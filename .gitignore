@@ -8,3 +8,6 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 *.pyc
+web/.next/
+web/node_modules/
+web/tsconfig.tsbuildinfo
