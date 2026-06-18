@@ -1,16 +1,31 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
 from itertools import combinations
 from typing import Any
 
 from code_scientist.elo import update_elo
+from code_scientist.llm import LLMResponseError
 from code_scientist.models import Hypothesis, Match, MetaReview, ResearchGoal, Review, TestPlan, stable_id
 from code_scientist.safety import review_hypothesis_safety
 
 
 class GenerationAgent:
+    def __init__(
+        self,
+        llm_client: Any | None = None,
+        llm_max_tokens: int = 1024,
+        llm_origin: str = "anthropic-haiku",
+    ) -> None:
+        self.llm_client = llm_client
+        self.llm_max_tokens = llm_max_tokens
+        self.llm_origin = llm_origin
+
     def generate(self, goal: ResearchGoal, evidence: list[Any], limit: int = 6) -> list[Hypothesis]:
+        if self.llm_client:
+            return self._generate_with_llm(goal, evidence, limit)
+
         evidence_refs = [getattr(item, "id", "") for item in evidence][:3]
         blueprints = [
             (
@@ -77,6 +92,19 @@ class GenerationAgent:
                 )
             )
         return hypotheses
+
+    def _generate_with_llm(self, goal: ResearchGoal, evidence: list[Any], limit: int) -> list[Hypothesis]:
+        response_text = self.llm_client.complete(
+            _generation_prompt(goal, evidence, limit),
+            max_tokens=self.llm_max_tokens,
+        )
+        return _parse_llm_hypotheses(
+            response_text=response_text,
+            goal=goal,
+            evidence=evidence,
+            limit=limit,
+            origin=self.llm_origin,
+        )
 
 
 class ReflectionAgent:
@@ -213,3 +241,109 @@ def _rank_score(hypothesis: Hypothesis) -> int:
         + len(hypothesis.test_plan.metrics)
         - len([risk for risk in hypothesis.risks if "unsafe" in risk.lower()])
     )
+
+
+def _generation_prompt(goal: ResearchGoal, evidence: list[Any], limit: int) -> str:
+    evidence_lines = []
+    for item in evidence[:5]:
+        evidence_lines.append(
+            f"- {getattr(item, 'id', 'evidence')}: {getattr(item, 'content', '')} "
+            f"Notes: {getattr(item, 'notes', '')}"
+        )
+    evidence_text = "\n".join(evidence_lines) if evidence_lines else "- No evidence available."
+    return f"""You are a coding-agent research scientist.
+Generate {limit} testable hypotheses for this objective:
+{goal.objective}
+
+Evidence:
+{evidence_text}
+
+Return only valid JSON with this shape:
+{{
+  "hypotheses": [
+    {{
+      "title": "short title",
+      "claim": "testable claim about improving LLM coding agents",
+      "rationale": "why this could work",
+      "assumptions": ["explicit assumption"],
+      "risks": ["risk or failure mode"]
+    }}
+  ]
+}}
+
+Prefer ideas that are measurable with these metrics: {", ".join(goal.metrics)}.
+Do not claim an improvement as proven; describe an experimentable hypothesis."""
+
+
+def _parse_llm_hypotheses(
+    response_text: str,
+    goal: ResearchGoal,
+    evidence: list[Any],
+    limit: int,
+    origin: str,
+) -> list[Hypothesis]:
+    try:
+        parsed = json.loads(_strip_json_fence(response_text))
+    except json.JSONDecodeError as exc:
+        raise LLMResponseError("LLM response was not valid hypothesis JSON.") from exc
+
+    raw_hypotheses = parsed.get("hypotheses") if isinstance(parsed, dict) else parsed
+    if not isinstance(raw_hypotheses, list):
+        raise LLMResponseError("LLM hypothesis JSON must be a list or object with a hypotheses list.")
+
+    evidence_refs = [getattr(item, "id", "") for item in evidence][:3]
+    hypotheses: list[Hypothesis] = []
+    for raw_item in raw_hypotheses[:limit]:
+        if not isinstance(raw_item, dict):
+            raise LLMResponseError("Each LLM hypothesis must be a JSON object.")
+        title = _required_text(raw_item, "title")
+        claim = _required_text(raw_item, "claim")
+        rationale = _required_text(raw_item, "rationale")
+        identity = f"{goal.id}:{origin}:{title}:{claim}"
+        hypotheses.append(
+            Hypothesis(
+                id=stable_id("hyp", identity),
+                title=title,
+                claim=claim,
+                rationale=rationale,
+                assumptions=_text_list(raw_item.get("assumptions")),
+                evidence_refs=evidence_refs,
+                test_plan=TestPlan(
+                    experiment=f"Compare baseline coding-agent workflow against: {title}.",
+                    metrics=goal.metrics,
+                    success_condition="Candidate improves pass rate or regression count without unacceptable cost increase.",
+                ),
+                risks=_text_list(raw_item.get("risks")),
+                origin=origin,
+            )
+        )
+    if not hypotheses:
+        raise LLMResponseError("LLM response did not include any hypotheses.")
+    return hypotheses
+
+
+def _strip_json_fence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _required_text(raw_item: dict[str, Any], key: str) -> str:
+    value = raw_item.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise LLMResponseError(f"LLM hypothesis missing required text field: {key}.")
+    return " ".join(value.split())
+
+
+def _text_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [" ".join(value.split())] if value.strip() else []
+    if isinstance(value, list):
+        return [" ".join(str(item).split()) for item in value if str(item).strip()]
+    return []

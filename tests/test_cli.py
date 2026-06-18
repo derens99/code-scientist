@@ -28,6 +28,29 @@ def test_cli_run_writes_state_and_report(tmp_path):
     assert data["hypotheses"]
 
 
+def test_cli_run_accepts_provider_options(tmp_path):
+    out_dir = tmp_path / "demo"
+    exit_code = main(
+        [
+            "run",
+            "Find testable ideas to improve LLM coding agents",
+            "--provider",
+            "deterministic",
+            "--model",
+            "claude-haiku-4-5",
+            "--max-tokens",
+            "128",
+            "--env-file",
+            str(tmp_path / ".env"),
+            "--out",
+            str(out_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    assert (out_dir / "state.json").exists()
+
+
 def test_cli_report_renders_existing_state(tmp_path, capsys):
     out_dir = tmp_path / "demo"
     main(["run", "Improve LLM coding agents", "--out", str(out_dir)])

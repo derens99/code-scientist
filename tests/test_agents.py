@@ -1,3 +1,5 @@
+import json
+
 from code_scientist.agents import (
     EvolutionAgent,
     GenerationAgent,
@@ -17,6 +19,44 @@ def test_generation_creates_structured_hypotheses():
     assert len(hypotheses) == 3
     assert all(item.test_plan.experiment for item in hypotheses)
     assert all(item.assumptions for item in hypotheses)
+
+
+def test_generation_can_use_llm_json_response():
+    class FakeLLM:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, prompt, max_tokens):
+            self.calls.append((prompt, max_tokens))
+            return json.dumps(
+                {
+                    "hypotheses": [
+                        {
+                            "title": "Trace-mined repair tasks",
+                            "claim": "Mining failed coding-agent traces into repair tasks will improve future pass rate.",
+                            "rationale": "Observed failures are strong seeds for regression-focused research.",
+                            "assumptions": ["Failure traces are available."],
+                            "risks": ["private data leakage"],
+                        }
+                    ]
+                }
+            )
+
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    fake_llm = FakeLLM()
+
+    hypotheses = GenerationAgent(llm_client=fake_llm, llm_max_tokens=321).generate(
+        goal,
+        seed_paper_evidence(),
+        limit=1,
+    )
+
+    assert len(hypotheses) == 1
+    assert hypotheses[0].title == "Trace-mined repair tasks"
+    assert hypotheses[0].origin == "anthropic-haiku"
+    assert hypotheses[0].evidence_refs
+    assert "Improve LLM coding agents" in fake_llm.calls[0][0]
+    assert fake_llm.calls[0][1] == 321
 
 
 def test_reflection_accepts_testable_safe_hypothesis():

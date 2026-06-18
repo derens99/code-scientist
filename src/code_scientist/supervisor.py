@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from itertools import combinations
 from pathlib import Path
+from typing import Any
 
 from code_scientist.agents import (
     EvolutionAgent,
@@ -12,6 +13,7 @@ from code_scientist.agents import (
     RankingAgent,
     ReflectionAgent,
 )
+from code_scientist.llm import DEFAULT_ANTHROPIC_MODEL, AnthropicHaikuClient
 from code_scientist.models import Hypothesis, ResearchGoal, RunState
 from code_scientist.paper import seed_paper_evidence
 from code_scientist.safety import review_goal_safety
@@ -23,6 +25,11 @@ def run_research_cycle(
     max_hypotheses: int,
     max_matches: int,
     out_dir: str | Path,
+    provider: str = "deterministic",
+    model: str | None = None,
+    max_tokens: int = 1024,
+    env_file: str | Path = ".env",
+    llm_client: Any | None = None,
 ) -> RunState:
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -33,7 +40,13 @@ def run_research_cycle(
         _write_state(out_path / "state.json", state)
         return state
 
-    generation = GenerationAgent()
+    generation = _build_generation_agent(
+        provider=provider,
+        model=model,
+        max_tokens=max_tokens,
+        env_file=env_file,
+        llm_client=llm_client,
+    )
     reflection = ReflectionAgent()
     proximity = ProximityAgent()
     ranking = RankingAgent()
@@ -92,6 +105,24 @@ def load_state(path: str | Path) -> RunState:
 
 def _write_state(path: Path, state: RunState) -> None:
     path.write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+
+
+def _build_generation_agent(
+    provider: str,
+    model: str | None,
+    max_tokens: int,
+    env_file: str | Path,
+    llm_client: Any | None,
+) -> GenerationAgent:
+    if provider == "deterministic":
+        return GenerationAgent()
+    if provider == "anthropic":
+        client = llm_client or AnthropicHaikuClient.from_environment(
+            model=model or DEFAULT_ANTHROPIC_MODEL,
+            env_path=env_file,
+        )
+        return GenerationAgent(llm_client=client, llm_max_tokens=max_tokens, llm_origin="anthropic-haiku")
+    raise ValueError(f"Unknown provider: {provider}")
 
 
 def _replace_hypotheses(existing: list[Hypothesis], replacements: list[Hypothesis]) -> list[Hypothesis]:

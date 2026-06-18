@@ -22,3 +22,34 @@ def test_supervisor_writes_state(tmp_path):
     assert restored.reviews
     assert restored.matches
     assert restored.meta_reviews
+
+
+def test_supervisor_can_run_with_injected_anthropic_client(tmp_path):
+    class FakeLLM:
+        def complete(self, prompt, max_tokens):
+            return json.dumps(
+                [
+                    {
+                        "title": "Repo-aware idea search",
+                        "claim": "Using repository traces to seed idea search will improve LLM coding-agent eval pass rate.",
+                        "rationale": "Repo traces make ideas more concrete and testable.",
+                        "assumptions": ["Trace data is available."],
+                        "risks": ["overfitting to one repository"],
+                    }
+                ]
+            )
+
+    out_dir = tmp_path / "run"
+
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=3,
+        max_matches=1,
+        out_dir=out_dir,
+        provider="anthropic",
+        llm_client=FakeLLM(),
+    )
+
+    assert state.hypotheses
+    assert any(item.origin == "anthropic-haiku" for item in state.hypotheses)
