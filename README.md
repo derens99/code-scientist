@@ -10,3 +10,14 @@ The MVP is offline and deterministic. It does not autonomously rewrite source co
 uv run code-scientist run "Find testable ideas to improve LLM coding agents" --cycles 2 --max-hypotheses 8 --out runs/demo
 uv run code-scientist report runs/demo/state.json
 ```
+
+## Verified Local Demo
+
+The MVP can be verified with:
+
+```bash
+uv run code-scientist run "Find testable ideas that could improve LLM coding agents" --cycles 2 --max-hypotheses 8 --max-matches 4 --out runs/demo
+uv run code-scientist report runs/demo/state.json
+```
+
+The generated report separates hypotheses from verified improvements and labels Elo as an auto-evaluation proxy.

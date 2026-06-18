@@ -1,4 +1,5 @@
 import json
+import subprocess
 
 from code_scientist.cli import main
 
@@ -35,3 +36,15 @@ def test_cli_report_renders_existing_state(tmp_path, capsys):
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "Code Scientist Research Report" in captured.out
+
+
+def test_uv_run_exposes_console_script():
+    result = subprocess.run(
+        ["uv", "run", "code-scientist", "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "Run a bounded research cycle" in result.stdout

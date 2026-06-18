@@ -8,6 +8,13 @@ dependencies = []
 [project.scripts]
 code-scientist = "code_scientist.cli:main"
 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/code_scientist"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0.0",
