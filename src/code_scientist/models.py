@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from hashlib import sha1
 from typing import Any, ClassVar
 
@@ -97,10 +97,10 @@ class Hypothesis:
     status: str = "candidate"
 
     def with_status(self, status: str) -> Hypothesis:
-        return Hypothesis(**{**self.to_dict(), "status": status})
+        return replace(self, status=status)
 
     def with_elo(self, elo: float) -> Hypothesis:
-        return Hypothesis(**{**self.to_dict(), "elo": elo})
+        return replace(self, elo=elo)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)

@@ -42,3 +42,29 @@ def test_run_state_round_trips_to_dict():
 
     assert restored.goal.objective == "Improve LLM coding agents"
     assert restored.evidence[0].source == "2502.18864.pdf"
+
+
+def test_hypothesis_copy_helpers_preserve_test_plan_type():
+    hypothesis = Hypothesis(
+        id="hyp-1",
+        title="Critic before edit",
+        claim="Assumption critique before editing reduces bad patches.",
+        rationale="False assumptions are a common source of bad code edits.",
+        assumptions=["The critic can identify false premises."],
+        evidence_refs=["ev-1"],
+        test_plan=TestPlan(
+            experiment="Run baseline and candidate workflows on seeded bug tasks.",
+            metrics=["pass_rate", "regression_count"],
+            success_condition="Candidate improves pass rate without more regressions.",
+        ),
+        risks=["Extra latency"],
+        origin="generation",
+    )
+
+    accepted = hypothesis.with_status("accepted")
+    reranked = hypothesis.with_elo(1216.0)
+
+    assert isinstance(accepted.test_plan, TestPlan)
+    assert isinstance(reranked.test_plan, TestPlan)
+    assert accepted.status == "accepted"
+    assert reranked.elo == 1216.0
