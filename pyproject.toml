@@ -1,0 +1,18 @@
+[project]
+name = "code-scientist"
+version = "0.1.0"
+description = "A local research engine for AI, LLM, and coding-agent improvement hypotheses."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+code-scientist = "code_scientist.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
