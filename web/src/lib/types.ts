@@ -67,6 +67,17 @@ export type ProximityEdge = {
   similarity: number;
 };
 
+export type BenchmarkResult = {
+  id: string;
+  name: string;
+  source: string;
+  baseline_metrics: Record<string, number>;
+  candidate_metrics: Record<string, number>;
+  deltas: Record<string, number>;
+  success: boolean;
+  notes: string[];
+};
+
 export type MetaReview = {
   id: string;
   common_weaknesses: string[];
@@ -106,6 +117,7 @@ export type RunState = {
   reviews: Review[];
   matches: Match[];
   proximity_edges?: ProximityEdge[];
+  benchmark_results?: BenchmarkResult[];
   meta_reviews: MetaReview[];
   context_snapshots?: ContextSnapshot[];
   safety: SafetyDecision | null;

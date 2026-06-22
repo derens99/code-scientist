@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from code_scientist.benchmarks import load_benchmark_fixture
 from code_scientist.llm import DEFAULT_ANTHROPIC_MODEL
 from code_scientist.reporting import render_report
 from code_scientist.supervisor import load_state, run_research_cycle
@@ -21,6 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--model", default=DEFAULT_ANTHROPIC_MODEL)
     run_parser.add_argument("--max-tokens", type=int, default=1024)
     run_parser.add_argument("--env-file", default=".env")
+    run_parser.add_argument("--benchmark-fixture", action="append", default=[])
     run_parser.add_argument("--out", default="runs/demo")
 
     report_parser = subparsers.add_parser("report", help="Render a report from state JSON.")
@@ -33,6 +35,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.command == "run":
         out_dir = Path(args.out)
+        benchmark_results = [
+            load_benchmark_fixture(path) for path in args.benchmark_fixture
+        ]
         state = run_research_cycle(
             objective=args.objective,
             cycles=args.cycles,
@@ -43,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             max_tokens=args.max_tokens,
             env_file=args.env_file,
+            benchmark_results=benchmark_results,
         )
         report = render_report(state)
         (out_dir / "report.md").write_text(report, encoding="utf-8")

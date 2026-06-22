@@ -13,6 +13,35 @@ uv run code-scientist run "Find testable ideas to improve LLM coding agents" --c
 uv run code-scientist report runs/demo/state.json
 ```
 
+## Benchmark Fixtures
+
+Use `--benchmark-fixture` to attach measured baseline and candidate metrics to a run:
+
+```json
+{
+  "name": "Seeded workflow comparison",
+  "baseline": {
+    "pass_rate": 0.5,
+    "regression_count": 3,
+    "tool_calls": 20,
+    "wall_time": 12.5,
+    "cost": 0.4
+  },
+  "candidate": {
+    "pass_rate": 0.75,
+    "regression_count": 1,
+    "tool_calls": 18,
+    "wall_time": 10.0,
+    "cost": 0.25
+  },
+  "notes": ["Fixture comes from a local smoke benchmark."]
+}
+```
+
+```bash
+uv run code-scientist run "Find testable ideas to improve LLM coding agents" --benchmark-fixture benchmark.json --out runs/benchmarked-demo
+```
+
 ## Anthropic Haiku Provider
 
 The deterministic provider remains the default. To generate hypotheses with Claude Haiku, place your API key in `.env`:

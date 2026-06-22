@@ -255,6 +255,7 @@ export function Workbench() {
                 plan={state.plan}
                 proximityEdges={state.proximity_edges}
                 contextSnapshots={state.context_snapshots}
+                benchmarkResults={state.benchmark_results}
                 report={report}
               />
             </Stack>

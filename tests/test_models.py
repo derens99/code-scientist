@@ -1,4 +1,5 @@
 from code_scientist.models import (
+    BenchmarkResult,
     ContextSnapshot,
     Evidence,
     Hypothesis,
@@ -79,6 +80,24 @@ def test_run_state_round_trips_to_dict():
     assert restored.context_snapshots[0].next_actions == ["run_proximity_guided_tournament_matches"]
 
 
+def test_run_state_round_trips_benchmark_results():
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    benchmark = BenchmarkResult(
+        id="bench-1",
+        name="Seeded workflow comparison",
+        source="benchmark.json",
+        baseline_metrics={"pass_rate": 0.5, "regression_count": 3.0},
+        candidate_metrics={"pass_rate": 0.75, "regression_count": 1.0},
+        deltas={"pass_rate": 0.25, "regression_count": -2.0},
+        success=True,
+        notes=["Local fixture"],
+    )
+
+    restored = RunState.from_dict(RunState(goal=goal, benchmark_results=[benchmark]).to_dict())
+
+    assert restored.benchmark_results == [benchmark]
+
+
 def test_run_state_loads_old_state_without_plan_or_context_memory():
     goal = ResearchGoal.from_objective("Improve LLM coding agents")
     restored = RunState.from_dict({"goal": goal.to_dict()})
@@ -86,6 +105,7 @@ def test_run_state_loads_old_state_without_plan_or_context_memory():
     assert restored.plan is None
     assert restored.proximity_edges == []
     assert restored.context_snapshots == []
+    assert restored.benchmark_results == []
 
 
 def test_hypothesis_copy_helpers_preserve_test_plan_type():

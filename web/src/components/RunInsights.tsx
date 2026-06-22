@@ -2,7 +2,15 @@
 
 import { Badge, Group, Paper, ScrollArea, Stack, Tabs, Text, Title } from "@mantine/core";
 import { Activity, Brain, Database, FileText } from "lucide-react";
-import type { ContextSnapshot, Hypothesis, Match, MetaReview, ProximityEdge, ResearchPlanConfig } from "@/lib/types";
+import type {
+  BenchmarkResult,
+  ContextSnapshot,
+  Hypothesis,
+  Match,
+  MetaReview,
+  ProximityEdge,
+  ResearchPlanConfig
+} from "@/lib/types";
 
 type RunInsightsProps = {
   matches: Match[];
@@ -11,6 +19,7 @@ type RunInsightsProps = {
   plan?: ResearchPlanConfig | null;
   proximityEdges?: ProximityEdge[];
   contextSnapshots?: ContextSnapshot[];
+  benchmarkResults?: BenchmarkResult[];
   report: string;
 };
 
@@ -21,6 +30,7 @@ export function RunInsights({
   plan,
   proximityEdges = [],
   contextSnapshots = [],
+  benchmarkResults = [],
   report
 }: RunInsightsProps) {
   const byId = new Map(hypotheses.map((hypothesis) => [hypothesis.id, hypothesis]));
@@ -37,6 +47,9 @@ export function RunInsights({
           </Tabs.Tab>
           <Tabs.Tab value="plan" leftSection={<Database size={15} />}>
             Plan
+          </Tabs.Tab>
+          <Tabs.Tab value="benchmarks" leftSection={<Activity size={15} />}>
+            Benchmarks
           </Tabs.Tab>
           <Tabs.Tab value="report" leftSection={<FileText size={15} />}>
             Report
@@ -88,6 +101,10 @@ export function RunInsights({
           />
         </Tabs.Panel>
 
+        <Tabs.Panel value="benchmarks" pt="md">
+          <BenchmarkPanel benchmarkResults={benchmarkResults} />
+        </Tabs.Panel>
+
         <Tabs.Panel value="report" pt="md">
           {report ? (
             <ScrollArea h={420} offsetScrollbars>
@@ -101,6 +118,45 @@ export function RunInsights({
         </Tabs.Panel>
       </Tabs>
     </Paper>
+  );
+}
+
+function BenchmarkPanel({ benchmarkResults }: { benchmarkResults: BenchmarkResult[] }) {
+  return (
+    <Stack gap="sm">
+      {benchmarkResults.length ? (
+        benchmarkResults.map((result) => (
+          <Paper key={result.id} p="sm" withBorder radius="sm" bg="#fbfcfe">
+            <Group justify="space-between" align="flex-start" gap="sm">
+              <Stack gap={4}>
+                <Text fw={700} size="sm">
+                  {result.name}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  {result.source}
+                </Text>
+              </Stack>
+              <Badge color={result.success ? "green" : "yellow"} variant="light">
+                {result.success ? "Passed" : "Needs review"}
+              </Badge>
+            </Group>
+            <Stack gap={4} mt="xs">
+              {Object.keys(result.candidate_metrics)
+                .sort()
+                .map((metric) => (
+                  <Text key={metric} size="sm" c="dimmed">
+                    {metric}: baseline {formatMetric(result.baseline_metrics[metric])}, candidate{" "}
+                    {formatMetric(result.candidate_metrics[metric])}, delta{" "}
+                    {formatDelta(result.deltas[metric])}
+                  </Text>
+                ))}
+            </Stack>
+          </Paper>
+        ))
+      ) : (
+        <EmptyText>No benchmark results recorded for this run.</EmptyText>
+      )}
+    </Stack>
   );
 }
 
@@ -210,4 +266,12 @@ function EmptyText({ children }: { children: React.ReactNode }) {
 
 function titleFor(hypotheses: Map<string, Hypothesis>, id: string) {
   return hypotheses.get(id)?.title ?? id;
+}
+
+function formatMetric(value: number) {
+  return Number.isInteger(value) ? value.toString() : value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function formatDelta(value: number) {
+  return `${value >= 0 ? "+" : ""}${formatMetric(value)}`;
 }

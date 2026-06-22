@@ -51,6 +51,51 @@ def test_cli_run_accepts_provider_options(tmp_path):
     assert (out_dir / "state.json").exists()
 
 
+def test_cli_run_persists_benchmark_fixture_results(tmp_path):
+    out_dir = tmp_path / "demo"
+    fixture = tmp_path / "benchmark.json"
+    fixture.write_text(
+        json.dumps(
+            {
+                "name": "Seeded benchmark",
+                "baseline": {
+                    "pass_rate": 0.5,
+                    "regression_count": 2,
+                    "tool_calls": 12,
+                    "wall_time": 8.0,
+                    "cost": 0.2,
+                },
+                "candidate": {
+                    "pass_rate": 0.75,
+                    "regression_count": 1,
+                    "tool_calls": 10,
+                    "wall_time": 7.5,
+                    "cost": 0.15,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "run",
+            "Find testable ideas to improve LLM coding agents",
+            "--benchmark-fixture",
+            str(fixture),
+            "--out",
+            str(out_dir),
+        ]
+    )
+
+    data = json.loads((out_dir / "state.json").read_text())
+    report = (out_dir / "report.md").read_text()
+    assert exit_code == 0
+    assert data["benchmark_results"][0]["name"] == "Seeded benchmark"
+    assert data["benchmark_results"][0]["deltas"]["pass_rate"] == 0.25
+    assert "## Benchmark Results" in report
+
+
 def test_cli_report_renders_existing_state(tmp_path, capsys):
     out_dir = tmp_path / "demo"
     main(["run", "Improve LLM coding agents", "--out", str(out_dir)])

@@ -226,6 +226,25 @@ class ProximityEdge:
 
 
 @dataclass(frozen=True)
+class BenchmarkResult:
+    id: str
+    name: str
+    source: str
+    baseline_metrics: dict[str, float]
+    candidate_metrics: dict[str, float]
+    deltas: dict[str, float]
+    success: bool
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BenchmarkResult:
+        return cls(**data)
+
+
+@dataclass(frozen=True)
 class MetaReview:
     id: str
     common_weaknesses: list[str]
@@ -289,6 +308,7 @@ class RunState:
     reviews: list[Review] = field(default_factory=list)
     matches: list[Match] = field(default_factory=list)
     proximity_edges: list[ProximityEdge] = field(default_factory=list)
+    benchmark_results: list[BenchmarkResult] = field(default_factory=list)
     meta_reviews: list[MetaReview] = field(default_factory=list)
     context_snapshots: list[ContextSnapshot] = field(default_factory=list)
     safety: SafetyDecision | None = None
@@ -302,6 +322,7 @@ class RunState:
             "reviews": [item.to_dict() for item in self.reviews],
             "matches": [item.to_dict() for item in self.matches],
             "proximity_edges": [item.to_dict() for item in self.proximity_edges],
+            "benchmark_results": [item.to_dict() for item in self.benchmark_results],
             "meta_reviews": [item.to_dict() for item in self.meta_reviews],
             "context_snapshots": [item.to_dict() for item in self.context_snapshots],
             "safety": self.safety.to_dict() if self.safety else None,
@@ -319,6 +340,9 @@ class RunState:
             reviews=[Review.from_dict(item) for item in data.get("reviews", [])],
             matches=[Match.from_dict(item) for item in data.get("matches", [])],
             proximity_edges=[ProximityEdge.from_dict(item) for item in data.get("proximity_edges", [])],
+            benchmark_results=[
+                BenchmarkResult.from_dict(item) for item in data.get("benchmark_results", [])
+            ],
             meta_reviews=[MetaReview.from_dict(item) for item in data.get("meta_reviews", [])],
             context_snapshots=[
                 ContextSnapshot.from_dict(item) for item in data.get("context_snapshots", [])

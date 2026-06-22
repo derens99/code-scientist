@@ -63,6 +63,25 @@ def render_report(state: RunState) -> str:
     else:
         lines.extend(["- No proximity edges recorded.", ""])
 
+    lines.extend(["## Benchmark Results", ""])
+    if state.benchmark_results:
+        for result in state.benchmark_results:
+            lines.append(f"- {result.name}: {'passed' if result.success else 'needs review'}")
+            lines.append(f"  - Source: {result.source}")
+            for metric in sorted(result.candidate_metrics):
+                baseline = result.baseline_metrics[metric]
+                candidate = result.candidate_metrics[metric]
+                delta = result.deltas[metric]
+                lines.append(
+                    f"  - {metric}: baseline {baseline:g}, candidate {candidate:g}, "
+                    f"delta {_format_delta(delta)}"
+                )
+            if result.notes:
+                lines.append(f"  - Notes: {', '.join(result.notes)}")
+        lines.append("")
+    else:
+        lines.extend(["- No benchmark results recorded.", ""])
+
     lines.extend(
         [
             "## Ranked Hypotheses",
@@ -116,3 +135,7 @@ def render_report(state: RunState) -> str:
 
 def _format_weights(weights: dict[str, float]) -> str:
     return ", ".join(f"{name}={value:g}" for name, value in sorted(weights.items()))
+
+
+def _format_delta(value: float) -> str:
+    return f"{value:+g}"

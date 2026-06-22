@@ -16,6 +16,7 @@ from code_scientist.agents import (
 )
 from code_scientist.llm import DEFAULT_ANTHROPIC_MODEL, AnthropicHaikuClient
 from code_scientist.models import (
+    BenchmarkResult,
     ContextSnapshot,
     Hypothesis,
     Match,
@@ -41,13 +42,21 @@ def run_research_cycle(
     max_tokens: int = 1024,
     env_file: str | Path = ".env",
     llm_client: Any | None = None,
+    benchmark_results: list[BenchmarkResult] | None = None,
 ) -> RunState:
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
     goal = ResearchGoal.from_objective(objective)
     plan = ResearchPlanConfig.from_goal(goal)
     safety = review_goal_safety(goal.objective)
-    state = RunState(goal=goal, plan=plan, evidence=seed_paper_evidence(), safety=safety)
+    benchmarks = benchmark_results or []
+    state = RunState(
+        goal=goal,
+        plan=plan,
+        evidence=seed_paper_evidence(),
+        benchmark_results=benchmarks,
+        safety=safety,
+    )
     if not safety.allowed:
         _write_state(out_path / "state.json", state)
         return state
@@ -131,6 +140,7 @@ def run_research_cycle(
             reviews=reviews,
             matches=matches,
             proximity_edges=proximity_edges,
+            benchmark_results=benchmarks,
             meta_reviews=metas,
             context_snapshots=context_snapshots,
             safety=safety,
@@ -145,6 +155,7 @@ def run_research_cycle(
         reviews=reviews,
         matches=matches,
         proximity_edges=proximity_edges,
+        benchmark_results=benchmarks,
         meta_reviews=metas,
         context_snapshots=context_snapshots,
         safety=safety,
