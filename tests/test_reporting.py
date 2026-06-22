@@ -14,6 +14,9 @@ def test_render_report_includes_leaderboard_and_limitations(tmp_path):
     report = render_report(state)
 
     assert "# Code Scientist Research Report" in report
+    assert "Research Plan Configuration" in report
+    assert "Context Memory" in report
+    assert "Proximity Graph" in report
     assert "Ranked Hypotheses" in report
     assert "Elo is an auto-evaluation proxy" in report
     assert "Recommended Next Experiments" in report

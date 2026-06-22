@@ -18,10 +18,14 @@ def test_supervisor_writes_state(tmp_path):
     assert state_path.exists()
     restored = RunState.from_dict(json.loads(state_path.read_text()))
     assert restored.goal.objective == state.goal.objective
+    assert restored.plan is not None
     assert restored.hypotheses
     assert restored.reviews
     assert restored.matches
+    assert restored.proximity_edges
     assert restored.meta_reviews
+    assert restored.context_snapshots
+    assert restored.context_snapshots[-1].scheduler_weights["ranking"] >= 1.0
 
 
 def test_supervisor_can_run_with_injected_anthropic_client(tmp_path):

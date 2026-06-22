@@ -252,6 +252,9 @@ export function Workbench() {
                 matches={state.matches}
                 metaReviews={state.meta_reviews}
                 hypotheses={state.hypotheses}
+                plan={state.plan}
+                proximityEdges={state.proximity_edges}
+                contextSnapshots={state.context_snapshots}
                 report={report}
               />
             </Stack>

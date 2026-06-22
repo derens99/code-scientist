@@ -1,17 +1,28 @@
 "use client";
 
 import { Badge, Group, Paper, ScrollArea, Stack, Tabs, Text, Title } from "@mantine/core";
-import { Activity, Brain, FileText } from "lucide-react";
-import type { Hypothesis, Match, MetaReview } from "@/lib/types";
+import { Activity, Brain, Database, FileText } from "lucide-react";
+import type { ContextSnapshot, Hypothesis, Match, MetaReview, ProximityEdge, ResearchPlanConfig } from "@/lib/types";
 
 type RunInsightsProps = {
   matches: Match[];
   metaReviews: MetaReview[];
   hypotheses: Hypothesis[];
+  plan?: ResearchPlanConfig | null;
+  proximityEdges?: ProximityEdge[];
+  contextSnapshots?: ContextSnapshot[];
   report: string;
 };
 
-export function RunInsights({ matches, metaReviews, hypotheses, report }: RunInsightsProps) {
+export function RunInsights({
+  matches,
+  metaReviews,
+  hypotheses,
+  plan,
+  proximityEdges = [],
+  contextSnapshots = [],
+  report
+}: RunInsightsProps) {
   const byId = new Map(hypotheses.map((hypothesis) => [hypothesis.id, hypothesis]));
 
   return (
@@ -23,6 +34,9 @@ export function RunInsights({ matches, metaReviews, hypotheses, report }: RunIns
           </Tabs.Tab>
           <Tabs.Tab value="meta" leftSection={<Brain size={15} />}>
             Meta-review
+          </Tabs.Tab>
+          <Tabs.Tab value="plan" leftSection={<Database size={15} />}>
+            Plan
           </Tabs.Tab>
           <Tabs.Tab value="report" leftSection={<FileText size={15} />}>
             Report
@@ -65,6 +79,15 @@ export function RunInsights({ matches, metaReviews, hypotheses, report }: RunIns
           </Stack>
         </Tabs.Panel>
 
+        <Tabs.Panel value="plan" pt="md">
+          <PlanContextPanel
+            plan={plan}
+            contextSnapshots={contextSnapshots}
+            proximityEdges={proximityEdges}
+            hypotheses={byId}
+          />
+        </Tabs.Panel>
+
         <Tabs.Panel value="report" pt="md">
           {report ? (
             <ScrollArea h={420} offsetScrollbars>
@@ -78,6 +101,64 @@ export function RunInsights({ matches, metaReviews, hypotheses, report }: RunIns
         </Tabs.Panel>
       </Tabs>
     </Paper>
+  );
+}
+
+function PlanContextPanel({
+  plan,
+  contextSnapshots,
+  proximityEdges,
+  hypotheses
+}: {
+  plan?: ResearchPlanConfig | null;
+  contextSnapshots: ContextSnapshot[];
+  proximityEdges: ProximityEdge[];
+  hypotheses: Map<string, Hypothesis>;
+}) {
+  const latest = contextSnapshots.at(-1);
+  return (
+    <Stack gap="md">
+      {plan ? (
+        <Stack gap="xs">
+          <Title order={3}>Research plan</Title>
+          <InsightGroup label="Evaluation criteria" items={plan.evaluation_criteria} color="blue" />
+          <InsightGroup label="Generation methods" items={plan.generation_methods} color="teal" />
+          <InsightGroup label="Review types" items={plan.review_types} color="gray" />
+          <InsightGroup label="Evolution strategies" items={plan.evolution_strategies} color="green" />
+        </Stack>
+      ) : (
+        <EmptyText>No research plan configuration recorded for this run.</EmptyText>
+      )}
+
+      {latest ? (
+        <Stack gap="xs">
+          <Title order={3}>Context memory</Title>
+          <Group gap={6}>
+            <Badge variant="light">Cycle {latest.cycle}</Badge>
+            <Badge variant="light">{latest.accepted_total} accepted</Badge>
+            <Badge variant="light">{latest.match_total} matches</Badge>
+            <Badge variant="light">{latest.proximity_edge_count} proximity edges</Badge>
+          </Group>
+          <InsightGroup label="Next actions" items={latest.next_actions} color="yellow" />
+        </Stack>
+      ) : (
+        <EmptyText>No context memory snapshots recorded for this run.</EmptyText>
+      )}
+
+      <Stack gap="xs">
+        <Title order={3}>Proximity graph</Title>
+        {proximityEdges.length ? (
+          proximityEdges.slice(0, 5).map((edge) => (
+            <Text key={`${edge.source}:${edge.target}`} size="sm" c="dimmed">
+              {titleFor(hypotheses, edge.source)} vs {titleFor(hypotheses, edge.target)}:{" "}
+              {edge.similarity.toFixed(3)}
+            </Text>
+          ))
+        ) : (
+          <EmptyText>No proximity edges recorded for this run.</EmptyText>
+        )}
+      </Stack>
+    </Stack>
   );
 }
 

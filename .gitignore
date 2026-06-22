@@ -1,5 +1,5 @@
 tmp/
-runs/
+/runs/
 .venv/
 .env
 .env.local

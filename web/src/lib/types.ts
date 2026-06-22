@@ -8,6 +8,18 @@ export type ResearchGoal = {
   safety_notes: string[];
 };
 
+export type ResearchPlanConfig = {
+  id: string;
+  goal_id: string;
+  proposal_preferences: string[];
+  evaluation_criteria: string[];
+  generation_methods: string[];
+  review_types: string[];
+  evolution_strategies: string[];
+  scheduler_weights: Record<string, number>;
+  constraints: string[];
+};
+
 export type TestPlan = {
   experiment: string;
   metrics: string[];
@@ -49,6 +61,12 @@ export type Match = {
   elo_after: Record<string, number>;
 };
 
+export type ProximityEdge = {
+  source: string;
+  target: string;
+  similarity: number;
+};
+
 export type MetaReview = {
   id: string;
   common_weaknesses: string[];
@@ -64,13 +82,32 @@ export type SafetyDecision = {
   flags: string[];
 };
 
+export type ContextSnapshot = {
+  id: string;
+  cycle: number;
+  generated_total: number;
+  accepted_total: number;
+  review_total: number;
+  match_total: number;
+  meta_review_total: number;
+  top_hypothesis_ids: string[];
+  origin_counts: Record<string, number>;
+  status_counts: Record<string, number>;
+  proximity_edge_count: number;
+  scheduler_weights: Record<string, number>;
+  next_actions: string[];
+};
+
 export type RunState = {
   goal: ResearchGoal;
+  plan?: ResearchPlanConfig | null;
   evidence: unknown[];
   hypotheses: Hypothesis[];
   reviews: Review[];
   matches: Match[];
+  proximity_edges?: ProximityEdge[];
   meta_reviews: MetaReview[];
+  context_snapshots?: ContextSnapshot[];
   safety: SafetyDecision | null;
 };
 

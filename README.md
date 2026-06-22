@@ -4,6 +4,8 @@ Code Scientist is a local research engine inspired by the AI co-scientist paper.
 
 The default MVP path is offline and deterministic. It does not autonomously rewrite source code, deploy changes, or claim measured improvement without benchmark evidence.
 
+The run state mirrors the paper's control loop with a parsed research plan configuration, paper-seeded evidence, generated and evolved hypotheses, structured reviews, Elo tournament matches, proximity graph edges, meta-reviews, and context-memory snapshots for scheduler/progress state.
+
 ## Usage
 
 ```bash

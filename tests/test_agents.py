@@ -84,7 +84,7 @@ def test_proximity_finds_similarity_edges():
     edges = ProximityAgent().compute(hypotheses)
 
     assert edges
-    assert all(0.0 <= item["similarity"] <= 1.0 for item in edges)
+    assert all(0.0 <= item.similarity <= 1.0 for item in edges)
 
 
 def test_evolution_creates_child_without_replacing_parent():

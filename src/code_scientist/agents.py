@@ -7,7 +7,16 @@ from typing import Any
 
 from code_scientist.elo import update_elo
 from code_scientist.llm import LLMResponseError
-from code_scientist.models import Hypothesis, Match, MetaReview, ResearchGoal, Review, TestPlan, stable_id
+from code_scientist.models import (
+    Hypothesis,
+    Match,
+    MetaReview,
+    ProximityEdge,
+    ResearchGoal,
+    Review,
+    TestPlan,
+    stable_id,
+)
 from code_scientist.safety import review_hypothesis_safety
 
 
@@ -141,15 +150,15 @@ class ReflectionAgent:
 
 
 class ProximityAgent:
-    def compute(self, hypotheses: list[Hypothesis]) -> list[dict[str, object]]:
-        edges: list[dict[str, object]] = []
+    def compute(self, hypotheses: list[Hypothesis]) -> list[ProximityEdge]:
+        edges: list[ProximityEdge] = []
         for left, right in combinations(hypotheses, 2):
             left_tokens = set(_tokens(left.title + " " + left.claim))
             right_tokens = set(_tokens(right.title + " " + right.claim))
             union = left_tokens | right_tokens
             similarity = len(left_tokens & right_tokens) / len(union) if union else 0.0
-            edges.append({"source": left.id, "target": right.id, "similarity": round(similarity, 3)})
-        return edges
+            edges.append(ProximityEdge(source=left.id, target=right.id, similarity=round(similarity, 3)))
+        return sorted(edges, key=lambda item: item.similarity, reverse=True)
 
 
 class RankingAgent:
