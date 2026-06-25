@@ -21,9 +21,29 @@ import {
   Tooltip
 } from "@mantine/core";
 import { useMediaQuery } from "@mantine/hooks";
-import { AlertTriangle, Database, FlaskConical, RefreshCw } from "lucide-react";
-import { fetchRunReport, fetchRuns, fetchRunState } from "@/lib/client";
-import type { Hypothesis, RunState, RunSummary } from "@/lib/types";
+import { AlertTriangle, Database, FlaskConical, PauseCircle, PlayCircle, RefreshCw, Square } from "lucide-react";
+import {
+  controlRun,
+  fetchRunReport,
+  fetchRuns,
+  fetchRunState,
+  submitManualHypothesis,
+  submitManualReview,
+  submitProximityClusterOverride,
+  submitProximityOverride,
+  submitRunCommand,
+  submitRunGuidance,
+  submitUserFeedback
+} from "@/lib/client";
+import type {
+  ManualHypothesisPayload,
+  ManualReviewPayload,
+  RunCommandPayload,
+  RunGuidancePayload,
+  UserFeedbackPayload
+} from "@/lib/client";
+import type { Hypothesis, ProximityEdge, RunState, RunSummary } from "@/lib/types";
+import { HumanInputPanel } from "./HumanInputPanel";
 import { HypothesisDetail } from "./HypothesisDetail";
 import { HypothesisLeaderboard } from "./HypothesisLeaderboard";
 import { RunInsights } from "./RunInsights";
@@ -39,6 +59,8 @@ export function Workbench() {
   const [selectedHypothesisId, setSelectedHypothesisId] = useState<string | null>(null);
   const [loadingRuns, setLoadingRuns] = useState(true);
   const [loadingState, setLoadingState] = useState(false);
+  const [controlling, setControlling] = useState(false);
+  const [submittingHumanInput, setSubmittingHumanInput] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const selectedSummary = useMemo(
@@ -69,6 +91,8 @@ export function Workbench() {
       .map((id) => state.hypotheses.find((hypothesis) => hypothesis.id === id))
       .filter((hypothesis): hypothesis is Hypothesis => Boolean(hypothesis));
   }, [selectedHypothesis, state]);
+
+  const runStatus = state?.run_status ?? selectedSummary?.runStatus ?? "completed";
 
   const runOptions = useMemo(
     () =>
@@ -128,9 +152,145 @@ export function Workbench() {
     }
   }, [loadRunState, selectedRunId]);
 
+  useEffect(() => {
+    if (!selectedRunId || (runStatus !== "running" && runStatus !== "paused")) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      void loadRunState(selectedRunId);
+      void loadRuns(selectedRunId);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [loadRunState, loadRuns, runStatus, selectedRunId]);
+
   async function handleRunCreated(runId: string) {
     await loadRuns(runId);
     setSelectedRunId(runId);
+  }
+
+  async function handleControl(action: "pause" | "resume" | "stop") {
+    if (!selectedRunId) {
+      return;
+    }
+    setControlling(true);
+    setError(null);
+    try {
+      await controlRun(selectedRunId, action);
+      await loadRunState(selectedRunId);
+      await loadRuns(selectedRunId);
+    } catch (controlError) {
+      setError(controlError instanceof Error ? controlError.message : "Unable to control run.");
+    } finally {
+      setControlling(false);
+    }
+  }
+
+  async function saveHumanInput(
+    action: () => Promise<{ state: RunState }>,
+    selectHypothesis?: (state: RunState) => string | null
+  ) {
+    if (!selectedRunId) {
+      return;
+    }
+    setSubmittingHumanInput(true);
+    setError(null);
+    try {
+      const payload = await action();
+      setState(payload.state);
+      const nextSelected = selectHypothesis?.(payload.state) ?? selectedHypothesisId;
+      if (nextSelected) {
+        setSelectedHypothesisId(nextSelected);
+      }
+      await loadRuns(selectedRunId);
+    } catch (inputError) {
+      setError(inputError instanceof Error ? inputError.message : "Unable to save human input.");
+    } finally {
+      setSubmittingHumanInput(false);
+    }
+  }
+
+  async function handleFeedback(payload: UserFeedbackPayload) {
+    if (!selectedRunId) {
+      return;
+    }
+    await saveHumanInput(() => submitUserFeedback(selectedRunId, payload));
+  }
+
+  async function handleManualHypothesis(payload: ManualHypothesisPayload) {
+    if (!selectedRunId) {
+      return;
+    }
+    const existingIds = new Set(state?.hypotheses.map((hypothesis) => hypothesis.id) ?? []);
+    await saveHumanInput(
+      () => submitManualHypothesis(selectedRunId, payload),
+      (updated) => updated.hypotheses.find((hypothesis) => !existingIds.has(hypothesis.id))?.id ?? null
+    );
+  }
+
+  async function handleManualReview(payload: ManualReviewPayload) {
+    if (!selectedRunId) {
+      return;
+    }
+    await saveHumanInput(() => submitManualReview(selectedRunId, payload));
+  }
+
+  async function handleGuidance(payload: RunGuidancePayload) {
+    if (!selectedRunId) {
+      return;
+    }
+    await saveHumanInput(() => submitRunGuidance(selectedRunId, payload));
+  }
+
+  async function handleCommand(payload: RunCommandPayload) {
+    if (!selectedRunId) {
+      return;
+    }
+    await saveHumanInput(() => submitRunCommand(selectedRunId, payload));
+  }
+
+  async function handleProximityOverride(edge: ProximityEdge, decision: "merge" | "preserve") {
+    if (!selectedRunId) {
+      return;
+    }
+    await saveHumanInput(() =>
+      submitProximityOverride(selectedRunId, {
+        source: edge.source,
+        target: edge.target,
+        decision,
+        clusterId: edge.cluster_id ?? `manual-${edge.source}-${edge.target}`,
+        reason:
+          decision === "merge"
+            ? "Scientist marked this edge for merge/deduplication."
+            : "Scientist preserved this edge as a diversity candidate."
+      })
+    );
+  }
+
+  async function handleProximityClusterOverride(clusterId: string, decision: "merge" | "preserve") {
+    if (!selectedRunId) {
+      return;
+    }
+    await saveHumanInput(() =>
+      submitProximityClusterOverride(selectedRunId, {
+        clusterId,
+        decision,
+        reason:
+          decision === "merge"
+            ? "Scientist marked this cluster for merge/deduplication."
+            : "Scientist preserved this cluster as a diversity candidate."
+      })
+    );
+  }
+
+  async function handleProximityClusterAssignment(edge: ProximityEdge, clusterId: string) {
+    if (!selectedRunId || !clusterId.trim()) {
+      return;
+    }
+    await saveHumanInput(() =>
+      submitRunCommand(selectedRunId, {
+        command: `cluster ${edge.source} ${edge.target} as ${clusterId.trim()}`
+      })
+    );
   }
 
   return (
@@ -231,6 +391,7 @@ export function Workbench() {
           {state ? (
             <Stack gap="md">
               <RunOverview summary={selectedSummary} state={state} />
+              <RunControls status={runStatus} loading={controlling} onControl={handleControl} />
               <Box
                 style={{
                   display: "grid",
@@ -246,7 +407,22 @@ export function Workbench() {
                   selectedId={selectedHypothesis?.id ?? null}
                   onSelect={setSelectedHypothesisId}
                 />
-                <HypothesisDetail hypothesis={selectedHypothesis} review={selectedReview} parents={parentHypotheses} />
+                <Stack gap="md">
+                  <HypothesisDetail hypothesis={selectedHypothesis} review={selectedReview} parents={parentHypotheses} />
+                  <HumanInputPanel
+                    selectedHypothesis={selectedHypothesis}
+                    submitting={submittingHumanInput}
+                    goalPreferences={state.goal.preferences}
+                    goalConstraints={state.goal.constraints}
+                    allowedSources={state.plan?.allowed_sources ?? []}
+                    onFeedback={handleFeedback}
+                    onManualHypothesis={handleManualHypothesis}
+                    onManualReview={handleManualReview}
+                    onVerificationMark={handleFeedback}
+                    onGuidance={handleGuidance}
+                    onCommand={handleCommand}
+                  />
+                </Stack>
               </Box>
               <RunInsights
                 matches={state.matches}
@@ -256,6 +432,20 @@ export function Workbench() {
                 proximityEdges={state.proximity_edges}
                 contextSnapshots={state.context_snapshots}
                 benchmarkResults={state.benchmark_results}
+                capabilityEvaluations={state.capability_evaluations}
+                prospectiveEvaluations={state.prospective_evaluations}
+                scalingCurve={state.scaling_curve}
+                safetyEvaluations={state.safety_evaluations}
+                feedbackLoopEvaluations={state.feedback_loop_evaluations}
+                researchOutputArtifacts={state.research_output_artifacts}
+                researchOverview={state.research_overview}
+                agentTraces={state.agent_traces}
+                retrievalMemory={state.retrieval_memory}
+                userFeedback={state.user_feedback}
+                onProximityOverride={handleProximityOverride}
+                onProximityClusterOverride={handleProximityClusterOverride}
+                onProximityClusterAssignment={handleProximityClusterAssignment}
+                proximityOverrideLoading={submittingHumanInput}
                 report={report}
               />
             </Stack>
@@ -265,6 +455,62 @@ export function Workbench() {
         </Box>
       </AppShell.Main>
     </AppShell>
+  );
+}
+
+function RunControls({
+  status,
+  loading,
+  onControl
+}: {
+  status: string;
+  loading: boolean;
+  onControl: (action: "pause" | "resume" | "stop") => void;
+}) {
+  const active = status === "running" || status === "paused";
+  return (
+    <Paper p="sm" withBorder radius="sm">
+      <Group gap="xs" justify="space-between">
+        <Group gap="xs">
+          <Badge color={status === "running" ? "green" : status === "paused" ? "yellow" : "gray"} variant="light">
+            {status}
+          </Badge>
+        </Group>
+        <Group gap="xs">
+          <Button
+            size="xs"
+            variant="light"
+            leftSection={<PauseCircle size={14} />}
+            disabled={status !== "running"}
+            loading={loading && status === "running"}
+            onClick={() => onControl("pause")}
+          >
+            Pause
+          </Button>
+          <Button
+            size="xs"
+            variant="light"
+            leftSection={<PlayCircle size={14} />}
+            disabled={status !== "paused"}
+            loading={loading && status === "paused"}
+            onClick={() => onControl("resume")}
+          >
+            Resume
+          </Button>
+          <Button
+            size="xs"
+            color="red"
+            variant="light"
+            leftSection={<Square size={14} />}
+            disabled={!active}
+            loading={loading && active}
+            onClick={() => onControl("stop")}
+          >
+            Stop
+          </Button>
+        </Group>
+      </Group>
+    </Paper>
   );
 }
 

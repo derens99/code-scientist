@@ -1,5 +1,6 @@
 tmp/
 /runs/
+/indexes/
 .venv/
 .env
 .env.local

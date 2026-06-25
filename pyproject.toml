@@ -3,7 +3,9 @@ name = "code-scientist"
 version = "0.1.0"
 description = "A local research engine for AI, LLM, and coding-agent improvement hypotheses."
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "pypdf>=6.14.2",
+]
 
 [project.scripts]
 code-scientist = "code_scientist.cli:main"

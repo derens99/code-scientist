@@ -44,8 +44,16 @@ export function HypothesisDetail({ hypothesis, review, parents }: HypothesisDeta
           </Stack>
         </Group>
 
+        {hypothesis.merged_into ? (
+          <Text size="sm" c="dimmed">
+            Merged into {hypothesis.merged_into}
+          </Text>
+        ) : null}
+        <ListSection title="Proximity decisions" items={hypothesis.proximity_notes ?? []} />
+
         <Section title="Claim">{hypothesis.claim}</Section>
         <Section title="Rationale">{hypothesis.rationale}</Section>
+        <ListSection title="Generation trace" items={hypothesis.generation_trace ?? []} />
 
         <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
           <ListSection title="Assumptions" items={hypothesis.assumptions} />
@@ -79,9 +87,20 @@ export function HypothesisDetail({ hypothesis, review, parents }: HypothesisDeta
           {review ? (
             <>
               <Group gap={6}>
-                <Badge color={review.decision === "accept" ? "green" : "red"} variant="light">
+                <Badge color={review.decision === "accept" ? "green" : review.decision === "revise" ? "yellow" : "red"} variant="light">
                   {review.decision}
                 </Badge>
+                <Badge color="blue" variant="light">
+                  {review.review_type ?? "initial_review"}
+                </Badge>
+                <Badge color="gray" variant="outline">
+                  confidence {(review.confidence ?? 0.5).toFixed(2)}
+                </Badge>
+                {review.requires_revision ? (
+                  <Badge color="yellow" variant="light">
+                    requires revision
+                  </Badge>
+                ) : null}
                 {Object.entries(review.scores).map(([key, value]) => (
                   <Badge key={key} color="gray" variant="outline">
                     {key}: {value}
@@ -93,6 +112,9 @@ export function HypothesisDetail({ hypothesis, review, parents }: HypothesisDeta
                 <ListSection title="Weaknesses" items={review.weaknesses} />
               </SimpleGrid>
               <ListSection title="Safety notes" items={review.safety_notes} />
+              <ListSection title="Grounded findings" items={review.findings ?? []} />
+              <ListSection title="Review trace" items={review.review_trace ?? []} />
+              <ListSection title="Evidence refs" items={review.evidence_refs ?? []} />
             </>
           ) : (
             <Text size="sm" c="dimmed">
@@ -111,6 +133,8 @@ export function HypothesisDetail({ hypothesis, review, parents }: HypothesisDeta
             </List>
           </Stack>
         ) : null}
+
+        <ListSection title="Evolution trace" items={hypothesis.evolution_trace ?? []} />
       </Stack>
     </Paper>
   );
