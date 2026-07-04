@@ -10,6 +10,10 @@ from code_scientist.evaluation import (
     summarize_capability_study_from_states,
 )
 from code_scientist.models import BenchmarkResult, Evidence, ProximityEdge, RunState
+from code_scientist.supervisor import (
+    _SAFETY_REVIEW_TYPES,
+    _safety_rejected_hypothesis_ids,
+)
 
 
 _CITATION_RELEVANCE_STOPWORDS = {
@@ -416,10 +420,13 @@ def render_report(state: RunState) -> str:
     lines.extend(["## Quarantined Hypotheses", ""])
     quarantined_hypotheses = [item for item in state.hypotheses if item.status == "quarantined"]
     if quarantined_hypotheses:
+        safety_reject_ids = _safety_rejected_hypothesis_ids(state.reviews)
         safety_rejections = {
             review.hypothesis_id: review
             for review in state.reviews
-            if review.review_type == "safety_review" and review.decision == "reject"
+            if review.hypothesis_id in safety_reject_ids
+            and review.review_type in _SAFETY_REVIEW_TYPES
+            and review.decision == "reject"
         }
         lines.append(
             "These hypotheses were rejected by safety review and are excluded from the tournament, "

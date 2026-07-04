@@ -3354,3 +3354,61 @@ def test_safety_rejected_hypotheses_are_quarantined_from_tournament(tmp_path):
     assert all("hyp-unsafe-1" not in h.parent_ids for h in resumed.hypotheses)
     overview = resumed.research_overview
     assert overview is None or "hyp-unsafe-1" not in overview.top_hypothesis_ids
+
+
+def _safety_review(hypothesis_id: str, *, review_type: str, safety_score: int) -> Review:
+    return Review(
+        id=f"rev-{review_type}-{hypothesis_id}",
+        hypothesis_id=hypothesis_id,
+        decision="reject",
+        scores={"safety": safety_score},
+        strengths=[],
+        weaknesses=["credential-exfiltration"],
+        safety_notes=["Hypothesis violates local research safety boundaries."],
+        review_type=review_type,
+    )
+
+
+def test_safe_untested_hypothesis_rejected_by_safety_review_is_not_quarantined():
+    # A safe-but-untested hypothesis produces review_type="safety_review",
+    # decision="reject" (inherited quality reject) but keeps safety=5. It must
+    # NOT be quarantined as unsafe.
+    safe = _hypothesis("hyp-safe-untested")
+    quality_reject = Review(
+        id="rev-quality-hyp-safe-untested",
+        hypothesis_id="hyp-safe-untested",
+        decision="reject",
+        scores={"safety": 5},
+        strengths=[],
+        weaknesses=["missing concrete test plan"],
+        safety_notes=["Hypothesis stays within local research boundaries."],
+        review_type="safety_review",
+    )
+
+    result = supervisor_module._apply_safety_quarantine([safe], [quality_reject])
+
+    assert [item.status for item in result] == ["candidate"]
+
+
+def test_unsafe_hypothesis_rejected_mid_cycle_is_quarantined():
+    unsafe = _hypothesis("hyp-unsafe-midcycle")
+    safety_reject = _safety_review(
+        "hyp-unsafe-midcycle", review_type="safety_review", safety_score=1
+    )
+
+    result = supervisor_module._apply_safety_quarantine([unsafe], [safety_reject])
+
+    assert [item.status for item in result] == ["quarantined"]
+
+
+def test_llm_safety_review_reject_is_quarantined():
+    unsafe = _hypothesis("hyp-unsafe-llm")
+    # _parse_llm_review stamps review_type="llm_safety_review" and may leave
+    # safety at its default (3). A reject on the safety review is the safety signal.
+    llm_reject = _safety_review(
+        "hyp-unsafe-llm", review_type="llm_safety_review", safety_score=3
+    )
+
+    result = supervisor_module._apply_safety_quarantine([unsafe], [llm_reject])
+
+    assert [item.status for item in result] == ["quarantined"]

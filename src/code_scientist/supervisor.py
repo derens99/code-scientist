@@ -2222,12 +2222,32 @@ def _use_multi_round_debate(plan: ResearchPlanConfig) -> bool:
     return bool({"simulated_debate", "multi_round_debate", "multi_turn_debate"} & normalized)
 
 
+_SAFETY_REVIEW_TYPES = {"safety_review", "llm_safety_review"}
+
+
 def _safety_rejected_hypothesis_ids(reviews: list[Review]) -> set[str]:
-    return {
-        review.hypothesis_id
-        for review in reviews
-        if review.review_type == "safety_review" and review.decision == "reject"
-    }
+    rejected: set[str] = set()
+    for review in reviews:
+        if review.review_type not in _SAFETY_REVIEW_TYPES:
+            continue
+        if review.decision != "reject":
+            continue
+        # The deterministic safety_review can inherit a quality "reject" from the
+        # initial review (a safe-but-untested hypothesis: ReflectionAgent.review
+        # rejects for a missing test plan while keeping safety=5). A genuine safety
+        # reject drives the safety score to <=2 (review(): safety=1 when not allowed;
+        # _safety_exploration_review clamps to min(..., 2) only on a safety failure),
+        # so the score cleanly separates safety rejects from quality rejects.
+        #
+        # The LLM safety review (_parse_llm_review) builds scores from the model's
+        # JSON and does NOT reliably drive safety<=2 on a reject (it defaults safety
+        # to 3 when the field is absent). Since that review's sole purpose is safety,
+        # a reject is itself the safety signal, so the score guard is applied ONLY to
+        # the deterministic safety_review type.
+        if review.review_type == "safety_review" and review.scores.get("safety", 5) > 2:
+            continue
+        rejected.add(review.hypothesis_id)
+    return rejected
 
 
 def _apply_safety_quarantine(hypotheses: list[Hypothesis], reviews: list[Review]) -> list[Hypothesis]:
