@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from code_scientist.llm import LLMResponseError
+from code_scientist.llm import LLMRequestError, LLMResponseError
 from code_scientist.models import (
     Evidence,
     EvidenceSafetyFinding,
@@ -476,7 +476,7 @@ def _review_with_model(
             reason=model_reason,
             flags=combined_flags,
         )
-    except (LLMResponseError, OSError) as exc:
+    except (LLMResponseError, LLMRequestError, OSError) as exc:
         error_flags = _unique([*deterministic.flags, "safety-critic-error"])
         if fail_closed:
             return SafetyDecision(

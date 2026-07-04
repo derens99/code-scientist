@@ -1,7 +1,7 @@
 import json
 
 from code_scientist.elo import update_elo
-from code_scientist.llm import LLMResponseError
+from code_scientist.llm import LLMRequestError, LLMResponseError
 from code_scientist.models import Evidence, Hypothesis, TestPlan
 from code_scientist.safety import (
     load_safety_policies,
@@ -353,6 +353,11 @@ class ExplodingClient:
         raise LLMResponseError("model unavailable")
 
 
+class OutageClient:
+    def complete(self, prompt, max_tokens=0):
+        raise LLMRequestError("api unavailable")
+
+
 class RefusedConnectionClient:
     def complete(self, prompt, max_tokens=0):
         raise OSError("connection refused")
@@ -382,7 +387,18 @@ def test_safety_critic_failure_fail_closed_blocks_for_manual_review():
     assert "safety-critic-error" in decision.flags
 
 
-def test_safety_critic_transport_error_is_flagged_not_raised():
+def test_safety_critic_request_error_is_flagged_not_raised():
+    decision = review_goal_safety_with_model(
+        "Find testable ideas to improve LLM coding agents",
+        OutageClient(),
+        max_tokens=64,
+    )
+
+    assert decision.allowed is True
+    assert "safety-critic-error" in decision.flags
+
+
+def test_safety_critic_raw_transport_error_is_flagged_not_raised():
     decision = review_goal_safety_with_model(
         "Find testable ideas to improve LLM coding agents",
         RefusedConnectionClient(),
