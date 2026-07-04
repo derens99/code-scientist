@@ -5,6 +5,7 @@ import json
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+from code_scientist.agent_packets import write_agent_packets
 from code_scientist.baselines import run_baseline_research
 from code_scientist.benchmarks import (
     load_benchmark_fixture,
@@ -14,6 +15,7 @@ from code_scientist.benchmarks import (
     summarize_benchmark_comparison_study,
 )
 from code_scientist.evidence import EvidenceStore
+from code_scientist.evidence import merge_evidence
 from code_scientist.evaluation import (
     assemble_capability_review_fixture,
     assemble_feedback_loop_review_fixture,
@@ -22,6 +24,7 @@ from code_scientist.evaluation import (
     build_feedback_loop_review_packet,
     build_preference_review_packet,
     evaluate_capability_proxy,
+    load_capability_evaluation_fixtures,
     load_capability_review_fixtures,
     load_feedback_loop_evaluation_fixtures,
     load_feedback_loop_review_fixtures,
@@ -31,6 +34,7 @@ from code_scientist.evaluation import (
     run_prospective_validation_manifest,
 )
 from code_scientist.llm import DEFAULT_ANTHROPIC_MODEL
+from code_scientist.models import UserFeedback, stable_id
 from code_scientist.reporting import (
     render_benchmark_comparison_study_report,
     render_capability_study_report,
@@ -209,6 +213,34 @@ def build_parser() -> argparse.ArgumentParser:
     prospective_validation_parser.add_argument("--work-dir", required=True)
     prospective_validation_parser.add_argument("--out", required=True)
 
+    evaluation_return_parser = subparsers.add_parser(
+        "evaluation-return",
+        help="Append returned review and validation fixtures to an existing run directory.",
+    )
+    evaluation_return_parser.add_argument("run_dir")
+    evaluation_return_parser.add_argument("--capability-eval-fixture", action="append", default=[])
+    evaluation_return_parser.add_argument("--capability-review-fixture", action="append", default=[])
+    evaluation_return_parser.add_argument("--preference-review-fixture", action="append", default=[])
+    evaluation_return_parser.add_argument("--prospective-eval-fixture", action="append", default=[])
+    evaluation_return_parser.add_argument("--feedback-loop-eval-fixture", action="append", default=[])
+    evaluation_return_parser.add_argument("--feedback-loop-review-fixture", action="append", default=[])
+
+    source_attachment_parser = subparsers.add_parser(
+        "source-attachment",
+        help="Append local evidence sources or evidence indexes to an existing run directory.",
+    )
+    source_attachment_parser.add_argument("run_dir")
+    source_attachment_parser.add_argument("--evidence-path", action="append", default=[])
+    source_attachment_parser.add_argument("--evidence-index", action="append", default=[])
+
+    agent_packets_parser = subparsers.add_parser(
+        "agent-packets",
+        help="Write host-agent subagent prompt packets from a saved run state.",
+    )
+    agent_packets_parser.add_argument("state_json")
+    agent_packets_parser.add_argument("--out", required=True)
+    agent_packets_parser.add_argument("--limit", type=int, default=3)
+
     benchmark_comparison_parser = subparsers.add_parser(
         "benchmark-suite-comparison",
         help="Compare baseline and Code Scientist saved states against the same benchmark suite.",
@@ -377,6 +409,50 @@ def main(argv: list[str] | None = None) -> int:
         (out_dir / "report.md").write_text(report, encoding="utf-8")
         print(f"Wrote {out_dir / 'state.json'}")
         print(f"Wrote {out_dir / 'report.md'}")
+        return 0
+    if args.command == "evaluation-return":
+        run_dir = Path(args.run_dir)
+        state = load_state(run_dir / "state.json")
+        state = _append_capability_evaluations(state, args.capability_eval_fixture)
+        state = _append_capability_review_evaluations(state, args.capability_review_fixture)
+        state = _append_preference_review_evaluations(state, args.preference_review_fixture)
+        state = _append_prospective_evaluations(state, args.prospective_eval_fixture)
+        state = _append_feedback_loop_evaluations(
+            state,
+            args.feedback_loop_eval_fixture,
+            args.feedback_loop_review_fixture,
+        )
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "state.json").write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+        (run_dir / "report.md").write_text(render_report(state), encoding="utf-8")
+        print(f"Wrote {run_dir / 'state.json'}")
+        print(f"Wrote {run_dir / 'report.md'}")
+        return 0
+    if args.command == "source-attachment":
+        run_dir = Path(args.run_dir)
+        state = load_state(run_dir / "state.json")
+        state = _append_source_attachments(
+            state,
+            evidence_paths=args.evidence_path,
+            evidence_index_paths=args.evidence_index,
+        )
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "state.json").write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+        (run_dir / "report.md").write_text(render_report(state), encoding="utf-8")
+        print(f"Wrote {run_dir / 'state.json'}")
+        print(f"Wrote {run_dir / 'report.md'}")
+        return 0
+    if args.command == "agent-packets":
+        index = write_agent_packets(
+            load_state(args.state_json),
+            state_path=args.state_json,
+            out_dir=args.out,
+            limit=args.limit,
+        )
+        output = Path(args.out)
+        print(f"Wrote {output / 'packet-index.json'}")
+        for packet in index["packets"]:
+            print(f"Wrote {output / packet['path']}")
         return 0
     if args.command == "baseline-run":
         out_dir = Path(args.out)
@@ -1129,6 +1205,16 @@ def _append_capability_review_evaluations(state, paths: list[str]):
     )
 
 
+def _append_capability_evaluations(state, paths: list[str]):
+    evaluations = load_capability_evaluation_fixtures(paths, state.goal, state.hypotheses)
+    if not evaluations:
+        return state
+    return replace(
+        state,
+        capability_evaluations=[*state.capability_evaluations, *evaluations],
+    )
+
+
 def _append_preference_review_evaluations(state, paths: list[str]):
     evaluations = load_preference_review_fixtures(paths, state.goal, state.hypotheses)
     if not evaluations:
@@ -1154,6 +1240,56 @@ def _append_feedback_loop_evaluations(
         state,
         feedback_loop_evaluations=[*state.feedback_loop_evaluations, *evaluations],
     )
+
+
+def _append_source_attachments(
+    state,
+    *,
+    evidence_paths: list[str],
+    evidence_index_paths: list[str],
+):
+    evidence_store = EvidenceStore()
+    if evidence_paths:
+        evidence_store.evidence.extend(EvidenceStore.from_paths(evidence_paths).evidence)
+    if evidence_index_paths:
+        evidence_store.evidence.extend(EvidenceStore.from_indexes(evidence_index_paths).evidence)
+    if not evidence_store.evidence:
+        return state
+
+    allowed_evidence, safety_findings = screen_evidence_sources(evidence_store.evidence)
+    attached_sources = sorted({item.source for item in allowed_evidence})
+    source_feedback = []
+    if attached_sources:
+        source_text = ", ".join(attached_sources[:5])
+        source_feedback.append(
+            UserFeedback(
+                id=stable_id(
+                    "feedback",
+                    f"{state.goal.id}:source_attachment:{source_text}:{len(state.user_feedback)}",
+                ),
+                kind="source_attachment",
+                target_id=state.goal.id,
+                content=f"Attached evidence sources: {source_text}",
+                influence="scheduler_boost",
+            )
+        )
+
+    return replace(
+        state,
+        evidence=merge_evidence(state.evidence, allowed_evidence),
+        evidence_safety_findings=_merge_evidence_safety_findings(
+            state.evidence_safety_findings,
+            safety_findings,
+        ),
+        user_feedback=[*state.user_feedback, *source_feedback],
+    )
+
+
+def _merge_evidence_safety_findings(existing, additions):
+    by_id = {item.id: item for item in existing}
+    for item in additions:
+        by_id.setdefault(item.id, item)
+    return list(by_id.values())
 
 
 def _append_safety_red_team_evaluation(state, goal: StudyGoalSpec):

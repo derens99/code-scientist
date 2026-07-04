@@ -30,6 +30,25 @@ export type TestPlan = {
   success_condition: string;
 };
 
+export type Evidence = {
+  id: string;
+  kind: string;
+  source: string;
+  content: string;
+  notes?: string;
+  metadata?: Record<string, string>;
+};
+
+export type EvidenceSafetyFinding = {
+  id: string;
+  evidence_id: string;
+  source: string;
+  allowed: boolean;
+  flags: string[];
+  reason: string;
+  content_preview: string;
+};
+
 export type Hypothesis = {
   id: string;
   title: string;
@@ -135,6 +154,8 @@ export type ProspectiveEvaluation = {
   measured_metrics: Record<string, number>;
   deltas: Record<string, number>;
   success: boolean;
+  measurement_source?: string;
+  measurement_status?: string;
   notes: string[];
 };
 
@@ -225,6 +246,19 @@ export type LlmInteraction = {
   max_tokens: string;
 };
 
+export type ToolCall = {
+  id?: string;
+  type?: string;
+  tool_name: string;
+  status?: string;
+  query?: string;
+  retrieval_method?: string;
+  evidence_refs?: string[];
+  citations?: string[];
+  reason?: string;
+  arguments?: Record<string, unknown>;
+};
+
 export type AgentTrace = {
   id: string;
   cycle: number;
@@ -238,6 +272,8 @@ export type AgentTrace = {
   evidence_refs: string[];
   llm_interactions?: LlmInteraction[];
   scratchpad?: string[];
+  transcript_ref?: string;
+  tool_calls?: ToolCall[];
 };
 
 export type RetrievalMemoryRecord = {
@@ -261,6 +297,7 @@ export type Task = {
   attempts: number;
   result_refs: string[];
   error: string;
+  worker_state?: Record<string, unknown>;
 };
 
 export type SafetyDecision = {
@@ -289,7 +326,8 @@ export type RunState = {
   goal: ResearchGoal;
   run_status?: string;
   plan?: ResearchPlanConfig | null;
-  evidence: unknown[];
+  evidence: Evidence[];
+  evidence_safety_findings?: EvidenceSafetyFinding[];
   hypotheses: Hypothesis[];
   reviews: Review[];
   matches: Match[];

@@ -20,6 +20,7 @@ import type {
   RetrievalMemoryRecord,
   SafetyEvaluationResult,
   ScalingCurvePoint,
+  Task,
   UserFeedback
 } from "@/lib/types";
 
@@ -40,6 +41,7 @@ type RunInsightsProps = {
   researchOverview?: ResearchOverview | null;
   agentTraces?: AgentTrace[];
   retrievalMemory?: RetrievalMemoryRecord[];
+  taskQueue?: Task[];
   userFeedback?: UserFeedback[];
   onProximityOverride?: (edge: ProximityEdge, decision: "merge" | "preserve") => void;
   onProximityClusterOverride?: (clusterId: string, decision: "merge" | "preserve") => void;
@@ -78,6 +80,15 @@ type ProximityGraphNeighbor = {
   edge: ProximityEdge;
 };
 
+type SchedulerDecisionView = {
+  rank: number;
+  score: number;
+  candidateCount: number;
+  poolSize: number;
+  cycle?: number;
+  signals: string[];
+};
+
 export function RunInsights({
   matches,
   metaReviews,
@@ -95,6 +106,7 @@ export function RunInsights({
   researchOverview = null,
   agentTraces = [],
   retrievalMemory = [],
+  taskQueue = [],
   userFeedback = [],
   onProximityOverride,
   onProximityClusterOverride,
@@ -165,6 +177,7 @@ export function RunInsights({
             plan={plan}
             contextSnapshots={contextSnapshots}
             retrievalMemory={retrievalMemory}
+            taskQueue={taskQueue}
             proximityEdges={proximityEdges}
             hypotheses={byId}
             onProximityOverride={onProximityOverride}
@@ -411,6 +424,9 @@ function BenchmarkPanel({
               <Text size="xs" c="dimmed">
                 {evaluation.implementation_refs.join(", ") || "No implementation refs"}
               </Text>
+              <Text size="xs" c="dimmed">
+                {evaluation.measurement_status ?? "proxy"} via {evaluation.measurement_source ?? "proxy"}
+              </Text>
               {Object.keys(evaluation.baseline_metrics)
                 .sort()
                 .map((metric) => {
@@ -620,6 +636,16 @@ function OverviewPanel({
                       {trace.llm_interactions.length > 3 ? ` +${trace.llm_interactions.length - 3}` : ""}
                     </Text>
                   ) : null}
+                  {trace.tool_calls?.length ? (
+                    <Text size="xs" c="dimmed">
+                      Tool calls:{" "}
+                      {trace.tool_calls
+                        .slice(0, 3)
+                        .map((toolCall) => toolCall.tool_name)
+                        .join(", ")}
+                      {trace.tool_calls.length > 3 ? ` +${trace.tool_calls.length - 3}` : ""}
+                    </Text>
+                  ) : null}
                 </Stack>
                 <Badge color={trace.status === "completed" ? "green" : "yellow"} variant="light">
                   {trace.status}
@@ -639,6 +665,7 @@ function PlanContextPanel({
   plan,
   contextSnapshots,
   retrievalMemory,
+  taskQueue,
   proximityEdges,
   hypotheses,
   onProximityOverride,
@@ -649,6 +676,7 @@ function PlanContextPanel({
   plan?: ResearchPlanConfig | null;
   contextSnapshots: ContextSnapshot[];
   retrievalMemory: RetrievalMemoryRecord[];
+  taskQueue: Task[];
   proximityEdges: ProximityEdge[];
   hypotheses: Map<string, Hypothesis>;
   onProximityOverride?: (edge: ProximityEdge, decision: "merge" | "preserve") => void;
@@ -658,6 +686,17 @@ function PlanContextPanel({
 }) {
   const [clusterDrafts, setClusterDrafts] = useState<Record<string, string>>({});
   const latest = contextSnapshots.at(-1);
+  const schedulerDecisions = taskQueue
+    .map((task) => ({ task, decision: readSchedulerDecision(task) }))
+    .filter((item): item is { task: Task; decision: SchedulerDecisionView } => item.decision !== null)
+    .sort((left, right) => {
+      const leftCycle = left.decision.cycle ?? 0;
+      const rightCycle = right.decision.cycle ?? 0;
+      if (leftCycle !== rightCycle) {
+        return rightCycle - leftCycle;
+      }
+      return left.decision.rank - right.decision.rank;
+    });
   const clusterSummaries = summarizeProximityClusters(proximityEdges);
   const graphNodes = summarizeProximityGraph(proximityEdges, hypotheses);
   return (
@@ -710,6 +749,50 @@ function PlanContextPanel({
                   <Text size="xs" c="dimmed">
                     Evidence: {record.evidence_refs.slice(0, 5).join(", ")}
                   </Text>
+                ) : null}
+              </Stack>
+            </Paper>
+          ))}
+        </Stack>
+      ) : null}
+
+      {schedulerDecisions.length ? (
+        <Stack gap="xs">
+          <Title order={3}>Scheduler decisions</Title>
+          {schedulerDecisions.slice(0, 6).map(({ task, decision }) => (
+            <Paper
+              key={`${task.id}:${decision.rank}:${decision.cycle ?? "none"}`}
+              p="xs"
+              withBorder
+              radius="sm"
+              bg="#fbfcfe"
+            >
+              <Stack gap={4}>
+                <Group justify="space-between" gap="xs" align="flex-start">
+                  <Text fw={700} size="sm">
+                    {task.kind}
+                  </Text>
+                  <Group gap={6}>
+                    <Badge variant="light">rank {decision.rank}</Badge>
+                    <Badge color="gray" variant="light">
+                      score {formatMetric(decision.score)}
+                    </Badge>
+                    <Badge variant="outline">
+                      {decision.candidateCount} candidates
+                    </Badge>
+                    <Badge variant="outline">
+                      pool {decision.poolSize}
+                    </Badge>
+                  </Group>
+                </Group>
+                {decision.signals.length ? (
+                  <Group gap={4}>
+                    {decision.signals.slice(0, 8).map((signal) => (
+                      <Badge key={`${task.id}:${signal}`} color="teal" variant="light">
+                        {signal}
+                      </Badge>
+                    ))}
+                  </Group>
                 ) : null}
               </Stack>
             </Paper>
@@ -1169,6 +1252,36 @@ function summarizeProximityGraph(
         right.strongestSimilarity - left.strongestSimilarity ||
         left.title.localeCompare(right.title)
     );
+}
+
+function readSchedulerDecision(task: Task): SchedulerDecisionView | null {
+  const raw = task.worker_state?.scheduler_decision;
+  if (!isRecord(raw)) {
+    return null;
+  }
+  const rank = numericField(raw.rank);
+  const score = numericField(raw.score) ?? task.priority;
+  if (rank === null) {
+    return null;
+  }
+  return {
+    rank,
+    score,
+    candidateCount: numericField(raw.candidate_count) ?? 0,
+    poolSize: numericField(raw.pool_size) ?? 0,
+    cycle: numericField(raw.cycle) ?? undefined,
+    signals: Array.isArray(raw.signals)
+      ? raw.signals.filter((signal): signal is string => typeof signal === "string")
+      : []
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function numericField(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function humanInfluenceForMatch(match: Match, userFeedback: UserFeedback[]) {

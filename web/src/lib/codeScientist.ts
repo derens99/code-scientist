@@ -75,6 +75,20 @@ export type RunCommandInput = {
   command: string;
 };
 
+export type EvaluationReturnInput = {
+  capabilityEvaluationPaths?: string[];
+  capabilityReviewPaths?: string[];
+  preferenceReviewPaths?: string[];
+  prospectiveEvaluationPaths?: string[];
+  feedbackLoopEvaluationPaths?: string[];
+  feedbackLoopReviewPaths?: string[];
+};
+
+export type SourceAttachmentInput = {
+  evidencePaths?: string[];
+  evidenceIndexPaths?: string[];
+};
+
 type ClusterAssignmentCommand =
   | { kind: "edge"; source: string; target: string; clusterId: string }
   | { kind: "members"; hypothesisIds: string[]; clusterId: string };
@@ -694,6 +708,64 @@ export async function writeRunControl(runId: string, action: "pause" | "resume" 
     JSON.stringify({ action: controlAction }, null, 2),
     "utf8"
   );
+}
+
+export function buildEvaluationReturnArgs(runId: string, input: EvaluationReturnInput) {
+  assertSafeRunId(runId);
+  const args = ["run", "code-scientist", "evaluation-return", path.join("runs", runId)];
+
+  for (const capabilityEvaluationPath of cleanList(input.capabilityEvaluationPaths)) {
+    args.push("--capability-eval-fixture", capabilityEvaluationPath);
+  }
+
+  for (const capabilityReviewPath of cleanList(input.capabilityReviewPaths)) {
+    args.push("--capability-review-fixture", capabilityReviewPath);
+  }
+
+  for (const preferenceReviewPath of cleanList(input.preferenceReviewPaths)) {
+    args.push("--preference-review-fixture", preferenceReviewPath);
+  }
+
+  for (const prospectiveEvaluationPath of cleanList(input.prospectiveEvaluationPaths)) {
+    args.push("--prospective-eval-fixture", prospectiveEvaluationPath);
+  }
+
+  for (const feedbackLoopEvaluationPath of cleanList(input.feedbackLoopEvaluationPaths)) {
+    args.push("--feedback-loop-eval-fixture", feedbackLoopEvaluationPath);
+  }
+
+  for (const feedbackLoopReviewPath of cleanList(input.feedbackLoopReviewPaths)) {
+    args.push("--feedback-loop-review-fixture", feedbackLoopReviewPath);
+  }
+
+  return args;
+}
+
+export async function appendEvaluationReturns(runId: string, input: EvaluationReturnInput): Promise<RunState> {
+  const args = buildEvaluationReturnArgs(runId, input);
+  await runUv(args);
+  return readRunState(runId);
+}
+
+export function buildSourceAttachmentArgs(runId: string, input: SourceAttachmentInput) {
+  assertSafeRunId(runId);
+  const args = ["run", "code-scientist", "source-attachment", path.join("runs", runId)];
+
+  for (const evidencePath of cleanList(input.evidencePaths)) {
+    args.push("--evidence-path", evidencePath);
+  }
+
+  for (const evidenceIndexPath of cleanList(input.evidenceIndexPaths)) {
+    args.push("--evidence-index", evidenceIndexPath);
+  }
+
+  return args;
+}
+
+export async function appendSourceAttachments(runId: string, input: SourceAttachmentInput): Promise<RunState> {
+  const args = buildSourceAttachmentArgs(runId, input);
+  await runUv(args);
+  return readRunState(runId);
 }
 
 async function updateRunState(runId: string, updater: (state: RunState) => RunState): Promise<RunState> {

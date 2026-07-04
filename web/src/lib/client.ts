@@ -71,6 +71,20 @@ export type RunCommandPayload = {
   command: string;
 };
 
+export type EvaluationReturnPayload = {
+  capabilityEvaluationPaths: string[];
+  capabilityReviewPaths: string[];
+  preferenceReviewPaths: string[];
+  prospectiveEvaluationPaths: string[];
+  feedbackLoopEvaluationPaths: string[];
+  feedbackLoopReviewPaths: string[];
+};
+
+export type SourceAttachmentPayload = {
+  evidencePaths: string[];
+  evidenceIndexPaths: string[];
+};
+
 export type ProximityOverridePayload = {
   source: string;
   target: string;
@@ -141,6 +155,14 @@ export async function submitRunGuidance(runId: string, payload: RunGuidancePaylo
 
 export async function submitRunCommand(runId: string, payload: RunCommandPayload) {
   return postRunInput(runId, "command", payload);
+}
+
+export async function submitEvaluationReturn(runId: string, payload: EvaluationReturnPayload) {
+  return postRunInput(runId, "evaluation-return", payload);
+}
+
+export async function submitSourceAttachment(runId: string, payload: SourceAttachmentPayload) {
+  return postRunInput(runId, "source-attachment", payload);
 }
 
 export async function submitProximityOverride(runId: string, payload: ProximityOverridePayload) {

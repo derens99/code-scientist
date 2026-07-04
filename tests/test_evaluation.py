@@ -207,6 +207,7 @@ def test_load_prospective_evaluation_fixture_records_measured_external_validatio
                 "baseline_metrics": {"pass_rate": 0.48, "regression_count": 2},
                 "measured_metrics": {"pass_rate": 0.71, "regression_count": 1},
                 "success_metric": "pass_rate",
+                "measurement_source": "held_out_repair_suite",
                 "notes": ["Measured by replaying a held-out coding-agent repair suite."],
             }
         ),
@@ -222,6 +223,8 @@ def test_load_prospective_evaluation_fixture_records_measured_external_validatio
     assert evaluation.measured_metrics == {"pass_rate": 0.71, "regression_count": 1.0}
     assert evaluation.deltas == {"pass_rate": 0.23, "regression_count": -1.0}
     assert evaluation.success is True
+    assert evaluation.measurement_source == "held_out_repair_suite"
+    assert evaluation.measurement_status == "measured"
     assert evaluation.notes == ["Measured by replaying a held-out coding-agent repair suite."]
 
 
@@ -530,7 +533,11 @@ def test_prospective_evaluation_records_measurements_and_deltas():
     )
 
     assert planned.status == "planned"
+    assert planned.measurement_source == "proxy"
+    assert planned.measurement_status == "planned"
     assert measured.status == "measured"
+    assert measured.measurement_source == "external_fixture"
+    assert measured.measurement_status == "measured"
     assert measured.deltas == {"pass_rate": 0.2, "regression_count": -1.0}
     assert measured.success is True
 
@@ -781,6 +788,8 @@ def test_capability_study_coverage_audits_paper_evaluation_requirements():
                 measured_metrics={"pass_rate": 0.7},
                 deltas={"pass_rate": 0.2},
                 success=True,
+                measurement_source="held_out_repair_suite",
+                measurement_status="measured",
             )
         ],
         safety_evaluations=[
@@ -835,6 +844,31 @@ def test_capability_study_coverage_audits_paper_evaluation_requirements():
     assert "benchmark scores or benchmark result artifacts" in sparse_coverage.missing_requirements
     assert "multi-goal study" in sparse_coverage.missing_requirements
     assert "external feedback-loop measurement" in sparse_coverage.missing_requirements
+
+
+def test_capability_study_coverage_requires_external_prospective_measurement():
+    proxy_state = RunState(
+        goal=ResearchGoal.from_objective("Improve LLM coding agents with local replay"),
+        prospective_evaluations=[
+            ProspectiveEvaluation(
+                id="prospect-proxy",
+                hypothesis_id="hyp-proxy",
+                status="measured",
+                implementation_refs=["branch/proxy"],
+                baseline_metrics={"pass_rate": 0.5},
+                measured_metrics={"pass_rate": 0.7},
+                deltas={"pass_rate": 0.2},
+                success=True,
+                measurement_source="proxy",
+                measurement_status="measured",
+            )
+        ],
+    )
+
+    coverage = audit_capability_study_coverage([proxy_state])
+
+    assert coverage.measured_prospective_count == 0
+    assert "prospective/external validation measurements" in coverage.missing_requirements
 
 
 def test_auto_capability_evaluation_scores_ranked_hypotheses_without_external_counts():

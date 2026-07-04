@@ -277,6 +277,22 @@ def render_report(state: RunState) -> str:
             )
             if task.error:
                 lines.append(f"  - Error: {task.error}")
+            decision = task.worker_state.get("scheduler_decision")
+            if isinstance(decision, dict):
+                signals = [
+                    str(signal)
+                    for signal in decision.get("signals", [])
+                    if isinstance(signal, str)
+                ]
+                lines.append(
+                    "  - Scheduler decision: "
+                    f"rank {decision.get('rank', 'n/a')}; "
+                    f"score {decision.get('score', task.priority)}; "
+                    f"candidates {decision.get('candidate_count', 'n/a')}; "
+                    f"pool {decision.get('pool_size', 'n/a')}"
+                )
+                if signals:
+                    lines.append(f"  - Scheduler signals: {', '.join(signals[:8])}")
         lines.append("")
     else:
         lines.extend(["- No task queue records persisted.", ""])
@@ -329,6 +345,8 @@ def render_report(state: RunState) -> str:
             )
             if trace.task_id:
                 lines.append(f"  - Task: {trace.task_id}")
+            if trace.transcript_ref:
+                lines.append(f"  - Transcript: {trace.transcript_ref}")
             if trace.notes:
                 lines.append(f"  - Notes: {trace.notes}")
             if trace.evidence_refs:
@@ -337,6 +355,12 @@ def render_report(state: RunState) -> str:
                 lines.append("  - Scratchpad:")
                 for note in trace.scratchpad[:5]:
                     lines.append(f"    - {_single_line(note)[:240]}")
+            if trace.tool_calls:
+                lines.append(f"  - Tool calls: {len(trace.tool_calls)}")
+                for tool_call in trace.tool_calls[:5]:
+                    tool_name = _single_line(str(tool_call.get("tool_name", "tool")))
+                    status = _single_line(str(tool_call.get("status", "unknown")))
+                    lines.append(f"    - {tool_name}: {status}")
             if trace.llm_interactions:
                 lines.append(f"  - LLM interactions: {len(trace.llm_interactions)}")
                 for interaction in trace.llm_interactions[:3]:
@@ -498,6 +522,9 @@ def render_report(state: RunState) -> str:
                 f"{'successful' if evaluation.success else 'not yet successful'}"
             )
             lines.append(f"  - Implementation refs: {', '.join(evaluation.implementation_refs) or 'none'}")
+            lines.append(
+                f"  - Measurement: {evaluation.measurement_status} via {evaluation.measurement_source}"
+            )
             for metric in sorted(evaluation.baseline_metrics):
                 baseline = evaluation.baseline_metrics[metric]
                 measured = evaluation.measured_metrics.get(metric)

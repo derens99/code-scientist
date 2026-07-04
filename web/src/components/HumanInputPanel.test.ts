@@ -31,6 +31,7 @@ describe("HumanInputPanel", () => {
         MantineProvider,
         {},
         React.createElement(HumanInputPanel, {
+          goalId: "goal-1",
           selectedHypothesis: hypothesis,
           submitting: false,
           goalPreferences: [],
@@ -52,5 +53,31 @@ describe("HumanInputPanel", () => {
     expect(markup).toContain("Add review");
     expect(markup).toContain("Update guidance");
     expect(markup).toContain("Run command");
+  });
+
+  it("renders goal-level conversational refinement when no hypothesis is selected", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        MantineProvider,
+        {},
+        React.createElement(HumanInputPanel, {
+          goalId: "goal-1",
+          selectedHypothesis: null,
+          submitting: false,
+          goalPreferences: [],
+          goalConstraints: [],
+          allowedSources: ["seed_paper_evidence"],
+          onFeedback: async () => {},
+          onManualHypothesis: async () => {},
+          onManualReview: async () => {},
+          onVerificationMark: async () => {},
+          onGuidance: async () => {},
+          onCommand: async () => {}
+        })
+      )
+    );
+
+    expect(markup).toContain("Goal refinement");
+    expect(markup).toContain("Add goal refinement");
   });
 });

@@ -92,7 +92,14 @@ def load_prospective_evaluation_fixture(
     success_metric = _fixture_text(data.get("success_metric"), "")
     if not success_metric:
         raise ValueError("Prospective evaluation fixture with measured_metrics must include success_metric.")
-    return record_prospective_measurement(planned, measured_metrics, success_metric)
+    default_source = "prospective_validation_manifest" if data.get("source_manifest") else "external_fixture"
+    return record_prospective_measurement(
+        planned,
+        measured_metrics,
+        success_metric,
+        measurement_source=_fixture_text(data.get("measurement_source"), default_source),
+        measurement_status=_fixture_text(data.get("measurement_status"), "measured"),
+    )
 
 
 def load_prospective_evaluation_fixtures(
@@ -173,6 +180,8 @@ def run_prospective_validation_manifest(
         "baseline_metrics": baseline_metrics,
         "measured_metrics": measured_metrics,
         "success_metric": success_metric,
+        "measurement_source": _fixture_text(data.get("measurement_source"), "prospective_validation_manifest"),
+        "measurement_status": _fixture_text(data.get("measurement_status"), "measured"),
         "notes": [
             *_fixture_string_list(data.get("notes"), "notes"),
             *command_notes,
@@ -861,6 +870,8 @@ def plan_prospective_evaluation(
         measured_metrics={},
         deltas={},
         success=False,
+        measurement_source="proxy",
+        measurement_status="planned",
         notes=list(notes or []),
     )
 
@@ -869,6 +880,9 @@ def record_prospective_measurement(
     evaluation: ProspectiveEvaluation,
     measured_metrics: dict[str, float],
     success_metric: str,
+    *,
+    measurement_source: str = "external_fixture",
+    measurement_status: str = "measured",
 ) -> ProspectiveEvaluation:
     measured = {key: round(value, 3) for key, value in measured_metrics.items()}
     deltas = {
@@ -885,6 +899,8 @@ def record_prospective_measurement(
         measured_metrics=measured,
         deltas=deltas,
         success=success,
+        measurement_source=measurement_source,
+        measurement_status=measurement_status,
         notes=evaluation.notes,
     )
 
@@ -1130,7 +1146,10 @@ def audit_capability_study_coverage(states: list[RunState]) -> CapabilityStudyCo
         1
         for state in states
         for evaluation in state.prospective_evaluations
-        if evaluation.status == "measured" and evaluation.measured_metrics
+        if evaluation.status == "measured"
+        and evaluation.measurement_status == "measured"
+        and evaluation.measurement_source != "proxy"
+        and evaluation.measured_metrics
     )
     measured_feedback_loop_count = sum(
         1

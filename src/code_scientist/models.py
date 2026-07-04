@@ -601,6 +601,8 @@ class ProspectiveEvaluation:
     measured_metrics: dict[str, float]
     deltas: dict[str, float]
     success: bool
+    measurement_source: str = "proxy"
+    measurement_status: str = "proxy"
     notes: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -609,6 +611,8 @@ class ProspectiveEvaluation:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ProspectiveEvaluation:
         copied = dict(data)
+        copied.setdefault("measurement_source", "proxy")
+        copied.setdefault("measurement_status", "proxy")
         copied.setdefault("notes", [])
         return cls(**copied)
 
@@ -811,6 +815,8 @@ class AgentTrace:
     evidence_refs: list[str] = field(default_factory=list)
     llm_interactions: list[dict[str, str]] = field(default_factory=list)
     scratchpad: list[str] = field(default_factory=list)
+    transcript_ref: str = ""
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -826,6 +832,8 @@ class AgentTrace:
         copied.setdefault("evidence_refs", [])
         copied.setdefault("llm_interactions", [])
         copied.setdefault("scratchpad", [])
+        copied.setdefault("transcript_ref", "")
+        copied.setdefault("tool_calls", [])
         return cls(**copied)
 
 
@@ -839,6 +847,7 @@ class Task:
     attempts: int = 0
     result_refs: list[str] = field(default_factory=list)
     error: str = ""
+    worker_state: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -851,6 +860,7 @@ class Task:
         copied.setdefault("attempts", 0)
         copied.setdefault("result_refs", [])
         copied.setdefault("error", "")
+        copied.setdefault("worker_state", {})
         return cls(**copied)
 
 

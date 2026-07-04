@@ -13,6 +13,29 @@ uv run code-scientist run "Find testable ideas to improve LLM coding agents" --c
 uv run code-scientist report runs/demo/state.json
 ```
 
+## Claude Code And Codex Agent Workflow
+
+This repository includes project-scoped agent entry points:
+
+- Claude Code: `.claude/skills/code-scientist/SKILL.md`, invoked as `/code-scientist`.
+- Codex: `.agents/skills/code-scientist/SKILL.md`, invoked with `$code-scientist` or the skills picker.
+
+The shared workflow runs Code Scientist, writes a normal `state.json` and `report.md`, converts top hypotheses into bounded subagent packets, then asks one independent read-only reviewer subagent to review each packet.
+
+```bash
+uv run code-scientist run "Find testable ideas to improve coding-agent subagent orchestration" \
+  --cycles 1 \
+  --max-hypotheses 6 \
+  --max-matches 2 \
+  --out runs/subagent-orchestration
+
+uv run code-scientist agent-packets runs/subagent-orchestration/state.json \
+  --out runs/subagent-orchestration/agent-packets \
+  --limit 3
+```
+
+`packet-index.json` lists the generated packet files. The custom subagent definitions at `.claude/agents/code-scientist-packet-reviewer.md` and `.codex/agents/code-scientist-packet-reviewer.toml` are intentionally read-only: packet reviewers should return verdicts and next actions, not edit source files.
+
 ## Benchmark Fixtures
 
 Use `--benchmark-fixture` to attach measured baseline and candidate metrics to a run:

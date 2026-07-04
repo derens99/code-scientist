@@ -29,19 +29,24 @@ import {
   fetchRunState,
   submitManualHypothesis,
   submitManualReview,
+  submitEvaluationReturn,
   submitProximityClusterOverride,
   submitProximityOverride,
   submitRunCommand,
   submitRunGuidance,
+  submitSourceAttachment,
   submitUserFeedback
 } from "@/lib/client";
 import type {
   ManualHypothesisPayload,
   ManualReviewPayload,
+  EvaluationReturnPayload,
   RunCommandPayload,
   RunGuidancePayload,
+  SourceAttachmentPayload,
   UserFeedbackPayload
 } from "@/lib/client";
+import { EvaluationReturnPanel } from "./EvaluationReturnPanel";
 import type { Hypothesis, ProximityEdge, RunState, RunSummary } from "@/lib/types";
 import { HumanInputPanel } from "./HumanInputPanel";
 import { HypothesisDetail } from "./HypothesisDetail";
@@ -49,6 +54,7 @@ import { HypothesisLeaderboard } from "./HypothesisLeaderboard";
 import { RunInsights } from "./RunInsights";
 import { RunOverview } from "./RunOverview";
 import { RunSetup } from "./RunSetup";
+import { SourceAttachmentPanel } from "./SourceAttachmentPanel";
 
 export function Workbench() {
   const wideLayout = useMediaQuery("(min-width: 1120px)");
@@ -248,6 +254,28 @@ export function Workbench() {
     await saveHumanInput(() => submitRunCommand(selectedRunId, payload));
   }
 
+  async function handleEvaluationReturn(payload: EvaluationReturnPayload) {
+    if (!selectedRunId) {
+      return;
+    }
+    await saveHumanInput(async () => {
+      const result = await submitEvaluationReturn(selectedRunId, payload);
+      setReport(await fetchRunReport(selectedRunId));
+      return result;
+    });
+  }
+
+  async function handleSourceAttachment(payload: SourceAttachmentPayload) {
+    if (!selectedRunId) {
+      return;
+    }
+    await saveHumanInput(async () => {
+      const result = await submitSourceAttachment(selectedRunId, payload);
+      setReport(await fetchRunReport(selectedRunId));
+      return result;
+    });
+  }
+
   async function handleProximityOverride(edge: ProximityEdge, decision: "merge" | "preserve") {
     if (!selectedRunId) {
       return;
@@ -410,6 +438,7 @@ export function Workbench() {
                 <Stack gap="md">
                   <HypothesisDetail hypothesis={selectedHypothesis} review={selectedReview} parents={parentHypotheses} />
                   <HumanInputPanel
+                    goalId={state.goal.id}
                     selectedHypothesis={selectedHypothesis}
                     submitting={submittingHumanInput}
                     goalPreferences={state.goal.preferences}
@@ -421,6 +450,19 @@ export function Workbench() {
                     onVerificationMark={handleFeedback}
                     onGuidance={handleGuidance}
                     onCommand={handleCommand}
+                  />
+                  <SourceAttachmentPanel
+                    submitting={submittingHumanInput}
+                    evidence={state.evidence}
+                    evidenceSafetyFindings={state.evidence_safety_findings ?? []}
+                    onSourceAttachment={handleSourceAttachment}
+                  />
+                  <EvaluationReturnPanel
+                    submitting={submittingHumanInput}
+                    capabilityEvaluations={state.capability_evaluations ?? []}
+                    prospectiveEvaluations={state.prospective_evaluations ?? []}
+                    feedbackLoopEvaluations={state.feedback_loop_evaluations ?? []}
+                    onEvaluationReturn={handleEvaluationReturn}
                   />
                 </Stack>
               </Box>
@@ -441,6 +483,7 @@ export function Workbench() {
                 researchOverview={state.research_overview}
                 agentTraces={state.agent_traces}
                 retrievalMemory={state.retrieval_memory}
+                taskQueue={state.task_queue}
                 userFeedback={state.user_feedback}
                 onProximityOverride={handleProximityOverride}
                 onProximityClusterOverride={handleProximityClusterOverride}

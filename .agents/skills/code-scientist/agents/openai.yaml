@@ -1,0 +1,4 @@
+interface:
+  display_name: "Code Scientist"
+  short_description: "Run Code Scientist and orchestrate subagent review packets."
+  default_prompt: "Use Code Scientist to research this objective and spawn packet reviewers."

@@ -13,6 +13,7 @@ import type {
   ResearchOverview,
   SafetyEvaluationResult,
   ScalingCurvePoint,
+  Task,
   UserFeedback
 } from "@/lib/types";
 import { RunInsights } from "./RunInsights";
@@ -107,6 +108,50 @@ describe("RunInsights", () => {
     expect(markup).toContain("Prefer hyp-1 over hyp-2");
   });
 
+  it("renders scheduler task decisions in the plan context", () => {
+    const task: Task = {
+      id: "task-ranking",
+      kind: "ranking",
+      priority: 4,
+      payload: { cycle: 1, hypothesis_id: "hyp-1" },
+      status: "completed",
+      attempts: 1,
+      result_refs: ["match-1"],
+      error: "",
+      worker_state: {
+        scheduler_decision: {
+          rank: 1,
+          score: 4,
+          candidate_count: 2,
+          pool_size: 2,
+          cycle: 1,
+          signals: ["weight:ranking", "user_feedback:feedback-1"]
+        }
+      }
+    };
+
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        MantineProvider,
+        {},
+        React.createElement(RunInsights as React.ComponentType<any>, {
+          matches: [],
+          metaReviews: [],
+          hypotheses: [],
+          taskQueue: [task],
+          defaultTab: "plan",
+          report: ""
+        })
+      )
+    );
+
+    expect(markup).toContain("Scheduler decisions");
+    expect(markup).toContain("ranking");
+    expect(markup).toContain("rank 1");
+    expect(markup).toContain("weight:ranking");
+    expect(markup).toContain("user_feedback:feedback-1");
+  });
+
   it("renders capability, prospective, scaling, and safety evaluations", () => {
     const hypothesis: Hypothesis = {
       id: "hyp-1",
@@ -161,6 +206,8 @@ describe("RunInsights", () => {
       measured_metrics: { pass_rate: 0.7 },
       deltas: { pass_rate: 0.2 },
       success: true,
+      measurement_source: "held_out_repair_suite",
+      measurement_status: "measured",
       notes: []
     };
     const weakerProspective: ProspectiveEvaluation = {
@@ -172,6 +219,8 @@ describe("RunInsights", () => {
       measured_metrics: { pass_rate: 0.47 },
       deltas: { pass_rate: -0.03 },
       success: false,
+      measurement_source: "proxy",
+      measurement_status: "measured",
       notes: []
     };
     const scaling: ScalingCurvePoint = {
@@ -257,6 +306,7 @@ describe("RunInsights", () => {
     expect(markup).toContain("1 feedback-loop measurements");
     expect(markup).toContain("Prospective: hyp-1");
     expect(markup).toContain("branch/candidate-workflow");
+    expect(markup).toContain("measured via held_out_repair_suite");
     expect(markup).toContain("Scaling: cycles-2-tools-20");
     expect(markup).toContain("Safety: coding_agent_safety_red_team");
     expect(markup).toContain("Feedback loop: meta-1");
@@ -283,7 +333,7 @@ describe("RunInsights", () => {
       elo: 1216,
       status: "accepted"
     };
-    const trace: AgentTrace = {
+    const trace = {
       id: "trace-1",
       cycle: 1,
       agent: "generation",
@@ -293,8 +343,15 @@ describe("RunInsights", () => {
       output_refs: ["hyp-1"],
       status: "completed",
       notes: "Generated one candidate.",
-      evidence_refs: ["ev-1"]
-    };
+      evidence_refs: ["ev-1"],
+      tool_calls: [
+        {
+          tool_name: "evidence_store.context_refs",
+          status: "ok",
+          evidence_refs: ["ev-1"]
+        }
+      ]
+    } as AgentTrace;
 
     const markup = renderToStaticMarkup(
       React.createElement(
@@ -313,6 +370,7 @@ describe("RunInsights", () => {
 
     expect(markup).toContain("Agent trace log");
     expect(markup).toContain("Task: task-generate-1");
+    expect(markup).toContain("Tool calls: evidence_store.context_refs");
   });
 
   it("renders research output artifacts in the overview", () => {

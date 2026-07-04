@@ -270,12 +270,13 @@ def run_research_cycle(
         for cycle in range(start_cycle, start_cycle + cycles):
             source_feedback_meta = metas[-1] if metas else None
             baseline_feedback_quality = _feedback_quality_metrics(hypotheses, reviews)
+            task_handlers: dict[str, Callable[[Task], list[str] | None]] = {}
 
-            def run_cycle_task(
+            def schedule_cycle_task(
                 kind: str,
                 payload: dict[str, Any],
                 execute: Callable[[Task], list[str] | None],
-            ) -> None:
+            ) -> Task:
                 nonlocal task_queue
                 task = create_task(cycle=cycle, plan=plan, kind=kind, payload=payload)
                 task = replace(
@@ -310,17 +311,70 @@ def run_research_cycle(
                         ),
                         *task_queue[existing_task_index + 1 :],
                     ]
+                task_handlers[task.id] = execute
+                return task
+
+            def run_ready_cycle_tasks(eligible_task_ids: set[str]) -> None:
+                nonlocal task_queue
+
+                def execute_scheduled_task(task: Task) -> list[str] | None:
+                    handler = task_handlers.get(task.id)
+                    if handler is None:
+                        raise RuntimeError(f"No scheduler handler registered for task: {task.id}")
+                    return handler(task)
+
+                scheduler_pool = select_scheduler_task_pool(
+                    task_queue,
+                    plan=plan,
+                    hypotheses=hypotheses,
+                    reviews=reviews,
+                    proximity_edges=proximity_edges,
+                    user_feedback=user_feedback,
+                    current_cycle=cycle,
+                    max_pool_size=len(eligible_task_ids),
+                    candidate_task_ids=eligible_task_ids,
+                )
+                selected_task_ids = {task.id for task in scheduler_pool}
+                scheduler_selection_by_id = {task.id: task for task in scheduler_pool}
+                rescored_queue = rescore_task_queue(
+                    task_queue,
+                    plan=plan,
+                    hypotheses=hypotheses,
+                    reviews=reviews,
+                    proximity_edges=proximity_edges,
+                    user_feedback=user_feedback,
+                    current_cycle=cycle,
+                )
+                task_queue = [
+                    replace(
+                        task,
+                        priority=scheduler_selection_by_id[task.id].priority,
+                        worker_state=scheduler_selection_by_id[task.id].worker_state,
+                    )
+                    if task.id in scheduler_selection_by_id
+                    else task
+                    for task in rescored_queue
+                ]
                 task_queue = run_task_worker(
                     task_queue,
-                    execute=execute,
+                    execute=execute_scheduled_task,
                     persist=persist_current_task_state,
                     raise_on_failed=True,
-                    eligible_task_ids={task.id},
+                    eligible_task_ids=selected_task_ids,
                     defer_when=defer_reason_from_control,
                 )
-                current_task = next(existing for existing in task_queue if existing.id == task.id)
-                if current_task.status == "deferred":
-                    raise _TaskDeferred(deferred_run_status)
+                for task_id in eligible_task_ids:
+                    current_task = next((existing for existing in task_queue if existing.id == task_id), None)
+                    if current_task and current_task.status == "deferred":
+                        raise _TaskDeferred(deferred_run_status)
+
+            def run_cycle_task(
+                kind: str,
+                payload: dict[str, Any],
+                execute: Callable[[Task], list[str] | None],
+            ) -> None:
+                task = schedule_cycle_task(kind, payload, execute)
+                run_ready_cycle_tasks({task.id})
 
             remaining = max(max_hypotheses - len(hypotheses), 0)
             active_generation_methods = _active_generation_methods(plan, use_grounded_review)
@@ -369,7 +423,47 @@ def run_research_cycle(
                 generated = [item for item in generated_candidates if item.id not in existing_ids]
                 return [item.id for item in generated]
 
-            run_cycle_task(
+            def make_execute_review(target: Hypothesis) -> Callable[[Task], list[str]]:
+                def execute_review(_task: Task) -> list[str]:
+                    nonlocal hypotheses, reviewed
+                    task_reviews = _review_for_plan(
+                        reflection=reflection,
+                        goal=goal,
+                        plan=plan,
+                        hypotheses=[target],
+                        evidence_store=evidence_store,
+                        use_grounded=use_grounded_review,
+                        cycle=cycle,
+                        agent_traces=agent_traces,
+                        agent_feedback=reflection_feedback,
+                        safety_feedback=safety_feedback,
+                        task_id=_task.id,
+                        retrieval_memory=retrieval_memory,
+                    )
+                    reviewed.extend(task_reviews)
+                    accepted_ids = _accepted_hypothesis_ids([target], task_reviews)
+                    accepted = [target.with_status("accepted")] if target.id in accepted_ids else []
+                    hypotheses = _merge_hypotheses(hypotheses, accepted)
+                    reviews.extend(task_reviews)
+                    return [item.id for item in task_reviews]
+
+                return execute_review
+
+            def register_resumed_review_tasks() -> list[Task]:
+                target_by_id = {item.id: item for item in hypotheses}
+                registered: list[Task] = []
+                for task in task_queue:
+                    if task.status != "queued" or task.kind != "review":
+                        continue
+                    target_id = str(task.payload.get("hypothesis_id", ""))
+                    target = target_by_id.get(target_id)
+                    if target is None:
+                        continue
+                    task_handlers[task.id] = make_execute_review(target)
+                    registered.append(task)
+                return registered
+
+            generation_task = schedule_cycle_task(
                 "generate",
                 {
                     "modes": active_generation_methods,
@@ -378,14 +472,32 @@ def run_research_cycle(
                 },
                 execute_generation,
             )
+            initial_ready_tasks = register_resumed_review_tasks()
+            run_ready_cycle_tasks({generation_task.id, *[task.id for task in initial_ready_tasks]})
 
-            def execute_review(_task: Task) -> list[str]:
+            review_tasks = [
+                schedule_cycle_task(
+                    "review",
+                    {
+                        "review_types": _active_review_types(plan, use_grounded_review),
+                        "hypothesis_id": item.id,
+                        "hypothesis_ids": [item.id],
+                        "agent_feedback": _unique_refs([*reflection_feedback, *safety_feedback]),
+                    },
+                    make_execute_review(item),
+                )
+                for item in generated
+            ]
+            if review_tasks:
+                run_ready_cycle_tasks({task.id for task in review_tasks})
+
+            def execute_empty_review(_task: Task) -> list[str]:
                 nonlocal hypotheses, reviewed
                 reviewed = _review_for_plan(
                     reflection=reflection,
                     goal=goal,
                     plan=plan,
-                    hypotheses=generated,
+                    hypotheses=[],
                     evidence_store=evidence_store,
                     use_grounded=use_grounded_review,
                     cycle=cycle,
@@ -395,21 +507,18 @@ def run_research_cycle(
                     task_id=_task.id,
                     retrieval_memory=retrieval_memory,
                 )
-                accepted_ids = _accepted_hypothesis_ids(generated, reviewed)
-                accepted = [item.with_status("accepted") for item in generated if item.id in accepted_ids]
-                hypotheses = _merge_hypotheses(hypotheses, accepted)
-                reviews.extend(reviewed)
                 return [item.id for item in reviewed]
 
-            run_cycle_task(
-                "review",
-                {
-                    "review_types": _active_review_types(plan, use_grounded_review),
-                    "hypothesis_ids": [item.id for item in generated],
-                    "agent_feedback": _unique_refs([*reflection_feedback, *safety_feedback]),
-                },
-                execute_review,
-            )
+            if not review_tasks:
+                run_cycle_task(
+                    "review",
+                    {
+                        "review_types": _active_review_types(plan, use_grounded_review),
+                        "hypothesis_ids": [],
+                        "agent_feedback": _unique_refs([*reflection_feedback, *safety_feedback]),
+                    },
+                    execute_empty_review,
+                )
 
             def execute_proximity(_task: Task) -> list[str]:
                 nonlocal hypotheses, proximity_edges
@@ -450,11 +559,12 @@ def run_research_cycle(
                             ],
                             task_retrievals,
                         ),
+                        tool_calls=_tool_calls_from_retrievals(task_retrievals),
                     )
                 )
                 return edge_refs
 
-            run_cycle_task(
+            proximity_task = schedule_cycle_task(
                 "proximity",
                 {
                     "method": "goal_aware",
@@ -524,11 +634,12 @@ def run_research_cycle(
                             ],
                             task_retrievals,
                         ),
+                        tool_calls=_tool_calls_from_retrievals(task_retrievals),
                     )
                 )
                 return cycle_match_ids
 
-            run_cycle_task(
+            ranking_task = schedule_cycle_task(
                 "ranking",
                 {
                     "comparison_mode": (
@@ -541,10 +652,12 @@ def run_research_cycle(
                 },
                 execute_ranking,
             )
+            run_ready_cycle_tasks({proximity_task.id, ranking_task.id})
 
             leaders = _select_diverse_evolution_leaders(hypotheses, proximity_edges, limit=2)
             child_limit = min(2, max(max_hypotheses - len(hypotheses), 0))
             evolution_strategy = _active_evolution_strategy(plan, cycle, use_grounded=use_grounded_review)
+            evolution_task: Task | None = None
             if leaders and child_limit:
                 def execute_evolution(_task: Task) -> list[str]:
                     nonlocal hypotheses, proximity_edges
@@ -594,6 +707,7 @@ def run_research_cycle(
                                 ],
                                 task_retrievals,
                             ),
+                            tool_calls=_tool_calls_from_retrievals(task_retrievals),
                         )
                     )
                     child_reviews = _review_for_plan(
@@ -619,7 +733,7 @@ def run_research_cycle(
                     hypotheses = _apply_proximity_deduplication(hypotheses, proximity_edges)
                     return [item.id for item in children]
 
-                run_cycle_task(
+                evolution_task = schedule_cycle_task(
                     "evolution",
                     {
                         "strategy": evolution_strategy,
@@ -669,11 +783,12 @@ def run_research_cycle(
                             ],
                             task_retrievals,
                         ),
+                        tool_calls=_tool_calls_from_retrievals(task_retrievals),
                     )
                 )
                 return [meta.id]
 
-            run_cycle_task(
+            meta_review_task = schedule_cycle_task(
                 "meta_review",
                 {
                     "review_count": len(reviews),
@@ -682,6 +797,14 @@ def run_research_cycle(
                 },
                 execute_meta_review,
             )
+            ready_meta_ids = {meta_review_task.id}
+            if evolution_task is not None:
+                ready_meta_ids.add(evolution_task.id)
+            run_ready_cycle_tasks(ready_meta_ids)
+            top_hypothesis_ids = [
+                item.id
+                for item in sorted(hypotheses, key=lambda hyp: hyp.elo, reverse=True)[:3]
+            ]
 
             def execute_overview(_task: Task) -> list[str]:
                 nonlocal research_overview
@@ -715,6 +838,7 @@ def run_research_cycle(
                             ],
                             task_retrievals,
                         ),
+                        tool_calls=_tool_calls_from_retrievals(task_retrievals),
                     )
                 )
                 return [research_overview.id]
@@ -773,6 +897,7 @@ def run_research_cycle(
                             ],
                             task_retrievals,
                         ),
+                        tool_calls=_tool_calls_from_retrievals(task_retrievals),
                     )
                 )
                 return [item.id for item in cycle_outputs]
@@ -1008,7 +1133,56 @@ def _goal_safety_text(goal: ResearchGoal) -> str:
 
 
 def _write_state(path: Path, state: RunState) -> None:
+    _write_agent_transcripts(path.parent, state)
     path.write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+
+
+def _write_agent_transcripts(run_dir: Path, state: RunState) -> None:
+    run_root = run_dir.resolve()
+    evidence_ids = {item.id for item in state.evidence}
+    for trace in state.agent_traces:
+        if not trace.transcript_ref or not trace.llm_interactions:
+            continue
+        transcript_path = (run_root / trace.transcript_ref).resolve()
+        if not transcript_path.is_relative_to(run_root):
+            raise ValueError(f"Agent transcript path escapes run directory: {trace.transcript_ref}")
+        transcript_path.parent.mkdir(parents=True, exist_ok=True)
+        unresolved_refs = [ref for ref in trace.evidence_refs if ref not in evidence_ids]
+        citation_status = (
+            "unresolved"
+            if unresolved_refs
+            else "resolved"
+            if trace.evidence_refs
+            else "not_applicable"
+        )
+        records = [
+            {
+                "trace_id": trace.id,
+                "cycle": trace.cycle,
+                "agent": trace.agent,
+                "action": trace.action,
+                "task_id": trace.task_id,
+                "turn_index": index,
+                "turn": interaction.get("turn", ""),
+                "prompt": interaction.get("prompt", ""),
+                "response": interaction.get("response", ""),
+                "max_tokens": interaction.get("max_tokens", ""),
+                "tool_calls": [
+                    _llm_complete_tool_call(trace, interaction, index),
+                    *trace.tool_calls,
+                ],
+                "evidence_refs": trace.evidence_refs,
+                "citation_check": {
+                    "status": citation_status,
+                    "unresolved_evidence_refs": unresolved_refs,
+                },
+            }
+            for index, interaction in enumerate(trace.llm_interactions, start=1)
+        ]
+        transcript_path.write_text(
+            "\n".join(json.dumps(record, sort_keys=True) for record in records) + "\n",
+            encoding="utf-8",
+        )
 
 
 def _collect_plan_governed_evidence(
@@ -1191,6 +1365,15 @@ def _ensure_continuous_state(
     goal = ResearchGoal.from_objective_with_briefs(objective, _read_goal_briefs(goal_brief_paths or []))
     plan = ResearchPlanConfig.from_goal(goal)
     safety_policies = load_safety_policies(safety_policy_paths or [])
+    seed_evidence = seed_paper_evidence()
+    initial_state = RunState(
+        goal=goal,
+        run_status="running",
+        plan=plan,
+        evidence=seed_evidence,
+        benchmark_results=benchmark_results or [],
+    )
+    _write_state(state_path, initial_state)
     governed_evidence, governance_findings = _collect_plan_governed_evidence(
         goal=goal,
         plan=plan,
@@ -1207,7 +1390,7 @@ def _ensure_continuous_state(
         safety_policies=safety_policies,
     )
     merged_evidence = merge_evidence(
-        seed_paper_evidence(),
+        seed_evidence,
         governed_evidence,
     )
     evidence, evidence_safety_findings = screen_evidence_sources(
@@ -1216,13 +1399,10 @@ def _ensure_continuous_state(
         max_tokens=max_tokens,
         safety_policies=safety_policies,
     )
-    state = RunState(
-        goal=goal,
-        run_status="running",
-        plan=plan,
+    state = replace(
+        initial_state,
         evidence=evidence,
         evidence_safety_findings=_merge_evidence_safety_findings(governance_findings, evidence_safety_findings),
-        benchmark_results=benchmark_results or [],
         safety=review_goal_safety_with_model(
             _goal_safety_text(goal),
             safety_llm_client,
@@ -1446,6 +1626,7 @@ def _generate_for_plan(
                     ],
                     mode_retrievals,
                 ),
+                tool_calls=_tool_calls_from_retrievals(mode_retrievals),
             )
         )
     return generated[:limit]
@@ -1535,6 +1716,7 @@ def _review_for_plan(
                     ],
                     mode_retrievals,
                 ),
+                tool_calls=_tool_calls_from_retrievals(mode_retrievals),
             )
         )
     return reviews
@@ -2306,13 +2488,27 @@ def _build_agent_trace(
     task_id: str = "",
     llm_interactions: list[dict[str, str]] | None = None,
     scratchpad: list[str] | None = None,
+    tool_calls: list[dict[str, Any]] | None = None,
 ) -> AgentTrace:
     trace_identity = (
         f"{cycle}:{agent}:{action}:{task_id}:{','.join(input_refs)}:"
         f"{','.join(output_refs)}:{status}:{notes}"
     )
+    trace_id = stable_id("trace", trace_identity)
+    trace_evidence_refs = evidence_refs or []
+    trace_tool_calls = tool_calls or []
+    if trace_evidence_refs and not trace_tool_calls:
+        trace_tool_calls = [
+            _evidence_context_tool_call(
+                trace_id=trace_id,
+                agent=agent,
+                action=action,
+                task_id=task_id,
+                evidence_refs=trace_evidence_refs,
+            )
+        ]
     return AgentTrace(
-        id=stable_id("trace", trace_identity),
+        id=trace_id,
         cycle=cycle,
         agent=agent,
         action=action,
@@ -2321,10 +2517,62 @@ def _build_agent_trace(
         output_refs=output_refs,
         status=status,
         notes=notes,
-        evidence_refs=evidence_refs or [],
+        evidence_refs=trace_evidence_refs,
         llm_interactions=llm_interactions or [],
         scratchpad=scratchpad or [],
+        transcript_ref=f"transcripts/{agent}/{task_id or trace_id}.jsonl",
+        tool_calls=trace_tool_calls,
     )
+
+
+def _llm_complete_tool_call(trace: AgentTrace, interaction: dict[str, str], turn_index: int) -> dict[str, Any]:
+    return {
+        "id": stable_id("tool", f"{trace.id}:{turn_index}:llm.complete:{interaction.get('max_tokens', '')}"),
+        "type": "llm_completion",
+        "tool_name": "llm.complete",
+        "turn": interaction.get("turn", ""),
+        "status": "ok",
+        "arguments": {
+            "max_tokens": interaction.get("max_tokens", ""),
+        },
+    }
+
+
+def _tool_calls_from_retrievals(retrievals: list[RetrievalMemoryRecord]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": stable_id("tool", f"{record.id}:evidence_store.retrieve"),
+            "type": "evidence_retrieval",
+            "tool_name": "evidence_store.retrieve",
+            "query": record.query,
+            "retrieval_method": record.retrieval_method,
+            "evidence_refs": record.evidence_refs,
+            "citations": record.citations,
+            "reason": record.reason,
+            "status": "ok" if record.evidence_refs else "empty",
+        }
+        for record in retrievals
+    ]
+
+
+def _evidence_context_tool_call(
+    *,
+    trace_id: str,
+    agent: str,
+    action: str,
+    task_id: str,
+    evidence_refs: list[str],
+) -> dict[str, Any]:
+    return {
+        "id": stable_id("tool", f"{trace_id}:evidence_store.context_refs:{','.join(evidence_refs)}"),
+        "type": "evidence_context",
+        "tool_name": "evidence_store.context_refs",
+        "agent": agent,
+        "action": action,
+        "task_id": task_id,
+        "evidence_refs": evidence_refs,
+        "status": "ok",
+    }
 
 
 def _trace_scratchpad(
@@ -2375,6 +2623,12 @@ def create_task(
         payload=task_payload,
         status=status,
         result_refs=refs,
+        worker_state={
+            "phase": status,
+            "last_event": "scheduled",
+            "attempt": 0,
+            "cycle": cycle,
+        },
     )
 
 
@@ -2425,21 +2679,218 @@ def score_task_priority(
     return round(max(score, 0.001), 3)
 
 
+def rescore_task_queue(
+    tasks: list[Task],
+    plan: ResearchPlanConfig,
+    hypotheses: list[Hypothesis] | None = None,
+    reviews: list[Review] | None = None,
+    proximity_edges: list[ProximityEdge] | None = None,
+    user_feedback: list[UserFeedback] | None = None,
+    current_cycle: int | None = None,
+) -> list[Task]:
+    return [
+        replace(
+            task,
+            priority=score_task_priority(
+                task,
+                plan=plan,
+                hypotheses=hypotheses,
+                reviews=reviews,
+                proximity_edges=proximity_edges,
+                user_feedback=user_feedback,
+                current_cycle=current_cycle,
+            ),
+        )
+        if task.status == "queued"
+        else task
+        for task in tasks
+    ]
+
+
+def select_scheduler_task_pool(
+    tasks: list[Task],
+    *,
+    plan: ResearchPlanConfig,
+    hypotheses: list[Hypothesis] | None = None,
+    reviews: list[Review] | None = None,
+    proximity_edges: list[ProximityEdge] | None = None,
+    user_feedback: list[UserFeedback] | None = None,
+    current_cycle: int | None = None,
+    max_pool_size: int = 1,
+    candidate_task_ids: set[str] | None = None,
+    candidate_kinds: set[str] | None = None,
+) -> list[Task]:
+    rescored = rescore_task_queue(
+        tasks,
+        plan=plan,
+        hypotheses=hypotheses,
+        reviews=reviews,
+        proximity_edges=proximity_edges,
+        user_feedback=user_feedback,
+        current_cycle=current_cycle,
+    )
+    queued = [
+        task
+        for task in rescored
+        if task.status == "queued"
+        and (candidate_task_ids is None or task.id in candidate_task_ids)
+        and (candidate_kinds is None or task.kind in candidate_kinds)
+    ]
+    if not queued:
+        return []
+    selected = sorted(queued, key=lambda task: (-task.priority, task.id))[: max(max_pool_size, 1)]
+    return [
+        replace(
+            task,
+            worker_state=_task_worker_state(
+                task,
+                scheduler_decision={
+                    "rank": rank,
+                    "score": task.priority,
+                    "candidate_count": len(queued),
+                    "pool_size": len(selected),
+                    "cycle": current_cycle,
+                    "signals": _scheduler_decision_signals(
+                        task,
+                        plan=plan,
+                        hypotheses=hypotheses,
+                        reviews=reviews,
+                        proximity_edges=proximity_edges,
+                        user_feedback=user_feedback,
+                        current_cycle=current_cycle,
+                    ),
+                },
+            ),
+        )
+        for rank, task in enumerate(selected, start=1)
+    ]
+
+
+def _scheduler_decision_signals(
+    task: Task,
+    *,
+    plan: ResearchPlanConfig,
+    hypotheses: list[Hypothesis] | None = None,
+    reviews: list[Review] | None = None,
+    proximity_edges: list[ProximityEdge] | None = None,
+    user_feedback: list[UserFeedback] | None = None,
+    current_cycle: int | None = None,
+) -> list[str]:
+    signals = [f"weight:{_task_weight_key(task.kind)}"]
+    hypothesis_refs = _task_hypothesis_refs(task)
+    hypotheses_by_id = {item.id: item for item in hypotheses or []}
+    related_hypotheses = [
+        hypotheses_by_id[item_id]
+        for item_id in hypothesis_refs
+        if item_id in hypotheses_by_id
+    ]
+    related_reviews = [
+        review
+        for review in reviews or []
+        if review.hypothesis_id in hypothesis_refs
+    ]
+
+    if related_hypotheses:
+        if any(item.elo > 1200.0 for item in related_hypotheses):
+            signals.append("high_elo")
+        if any(not item.evidence_refs for item in related_hypotheses):
+            signals.append("missing_evidence")
+        if not related_reviews:
+            signals.append("review_gap")
+        elif any(review.requires_revision or not review.evidence_refs for review in related_reviews):
+            signals.append("revision_needed")
+
+    task_cycle = _int_payload_value(task.payload.get("cycle"))
+    if current_cycle is not None and task_cycle is not None:
+        stale_cycles = max(current_cycle - task_cycle, 0)
+        if stale_cycles:
+            signals.append(f"stale_work:{stale_cycles}")
+
+    cluster_ids = sorted(
+        {
+            edge.cluster_id
+            for edge in _task_proximity_cluster_edges(task, hypothesis_refs, proximity_edges or [])
+            if edge.cluster_id
+        }
+    )
+    signals.extend(f"proximity_cluster:{cluster_id}" for cluster_id in cluster_ids)
+    signals.extend(
+        f"user_feedback:{item.id}"
+        for item in user_feedback or []
+        if _feedback_applies_to_task(item, task, hypothesis_refs)
+    )
+    return signals
+
+
 def start_task(task: Task) -> Task:
-    return replace(task, status="running", attempts=task.attempts + 1, error="")
+    attempt = task.attempts + 1
+    return replace(
+        task,
+        status="running",
+        attempts=attempt,
+        error="",
+        worker_state=_task_worker_state(
+            task,
+            phase="running",
+            last_event="started",
+            attempt=attempt,
+        ),
+    )
 
 
 def complete_task(task: Task, result_refs: list[str] | None = None) -> Task:
-    return replace(task, status="completed", result_refs=list(result_refs or []), error="")
+    refs = list(result_refs or [])
+    return replace(
+        task,
+        status="completed",
+        result_refs=refs,
+        error="",
+        worker_state=_task_worker_state(
+            task,
+            phase="completed",
+            last_event="completed",
+            attempt=task.attempts,
+            result_refs=refs,
+        ),
+    )
 
 
 def fail_task(task: Task, error: str, max_attempts: int = 3) -> Task:
     status = "failed" if task.attempts >= max(max_attempts, 1) else "queued"
-    return replace(task, status=status, error=error)
+    return replace(
+        task,
+        status=status,
+        error=error,
+        worker_state=_task_worker_state(
+            task,
+            phase=status,
+            last_event="failed" if status == "failed" else "retry_scheduled",
+            attempt=task.attempts,
+            last_error=error,
+            retryable=status == "queued",
+        ),
+    )
 
 
 def defer_task(task: Task, reason: str) -> Task:
-    return replace(task, status="deferred", error=reason)
+    return replace(
+        task,
+        status="deferred",
+        error=reason,
+        worker_state=_task_worker_state(
+            task,
+            phase="deferred",
+            last_event="deferred",
+            attempt=task.attempts,
+            defer_reason=reason,
+        ),
+    )
+
+
+def _task_worker_state(task: Task, **updates: Any) -> dict[str, Any]:
+    state = dict(task.worker_state)
+    state.update(updates)
+    return state
 
 
 def prepare_task_queue_for_resume(tasks: list[Task]) -> list[Task]:
@@ -2638,20 +3089,7 @@ def _int_payload_value(value: Any) -> int | None:
 
 
 def _proximity_cluster_bonus(task: Task, hypothesis_refs: list[str], edges: list[ProximityEdge]) -> float:
-    if not hypothesis_refs and not task.payload.get("cluster_id"):
-        return 0.0
-    referenced = set(hypothesis_refs)
-    payload_cluster = str(task.payload.get("cluster_id", ""))
-    cluster_edges = [
-        edge
-        for edge in edges
-        if edge.cluster_id
-        and (
-            edge.source in referenced
-            or edge.target in referenced
-            or edge.cluster_id == payload_cluster
-        )
-    ]
+    cluster_edges = _task_proximity_cluster_edges(task, hypothesis_refs, edges)
     if not cluster_edges:
         return 0.0
     semantic_bonus = 0.1 if any(edge.method == "semantic_evidence_overlap" for edge in cluster_edges) else 0.0
@@ -2665,6 +3103,27 @@ def _proximity_cluster_bonus(task: Task, hypothesis_refs: list[str], edges: list
     ) else 0.0
     similarity_bonus = min(max(edge.similarity for edge in cluster_edges) * 0.15, 0.15)
     return 0.15 + semantic_bonus + embedding_bonus + evidence_bonus + control_bonus + similarity_bonus
+
+
+def _task_proximity_cluster_edges(
+    task: Task,
+    hypothesis_refs: list[str],
+    edges: list[ProximityEdge],
+) -> list[ProximityEdge]:
+    if not hypothesis_refs and not task.payload.get("cluster_id"):
+        return []
+    referenced = set(hypothesis_refs)
+    payload_cluster = str(task.payload.get("cluster_id", ""))
+    return [
+        edge
+        for edge in edges
+        if edge.cluster_id
+        and (
+            edge.source in referenced
+            or edge.target in referenced
+            or edge.cluster_id == payload_cluster
+        )
+    ]
 
 
 def _user_feedback_priority_delta(
@@ -2728,8 +3187,14 @@ def _preference_ranking_delta(item: UserFeedback, hypothesis_refs: list[str]) ->
     return delta
 
 
-def _task_priority(plan: ResearchPlanConfig, kind: str) -> float:
-    weight_key = {
+def _feedback_applies_to_task(item: UserFeedback, task: Task, hypothesis_refs: list[str]) -> bool:
+    if _preference_ranking_delta(item, hypothesis_refs):
+        return True
+    return item.target_id in {task.id, task.kind, *hypothesis_refs}
+
+
+def _task_weight_key(kind: str) -> str:
+    return {
         "generate": "generation",
         "review": "reflection",
         "proximity": "proximity",
@@ -2739,6 +3204,10 @@ def _task_priority(plan: ResearchPlanConfig, kind: str) -> float:
         "overview": "meta_review",
         "research_outputs": "meta_review",
     }.get(kind, kind)
+
+
+def _task_priority(plan: ResearchPlanConfig, kind: str) -> float:
+    weight_key = _task_weight_key(kind)
     return round(max(plan.scheduler_weights.get(weight_key, 1.0), 0.001), 3)
 
 

@@ -10,6 +10,8 @@ import {
   applyProximityOverride,
   applyRunCommand,
   buildRunArgs,
+  buildEvaluationReturnArgs,
+  buildSourceAttachmentArgs,
   clampInteger,
   listRuns,
   sanitizeRunName,
@@ -193,6 +195,60 @@ describe("buildRunArgs", () => {
     expect(args).toContain("/tmp/blind-review.json");
     expect(args).toContain("/tmp/reviewer-scores.json");
     expect(args).not.toContain(" ");
+  });
+});
+
+describe("buildEvaluationReturnArgs", () => {
+  it("builds a run-scoped append command for returned evaluation packet paths", () => {
+    const args = buildEvaluationReturnArgs("paper-study-demo", {
+      capabilityEvaluationPaths: ["/tmp/capability.json", " "],
+      capabilityReviewPaths: ["/tmp/capability-review.json"],
+      preferenceReviewPaths: ["/tmp/preference-review.json"],
+      prospectiveEvaluationPaths: ["/tmp/prospective.json"],
+      feedbackLoopEvaluationPaths: ["/tmp/feedback-loop.json"],
+      feedbackLoopReviewPaths: ["/tmp/feedback-loop-review.json", " "]
+    });
+
+    expect(args).toEqual([
+      "run",
+      "code-scientist",
+      "evaluation-return",
+      path.join("runs", "paper-study-demo"),
+      "--capability-eval-fixture",
+      "/tmp/capability.json",
+      "--capability-review-fixture",
+      "/tmp/capability-review.json",
+      "--preference-review-fixture",
+      "/tmp/preference-review.json",
+      "--prospective-eval-fixture",
+      "/tmp/prospective.json",
+      "--feedback-loop-eval-fixture",
+      "/tmp/feedback-loop.json",
+      "--feedback-loop-review-fixture",
+      "/tmp/feedback-loop-review.json"
+    ]);
+  });
+});
+
+describe("buildSourceAttachmentArgs", () => {
+  it("builds a run-scoped append command for source attachment paths", () => {
+    const args = buildSourceAttachmentArgs("paper-study-demo", {
+      evidencePaths: ["/tmp/notes.md", " ", "/tmp/repo"],
+      evidenceIndexPaths: ["/tmp/corpus.index.json"]
+    });
+
+    expect(args).toEqual([
+      "run",
+      "code-scientist",
+      "source-attachment",
+      path.join("runs", "paper-study-demo"),
+      "--evidence-path",
+      "/tmp/notes.md",
+      "--evidence-path",
+      "/tmp/repo",
+      "--evidence-index",
+      "/tmp/corpus.index.json"
+    ]);
   });
 });
 

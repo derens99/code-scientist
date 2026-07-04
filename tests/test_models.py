@@ -319,6 +319,8 @@ def test_agent_trace_from_dict_defaults_task_id_for_old_state_files():
     assert trace.task_id == ""
     assert trace.llm_interactions == []
     assert trace.scratchpad == []
+    assert trace.transcript_ref == ""
+    assert trace.tool_calls == []
 
 
 def test_agent_trace_round_trips_llm_interactions_and_loads_old_defaults():
@@ -373,6 +375,54 @@ def test_agent_trace_round_trips_scratchpad_and_loads_old_defaults():
     assert restored_old.scratchpad == []
 
 
+def test_agent_trace_round_trips_transcript_ref_and_loads_old_defaults():
+    trace = AgentTrace(
+        id="trace-transcript",
+        cycle=1,
+        agent="ranking",
+        action="debate_pairwise_compare",
+        task_id="task-ranking",
+        transcript_ref="transcripts/ranking/task-ranking.jsonl",
+    )
+    old_trace = trace.to_dict()
+    old_trace.pop("transcript_ref")
+
+    restored = AgentTrace.from_dict(trace.to_dict())
+    restored_old = AgentTrace.from_dict(old_trace)
+
+    assert restored.transcript_ref == "transcripts/ranking/task-ranking.jsonl"
+    assert restored_old.transcript_ref == ""
+
+
+def test_agent_trace_round_trips_tool_calls_and_loads_old_defaults():
+    trace = AgentTrace(
+        id="trace-tools",
+        cycle=1,
+        agent="meta_review",
+        action="summarize",
+        tool_calls=[
+            {
+                "id": "tool-1",
+                "tool_name": "evidence_store.retrieve",
+                "query": "coding-agent benchmarks",
+                "retrieval_method": "hybrid",
+                "evidence_refs": ["ev-1"],
+                "citations": ["paper.md > Benchmarks"],
+                "status": "ok",
+            }
+        ],
+    )
+    old_trace = trace.to_dict()
+    old_trace.pop("tool_calls")
+
+    restored = AgentTrace.from_dict(trace.to_dict())
+    restored_old = AgentTrace.from_dict(old_trace)
+
+    assert restored.tool_calls[0]["tool_name"] == "evidence_store.retrieve"
+    assert restored.tool_calls[0]["evidence_refs"] == ["ev-1"]
+    assert restored_old.tool_calls == []
+
+
 def test_retrieval_memory_round_trips_and_loads_old_defaults():
     record = RetrievalMemoryRecord(
         id="retrieval-1",
@@ -404,6 +454,29 @@ def test_retrieval_memory_round_trips_and_loads_old_defaults():
     assert restored_old_record.citations == []
     assert restored_old_record.reason == ""
     assert restored_old_state.retrieval_memory == []
+
+
+def test_task_round_trips_worker_state_and_loads_old_defaults():
+    task = Task(
+        id="task-generate",
+        kind="generate",
+        priority=1.0,
+        status="queued",
+        worker_state={
+            "phase": "queued",
+            "last_event": "scheduled",
+            "attempt": 0,
+        },
+    )
+    old_task = task.to_dict()
+    old_task.pop("worker_state")
+
+    restored = Task.from_dict(task.to_dict())
+    restored_old = Task.from_dict(old_task)
+
+    assert restored.worker_state["last_event"] == "scheduled"
+    assert restored.worker_state["attempt"] == 0
+    assert restored_old.worker_state == {}
 
 
 def test_review_round_trips_review_trace_and_loads_old_defaults():
@@ -486,6 +559,8 @@ def test_run_state_round_trips_phase_six_evaluations():
         measured_metrics={"pass_rate": 0.7},
         deltas={"pass_rate": 0.2},
         success=True,
+        measurement_source="held_out_repair_suite",
+        measurement_status="measured",
         notes=["Candidate implemented."],
     )
     scaling = ScalingCurvePoint(
@@ -522,6 +597,25 @@ def test_run_state_round_trips_phase_six_evaluations():
     assert restored.prospective_evaluations == [prospective]
     assert restored.scaling_curve == [scaling]
     assert restored.safety_evaluations == [safety]
+
+
+def test_prospective_evaluation_loads_old_state_with_proxy_defaults():
+    restored = ProspectiveEvaluation.from_dict(
+        {
+            "id": "prospect-old",
+            "hypothesis_id": "hyp-old",
+            "status": "measured",
+            "implementation_refs": ["branch/old"],
+            "baseline_metrics": {"pass_rate": 0.5},
+            "measured_metrics": {"pass_rate": 0.6},
+            "deltas": {"pass_rate": 0.1},
+            "success": True,
+        }
+    )
+
+    assert restored.measurement_source == "proxy"
+    assert restored.measurement_status == "proxy"
+    assert restored.notes == []
 
 
 def test_run_state_loads_old_state_without_plan_or_context_memory():

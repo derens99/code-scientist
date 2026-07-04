@@ -15,6 +15,7 @@ from code_scientist.models import (
     ResearchPlanConfig,
     Review,
     RunState,
+    SafetyDecision,
     TestPlan,
     UserFeedback,
 )
@@ -26,10 +27,12 @@ from code_scientist.supervisor import (
     fail_task,
     pick_next_task,
     prepare_task_queue_for_resume,
+    rescore_task_queue,
     run_continuous_research,
     run_research_cycle,
     run_task_worker,
     score_task_priority,
+    select_scheduler_task_pool,
     start_task,
 )
 
@@ -217,26 +220,37 @@ def test_task_lifecycle_helpers_transition_statuses():
     running = start_task(task)
     assert running.status == "running"
     assert running.attempts == 1
+    assert running.worker_state["phase"] == "running"
+    assert running.worker_state["last_event"] == "started"
+    assert running.worker_state["attempt"] == 1
 
     retryable = fail_task(running, "temporary provider error", max_attempts=2)
     assert retryable.status == "queued"
     assert retryable.attempts == 1
     assert retryable.error == "temporary provider error"
+    assert retryable.worker_state["last_event"] == "retry_scheduled"
+    assert retryable.worker_state["retryable"] is True
 
     failed = fail_task(start_task(retryable), "permanent provider error", max_attempts=2)
     assert failed.status == "failed"
     assert failed.attempts == 2
     assert failed.error == "permanent provider error"
+    assert failed.worker_state["last_event"] == "failed"
+    assert failed.worker_state["retryable"] is False
 
     deferred = defer_task(task, "paused by control file")
     assert deferred.status == "deferred"
     assert deferred.error == "paused by control file"
+    assert deferred.worker_state["phase"] == "deferred"
+    assert deferred.worker_state["defer_reason"] == "paused by control file"
 
     completed = complete_task(running, ["hyp-1"])
     assert completed.status == "completed"
     assert completed.attempts == 1
     assert completed.result_refs == ["hyp-1"]
     assert completed.error == ""
+    assert completed.worker_state["phase"] == "completed"
+    assert completed.worker_state["result_refs"] == ["hyp-1"]
 
 
 def test_pick_next_task_uses_priority_and_only_queued_tasks():
@@ -412,6 +426,161 @@ def test_score_task_priority_uses_global_preference_rankings():
     )
 
     assert preferred_score > other_score
+
+
+def test_rescore_task_queue_refreshes_stale_queued_work_before_selection():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(goal)
+    fresh = create_task(cycle=4, plan=plan, kind="review", payload={"hypothesis_id": "hyp-fresh"})
+    stale = create_task(cycle=1, plan=plan, kind="review", payload={"hypothesis_id": "hyp-stale"})
+
+    rescored = rescore_task_queue([fresh, stale], plan=plan, current_cycle=4)
+    by_id = {task.id: task for task in rescored}
+
+    assert by_id[stale.id].priority > by_id[fresh.id].priority
+    assert pick_next_task(rescored) == by_id[stale.id]
+
+
+def test_select_scheduler_task_pool_uses_state_signals_across_ready_kinds():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = replace(
+        ResearchPlanConfig.from_goal(goal),
+        scheduler_weights={
+            "generation": 0.4,
+            "reflection": 1.0,
+            "proximity": 0.7,
+            "ranking": 1.2,
+            "evolution": 0.6,
+            "meta_review": 0.2,
+        },
+    )
+    stale_review_target = _hypothesis("hyp-stale", evidence_refs=[])
+    clustered_target = _hypothesis("hyp-clustered", evidence_refs=["ev-1"])
+    preferred_target = _hypothesis("hyp-preferred", elo=1450, evidence_refs=["ev-2"])
+    other = _hypothesis("hyp-other", evidence_refs=["ev-3"])
+    reviews = [
+        Review(
+            id="rev-other",
+            hypothesis_id=other.id,
+            decision="accept",
+            scores={"alignment": 4},
+            strengths=[],
+            weaknesses=[],
+            safety_notes=[],
+            evidence_refs=["ev-3"],
+        )
+    ]
+    proximity_edges = [
+        ProximityEdge(
+            source=clustered_target.id,
+            target=other.id,
+            similarity=0.88,
+            method="embedding_proximity",
+            reason="Shared benchmark failure mode.",
+            cluster_id="cluster-benchmark",
+            evidence_refs=["ev-1"],
+        )
+    ]
+    feedback = [
+        UserFeedback(
+            id="feedback-preferred",
+            kind="preference_ranking",
+            target_id=goal.id,
+            content="Prefer hyp-preferred over hyp-other for the next tournament.",
+            influence="scheduler_boost",
+        )
+    ]
+    tasks = [
+        create_task(cycle=4, plan=plan, kind="generate", payload={}),
+        create_task(cycle=1, plan=plan, kind="review", payload={"hypothesis_id": stale_review_target.id}),
+        create_task(cycle=4, plan=plan, kind="proximity", payload={"hypothesis_id": clustered_target.id}),
+        create_task(cycle=4, plan=plan, kind="ranking", payload={"hypothesis_id": preferred_target.id}),
+        create_task(cycle=4, plan=plan, kind="meta_review", payload={}),
+    ]
+
+    selected = select_scheduler_task_pool(
+        tasks,
+        plan=plan,
+        hypotheses=[stale_review_target, clustered_target, preferred_target, other],
+        reviews=reviews,
+        proximity_edges=proximity_edges,
+        user_feedback=feedback,
+        current_cycle=4,
+        max_pool_size=3,
+    )
+
+    assert [task.kind for task in selected] == ["ranking", "review", "proximity"]
+    assert selected[0].payload["hypothesis_id"] == preferred_target.id
+    assert selected[1].payload["hypothesis_id"] == stale_review_target.id
+    assert selected[2].payload["hypothesis_id"] == clustered_target.id
+    assert all(task.status == "queued" for task in selected)
+
+
+def test_select_scheduler_task_pool_records_durable_decision_signals():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = replace(
+        ResearchPlanConfig.from_goal(goal),
+        scheduler_weights={
+            "generation": 0.4,
+            "reflection": 1.0,
+            "proximity": 0.7,
+            "ranking": 1.2,
+            "evolution": 0.6,
+            "meta_review": 0.2,
+        },
+    )
+    stale_target = _hypothesis("hyp-stale", evidence_refs=[])
+    clustered_target = _hypothesis("hyp-clustered", evidence_refs=["ev-1"])
+    preferred_target = _hypothesis("hyp-preferred", elo=1450, evidence_refs=["ev-2"])
+    other = _hypothesis("hyp-other", evidence_refs=["ev-3"])
+    proximity_edges = [
+        ProximityEdge(
+            source=clustered_target.id,
+            target=other.id,
+            similarity=0.88,
+            method="embedding_proximity",
+            reason="Shared benchmark failure mode.",
+            cluster_id="cluster-benchmark",
+            evidence_refs=["ev-1"],
+        )
+    ]
+    feedback = [
+        UserFeedback(
+            id="feedback-preferred",
+            kind="preference_ranking",
+            target_id=goal.id,
+            content="Prefer hyp-preferred over hyp-other for the next tournament.",
+            influence="scheduler_boost",
+        )
+    ]
+    tasks = [
+        create_task(cycle=4, plan=plan, kind="generate", payload={}),
+        create_task(cycle=1, plan=plan, kind="review", payload={"hypothesis_id": stale_target.id}),
+        create_task(cycle=4, plan=plan, kind="proximity", payload={"hypothesis_id": clustered_target.id}),
+        create_task(cycle=4, plan=plan, kind="ranking", payload={"hypothesis_id": preferred_target.id}),
+    ]
+
+    selected = select_scheduler_task_pool(
+        tasks,
+        plan=plan,
+        hypotheses=[stale_target, clustered_target, preferred_target, other],
+        proximity_edges=proximity_edges,
+        user_feedback=feedback,
+        current_cycle=4,
+        max_pool_size=3,
+    )
+
+    decisions = [task.worker_state["scheduler_decision"] for task in selected]
+    assert [decision["rank"] for decision in decisions] == [1, 2, 3]
+    assert decisions[0]["score"] == selected[0].priority
+    assert decisions[0]["candidate_count"] == 4
+    assert decisions[0]["pool_size"] == 3
+    assert "weight:ranking" in decisions[0]["signals"]
+    assert "user_feedback:feedback-preferred" in decisions[0]["signals"]
+    assert "stale_work:3" in decisions[1]["signals"]
+    assert "missing_evidence" in decisions[1]["signals"]
+    assert "review_gap" in decisions[1]["signals"]
+    assert "proximity_cluster:cluster-benchmark" in decisions[2]["signals"]
 
 
 def test_schedule_pairs_prioritizes_embedding_deduplication_controls():
@@ -1157,6 +1326,37 @@ def test_supervisor_anthropic_provider_drives_plan_and_all_agent_roles(tmp_path)
         and "repository traces" in interaction["response"].lower()
         for trace in traces_with_llm_interactions
         for interaction in trace.llm_interactions
+    )
+    transcript_agents: set[str] = set()
+    for trace in traces_with_llm_interactions:
+        transcript_path = tmp_path / "run" / trace.transcript_ref
+        assert transcript_path.exists()
+        transcript_records = [
+            json.loads(line)
+            for line in transcript_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert transcript_records
+        assert {record["trace_id"] for record in transcript_records} == {trace.id}
+        assert {record["agent"] for record in transcript_records} == {trace.agent}
+        assert all(record["prompt"] and record["response"] for record in transcript_records)
+        transcript_tool_calls = [
+            call
+            for record in transcript_records
+            for call in record["tool_calls"]
+        ]
+        assert any(call["tool_name"] == "llm.complete" for call in transcript_tool_calls)
+        if trace.tool_calls:
+            assert any(
+                call["tool_name"].startswith("evidence_store.")
+                for call in transcript_tool_calls
+            )
+        transcript_agents.add(trace.transcript_ref.split("/")[1])
+    assert {"generation", "reflection", "ranking", "meta_review"} <= transcript_agents
+    assert any(
+        call["tool_name"].startswith("evidence_store.")
+        for trace in traces_with_llm_interactions
+        for call in trace.tool_calls
     )
 
 
@@ -2337,6 +2537,227 @@ def test_task_queue_priorities_reflect_scheduler_weights(tmp_path):
     assert generation_priority > meta_priority
 
 
+def test_scheduler_runs_ready_tasks_by_priority_instead_of_fixed_phase_order(tmp_path):
+    objective = "Find testable ideas to improve LLM coding agents"
+    goal = ResearchGoal.from_objective(objective)
+    plan = replace(
+        ResearchPlanConfig.from_goal(goal),
+        scheduler_weights={
+            "generation": 1.0,
+            "reflection": 1.0,
+            "proximity": 0.05,
+            "ranking": 4.0,
+            "evolution": 0.1,
+            "meta_review": 0.1,
+        },
+    )
+
+    state = run_research_cycle(
+        objective=objective,
+        cycles=1,
+        max_hypotheses=4,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        plan_config=plan,
+    )
+
+    executed_agents = [trace.agent for trace in state.agent_traces]
+    assert "ranking" in executed_agents
+    assert "proximity" in executed_agents
+    assert executed_agents.index("ranking") < executed_agents.index("proximity")
+    ranking_task = next(task for task in state.task_queue if task.kind == "ranking")
+    proximity_task = next(task for task in state.task_queue if task.kind == "proximity")
+    assert ranking_task.worker_state["scheduler_decision"]["rank"] == 1
+    assert ranking_task.worker_state["scheduler_decision"]["candidate_count"] == 2
+    assert "weight:ranking" in ranking_task.worker_state["scheduler_decision"]["signals"]
+    assert proximity_task.worker_state["scheduler_decision"]["rank"] == 2
+
+
+def test_scheduler_prioritizes_feedback_targeted_review_tasks(tmp_path, monkeypatch):
+    objective = "Find testable ideas to improve LLM coding agents"
+    goal = ResearchGoal.from_objective(objective)
+    plan = ResearchPlanConfig.from_goal(goal)
+    targeted = _hypothesis("hyp-review-priority")
+    other = _hypothesis("hyp-review-other")
+    initial = RunState(
+        goal=goal,
+        plan=plan,
+        safety=SafetyDecision(allowed=True, reason="Allowed", flags=[]),
+        user_feedback=[
+            UserFeedback(
+                id="feedback-review-priority",
+                kind="verification_request",
+                target_id=targeted.id,
+                content="Prioritize this hypothesis review before adjacent review work.",
+                influence="scheduler_boost",
+            )
+        ],
+    )
+    out_dir = tmp_path / "run"
+    out_dir.mkdir()
+    (out_dir / "state.json").write_text(json.dumps(initial.to_dict()), encoding="utf-8")
+
+    def fake_generate_for_plan(**_kwargs):
+        return [targeted, other]
+
+    monkeypatch.setattr(supervisor_module, "_generate_for_plan", fake_generate_for_plan)
+
+    state = run_research_cycle(
+        objective=objective,
+        cycles=1,
+        max_hypotheses=2,
+        max_matches=1,
+        out_dir=out_dir,
+        plan_config=plan,
+        resume=True,
+    )
+
+    review_tasks = [task for task in state.task_queue if task.kind == "review"]
+    assert len(review_tasks) == 2
+    by_hypothesis_id = {task.payload["hypothesis_id"]: task for task in review_tasks}
+    targeted_decision = by_hypothesis_id[targeted.id].worker_state["scheduler_decision"]
+    other_decision = by_hypothesis_id[other.id].worker_state["scheduler_decision"]
+    assert targeted_decision["rank"] == 1
+    assert other_decision["rank"] == 2
+    assert targeted_decision["candidate_count"] == 2
+    assert "user_feedback:feedback-review-priority" in targeted_decision["signals"]
+
+
+def test_scheduler_runs_resumed_feedback_review_before_new_generation(tmp_path, monkeypatch):
+    objective = "Find testable ideas to improve LLM coding agents"
+    goal = ResearchGoal.from_objective(objective)
+    plan = replace(
+        ResearchPlanConfig.from_goal(goal),
+        scheduler_weights={
+            "generation": 0.05,
+            "reflection": 1.0,
+            "review": 5.0,
+            "proximity": 0.5,
+            "ranking": 0.5,
+            "evolution": 0.1,
+            "meta_review": 0.1,
+        },
+    )
+    targeted = _hypothesis("hyp-resumed-review").with_status("accepted")
+    generated = _hypothesis("hyp-new-generated")
+    queued_review = create_task(
+        cycle=1,
+        plan=plan,
+        kind="review",
+        payload={
+            "review_types": plan.review_types,
+            "hypothesis_id": targeted.id,
+            "hypothesis_ids": [targeted.id],
+        },
+    )
+    initial = RunState(
+        goal=goal,
+        plan=plan,
+        safety=SafetyDecision(allowed=True, reason="Allowed", flags=[]),
+        hypotheses=[targeted],
+        task_queue=[queued_review],
+        user_feedback=[
+            UserFeedback(
+                id="feedback-resumed-review",
+                kind="verification_request",
+                target_id=targeted.id,
+                content="Review the existing hypothesis before generating more.",
+                influence="scheduler_boost",
+            )
+        ],
+    )
+    out_dir = tmp_path / "run"
+    out_dir.mkdir()
+    (out_dir / "state.json").write_text(json.dumps(initial.to_dict()), encoding="utf-8")
+    executed: list[str] = []
+
+    def fake_generate_for_plan(**_kwargs):
+        executed.append("generate")
+        return [generated]
+
+    def fake_review_for_plan(**kwargs):
+        reviews: list[Review] = []
+        for hypothesis in kwargs["hypotheses"]:
+            executed.append(f"review:{hypothesis.id}")
+            reviews.append(
+                Review(
+                    id=f"review-{hypothesis.id}",
+                    hypothesis_id=hypothesis.id,
+                    decision="accept",
+                    scores={"alignment": 5},
+                    strengths=["Specific enough to test."],
+                    weaknesses=[],
+                    safety_notes=[],
+                    review_type="initial_review",
+                    confidence=0.8,
+                    requires_revision=False,
+                )
+            )
+        return reviews
+
+    monkeypatch.setattr(supervisor_module, "_generate_for_plan", fake_generate_for_plan)
+    monkeypatch.setattr(supervisor_module, "_review_for_plan", fake_review_for_plan)
+
+    state = run_research_cycle(
+        objective=objective,
+        cycles=1,
+        max_hypotheses=2,
+        max_matches=1,
+        out_dir=out_dir,
+        plan_config=plan,
+        resume=True,
+    )
+
+    assert executed[0] == f"review:{targeted.id}"
+    assert executed.index(f"review:{targeted.id}") < executed.index("generate")
+    review_task = next(
+        task
+        for task in state.task_queue
+        if task.kind == "review" and task.payload.get("hypothesis_id") == targeted.id
+    )
+    generate_task = next(task for task in state.task_queue if task.kind == "generate")
+    assert review_task.status == "completed"
+    assert review_task.worker_state["scheduler_decision"]["rank"] == 1
+    assert "user_feedback:feedback-resumed-review" in review_task.worker_state["scheduler_decision"]["signals"]
+    assert generate_task.worker_state["scheduler_decision"]["rank"] > review_task.worker_state["scheduler_decision"]["rank"]
+
+
+def test_scheduler_can_run_meta_review_before_evolution_when_weighted_higher(tmp_path):
+    objective = "Find testable ideas to improve LLM coding agents"
+    goal = ResearchGoal.from_objective(objective)
+    plan = replace(
+        ResearchPlanConfig.from_goal(goal),
+        scheduler_weights={
+            "generation": 1.0,
+            "reflection": 1.0,
+            "proximity": 0.5,
+            "ranking": 1.0,
+            "evolution": 0.05,
+            "meta_review": 4.0,
+        },
+    )
+
+    state = run_research_cycle(
+        objective=objective,
+        cycles=1,
+        max_hypotheses=5,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        plan_config=plan,
+    )
+
+    executed_agents = [trace.agent for trace in state.agent_traces]
+    assert "meta_review" in executed_agents
+    assert "evolution" in executed_agents
+    assert executed_agents.index("meta_review") < executed_agents.index("evolution")
+    meta_task = next(task for task in state.task_queue if task.kind == "meta_review")
+    evolution_task = next(task for task in state.task_queue if task.kind == "evolution")
+    assert meta_task.worker_state["scheduler_decision"]["rank"] == 1
+    assert evolution_task.worker_state["scheduler_decision"]["rank"] == 2
+    assert meta_task.worker_state["scheduler_decision"]["candidate_count"] == 2
+    assert "weight:meta_review" in meta_task.worker_state["scheduler_decision"]["signals"]
+
+
 def test_supervisor_marks_blocked_unsafe_goals(tmp_path):
     out_dir = tmp_path / "run"
     state = run_research_cycle(
@@ -2839,6 +3260,39 @@ def test_supervisor_generates_publication_grant_and_contact_artifacts(tmp_path):
     assert contacts.contact_targets
     assert any(trace.agent == "research_outputs" for trace in state.agent_traces)
     assert any(task.kind == "research_outputs" for task in state.task_queue)
+
+
+def test_continuous_supervisor_writes_initial_state_before_evidence_collection(tmp_path, monkeypatch):
+    out_dir = tmp_path / "run"
+    observed: dict[str, object] = {}
+
+    def collect_probe(**_kwargs):
+        state_path = out_dir / "state.json"
+        observed["state_existed"] = state_path.exists()
+        if state_path.exists():
+            initial_state = RunState.from_dict(json.loads(state_path.read_text()))
+            observed["run_status"] = initial_state.run_status
+            observed["objective"] = initial_state.goal.objective
+            observed["has_plan"] = initial_state.plan is not None
+        return [], []
+
+    monkeypatch.setattr(supervisor_module, "_collect_plan_governed_evidence", collect_probe)
+
+    run_continuous_research(
+        objective="Find testable ideas to improve LLM coding agents",
+        max_hypotheses=4,
+        max_matches=1,
+        out_dir=out_dir,
+        interval_seconds=0,
+        max_continuous_cycles=0,
+    )
+
+    assert observed == {
+        "state_existed": True,
+        "run_status": "running",
+        "objective": "Find testable ideas to improve LLM coding agents",
+        "has_plan": True,
+    }
 
 
 def test_continuous_supervisor_stops_from_control_file_after_cycle(tmp_path):

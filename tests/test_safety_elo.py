@@ -378,15 +378,36 @@ def test_model_safety_critic_quarantines_evidence_before_agent_use():
 def test_safety_red_team_suite_reports_measurable_pass_fail_results():
     result = run_safety_red_team_suite()
     summary = summarize_safety_red_team_suite(result)
+    cases_by_id = {case.id: case for case in result.cases}
 
-    assert result.case_count >= 4
+    assert result.case_count >= 8
     assert result.failed_count == 0
     assert result.pass_rate == 1.0
-    assert "retrieved-source-prompt-injection" in {case.id for case in result.cases}
+    assert {
+        "retrieved-source-prompt-injection",
+        "hypothesis-benchmark-gaming",
+        "hypothesis-unsafe-repo-mutation",
+        "evidence-credential-leakage",
+        "benchmark-gaming",
+        "unsafe-repo-mutation",
+        "credential-leakage",
+        "unreviewed-deployment",
+    } <= cases_by_id.keys()
+    assert {case.subject_type for case in result.cases} >= {"goal", "hypothesis", "evidence"}
+    assert cases_by_id["retrieved-source-prompt-injection"].subject_type == "evidence"
+    assert cases_by_id["hypothesis-benchmark-gaming"].subject_type == "hypothesis"
+    assert cases_by_id["hypothesis-unsafe-repo-mutation"].subject_type == "hypothesis"
+    assert "benchmark-gaming" in cases_by_id["benchmark-gaming"].flags
+    assert "benchmark-gaming" in cases_by_id["hypothesis-benchmark-gaming"].flags
+    assert "unsafe-repo-mutation" in cases_by_id["unsafe-repo-mutation"].flags
+    assert "unsafe-repo-mutation" in cases_by_id["hypothesis-unsafe-repo-mutation"].flags
+    assert "credential-exfiltration" in cases_by_id["credential-leakage"].flags
+    assert "credential-exfiltration" in cases_by_id["evidence-credential-leakage"].flags
     assert summary.case_count == result.case_count
     assert summary.passed_count == result.passed_count
     assert summary.failed_case_ids == []
     assert summary.pass_rate == 1.0
+    assert any("benchmark gaming" in note for note in summary.notes)
 
 
 def test_update_elo_moves_winner_up_and_loser_down():

@@ -13,6 +13,7 @@ import type {
 import type { Hypothesis } from "@/lib/types";
 
 type HumanInputPanelProps = {
+  goalId: string;
   selectedHypothesis: Hypothesis | null;
   submitting: boolean;
   goalPreferences: string[];
@@ -27,6 +28,7 @@ type HumanInputPanelProps = {
 };
 
 export function HumanInputPanel({
+  goalId,
   selectedHypothesis,
   submitting,
   goalPreferences,
@@ -71,14 +73,29 @@ export function HumanInputPanel({
     setSourceSelection(allowedSources.join(", "));
   }, [allowedSources, goalConstraints, goalPreferences]);
 
+  const feedbackKindValue = selectedHypothesis ? feedbackKind : "goal_refinement";
+  const feedbackKindOptions = selectedHypothesis
+    ? [
+        { value: "preference", label: "Preference" },
+        { value: "preference_ranking", label: "Preference ranking" },
+        { value: "verification_request", label: "Verification" },
+        { value: "constraint", label: "Constraint" }
+      ]
+    : [
+        { value: "goal_refinement", label: "Goal refinement" },
+        { value: "constraint", label: "Constraint" },
+        { value: "preference", label: "Preference" }
+      ];
+
   async function submitFeedback(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selectedHypothesis) {
+    const targetId = selectedHypothesis?.id ?? goalId;
+    if (!targetId) {
       return;
     }
     await onFeedback({
-      targetId: selectedHypothesis.id,
-      kind: feedbackKind,
+      targetId,
+      kind: feedbackKindValue,
       influence: feedbackInfluence,
       content: feedbackContent
     });
@@ -203,14 +220,9 @@ export function HumanInputPanel({
                 <Group grow align="flex-start">
                   <Select
                     label="Kind"
-                    value={feedbackKind}
+                    value={feedbackKindValue}
                     onChange={(value) => setFeedbackKind(value ?? "preference")}
-                    data={[
-                      { value: "preference", label: "Preference" },
-                      { value: "preference_ranking", label: "Preference ranking" },
-                      { value: "verification_request", label: "Verification" },
-                      { value: "constraint", label: "Constraint" }
-                    ]}
+                    data={feedbackKindOptions}
                   />
                   <Select
                     label="Influence"
@@ -233,10 +245,10 @@ export function HumanInputPanel({
                 <Button
                   type="submit"
                   leftSection={<MessageSquarePlus size={16} />}
-                  disabled={!selectedHypothesis || !feedbackContent.trim()}
+                  disabled={!feedbackContent.trim()}
                   loading={submitting}
                 >
-                  Add feedback
+                  {selectedHypothesis ? "Add feedback" : "Add goal refinement"}
                 </Button>
               </Stack>
             </form>

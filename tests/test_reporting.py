@@ -665,6 +665,8 @@ def test_render_report_includes_task_queue_counts(tmp_path):
     assert "completed" in report
     assert "generate" in report
     assert "ranking" in report
+    assert "Scheduler decision" in report
+    assert "weight:ranking" in report
 
 
 def test_render_report_includes_agent_specific_meta_review_feedback(tmp_path):
@@ -717,6 +719,7 @@ def test_render_report_links_agent_traces_to_task_records(tmp_path):
     assert trace_task_ids
     assert trace_task_ids <= task_ids
     assert any(f"Task: {task_id}" in report for task_id in trace_task_ids)
+    assert any(f"Transcript: {trace.transcript_ref}" in report for trace in state.agent_traces if trace.transcript_ref)
 
 
 def test_render_report_includes_agent_trace_llm_interactions(tmp_path):
@@ -767,6 +770,14 @@ def test_render_report_includes_retrieval_memory_and_scratchpads(tmp_path):
             "retrieval query: repo-aware idea search",
             "worker note: selected benchmark-backed evidence",
         ],
+        tool_calls=[
+            {
+                "tool_name": "evidence_store.retrieve",
+                "status": "ok",
+                "query": "repo-aware idea search",
+                "evidence_refs": ["ev-1", "ev-2"],
+            }
+        ],
     )
     state = state.__class__.from_dict(
         {
@@ -796,6 +807,8 @@ def test_render_report_includes_retrieval_memory_and_scratchpads(tmp_path):
     assert "Evidence refs: ev-1, ev-2" in report
     assert "Scratchpad:" in report
     assert "retrieval query: repo-aware idea search" in report
+    assert "Tool calls: 1" in report
+    assert "evidence_store.retrieve: ok" in report
 
 
 def test_render_report_includes_capability_evaluation(tmp_path):
@@ -876,6 +889,8 @@ def test_render_report_includes_prospective_scaling_and_safety_evaluations(tmp_p
         measured_metrics={"pass_rate": 0.7, "regression_count": 1.0},
         deltas={"pass_rate": 0.2, "regression_count": -1.0},
         success=True,
+        measurement_source="held_out_repair_suite",
+        measurement_status="measured",
         notes=["Candidate was implemented against a local benchmark."],
     )
     scaling = ScalingCurvePoint(
@@ -913,6 +928,7 @@ def test_render_report_includes_prospective_scaling_and_safety_evaluations(tmp_p
 
     assert "## Prospective Evaluation" in report
     assert "branch/candidate-workflow" in report
+    assert "Measurement: measured via held_out_repair_suite" in report
     assert "pass_rate: baseline 0.5, measured 0.7, delta +0.2" in report
     assert "## Scaling Curve" in report
     assert "cycles-2-tools-20" in report

@@ -506,6 +506,8 @@ def _prospective_template() -> dict[str, Any]:
             "cost": 0.0,
         },
         "success_metric": "pass_rate",
+        "measurement_source": "replace-with-validation-source",
+        "measurement_status": "measured",
         "notes": [
             "Replace placeholder values after implementing or externally measuring a selected hypothesis.",
         ],
@@ -547,7 +549,9 @@ winner/no-preference choice instead of rubric scores. Use
 `code-scientist feedback-loop-review-packet` after selecting before/after
 feedback-loop artifacts. Use
 `validation/prospective-validation-template.json` as the shape for measured
-implementation outcomes, or add a no-shell command-list `command` field and run
+implementation outcomes. Replace `measurement_source` with the held-out suite,
+blind review, or deployment artifact that produced the numbers, or add a
+no-shell command-list `command` field and run
 `code-scientist prospective-validation-run` to produce the measured fixture.
 Study-run manifests can also include per-goal
 `prospective_validation_manifests` when the validation command should run as
