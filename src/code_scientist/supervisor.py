@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections import Counter
 from collections.abc import Callable
@@ -67,6 +68,74 @@ _INACTIVE_STATUSES = {"merged_duplicate", "quarantined"}
 
 def _active_hypotheses(hypotheses: list[Hypothesis]) -> list[Hypothesis]:
     return [item for item in hypotheses if item.status not in _INACTIVE_STATUSES]
+
+
+# Default-plan termination strings that describe run-level bounds enforced
+# elsewhere (fixed cycle count, max hypotheses, human/control-file stop). They
+# are silently skipped here rather than reported as unevaluated.
+_TERMINATION_IGNORE = {"max_cycles", "max_hypotheses", "human_stop"}
+_ELO_PLATEAU_DEFAULT = 2
+
+
+def evaluate_termination_criteria(
+    plan: ResearchPlanConfig,
+    hypotheses: list[Hypothesis],
+    reviews: list[Review],
+    context_snapshots: list[ContextSnapshot],
+) -> str | None:
+    """Deterministically evaluate free-text plan termination criteria.
+
+    Returns a stable reason string for the first criterion that fires, or None
+    when no criterion terminates the run. Unrecognized criteria do not
+    terminate; they are recorded as ``unevaluated:<text>`` on the latest
+    snapshot's ``next_actions``.
+    """
+
+    active = _active_hypotheses(hypotheses)
+
+    for raw in plan.termination_criteria:
+        criterion = raw.strip()
+        normalized = criterion.lower()
+        if not normalized or normalized in _TERMINATION_IGNORE:
+            continue
+
+        digits = re.findall(r"\d+", normalized)
+
+        if normalized.startswith("min_hypotheses") or (
+            "at least" in normalized and "hypothes" in normalized
+        ):
+            threshold = int(digits[0]) if digits else 1
+            if len(active) >= threshold:
+                return f"min_hypotheses:{threshold}"
+            continue
+
+        if normalized.startswith("elo_plateau") or "elo plateau" in normalized:
+            window = int(digits[0]) if digits else _ELO_PLATEAU_DEFAULT
+            if window >= 1 and len(context_snapshots) >= window:
+                recent = context_snapshots[-window:]
+                tops = [snapshot.top_hypothesis_ids[:1] for snapshot in recent]
+                if all(top and top == tops[0] for top in tops):
+                    return f"elo_plateau:{window}"
+            continue
+
+        if normalized == "all_reviewed" or "all reviewed" in normalized:
+            if active:
+                reviewed_ids = {review.hypothesis_id for review in reviews}
+                if all(item.id in reviewed_ids for item in active):
+                    return "all_reviewed"
+            continue
+
+        # Unrecognized criterion: record it (do not terminate).
+        if context_snapshots:
+            latest = context_snapshots[-1]
+            marker = f"unevaluated:{criterion}"
+            if marker not in latest.next_actions:
+                context_snapshots[-1] = replace(
+                    latest,
+                    next_actions=[*latest.next_actions, marker],
+                )
+
+    return None
 
 
 def run_research_cycle(
@@ -967,6 +1036,16 @@ def run_research_cycle(
                     max_hypotheses=max_hypotheses,
                 )
             )
+            termination_reason = evaluate_termination_criteria(
+                plan, hypotheses, reviews, context_snapshots
+            )
+            if termination_reason:
+                context_snapshots[-1] = replace(
+                    context_snapshots[-1], termination_reason=termination_reason
+                )
+                state = current_state(run_status, task_queue)
+                _write_state(state_path, state)
+                break
             state = current_state(run_status, task_queue)
             _write_state(state_path, state)
     except _TaskDeferred as deferred:
@@ -1120,6 +1199,9 @@ def run_continuous_research(
         completed_cycles += 1
         if after_cycle:
             after_cycle(state)
+
+        if state.context_snapshots and state.context_snapshots[-1].termination_reason:
+            return _set_run_status(state_path, "completed")
 
         action = _read_control_action(control_path)
         if action == "stop":

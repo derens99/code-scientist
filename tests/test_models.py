@@ -306,6 +306,30 @@ def test_run_state_round_trips_to_dict():
     assert restored.context_snapshots[0].next_actions == ["run_proximity_guided_tournament_matches"]
 
 
+def test_context_snapshot_round_trips_termination_reason_and_defaults_old_state():
+    old_dict_without_key = {
+        "id": "ctx-1",
+        "cycle": 1,
+        "generated_total": 2,
+        "accepted_total": 2,
+        "review_total": 2,
+        "match_total": 1,
+        "meta_review_total": 1,
+        "top_hypothesis_ids": ["hyp-1"],
+        "origin_counts": {"generation": 2},
+        "status_counts": {"accepted": 2},
+        "proximity_edge_count": 1,
+        "scheduler_weights": {"ranking": 1.5},
+        "next_actions": ["run_proximity_guided_tournament_matches"],
+    }
+
+    restored = ContextSnapshot.from_dict(old_dict_without_key)
+    assert restored.termination_reason == ""
+
+    old_dict_without_key["termination_reason"] = "min_hypotheses:2"
+    assert ContextSnapshot.from_dict(old_dict_without_key).termination_reason == "min_hypotheses:2"
+
+
 def test_agent_trace_from_dict_defaults_task_id_for_old_state_files():
     trace = AgentTrace.from_dict(
         {

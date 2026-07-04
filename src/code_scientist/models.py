@@ -893,13 +893,16 @@ class ContextSnapshot:
     proximity_edge_count: int
     scheduler_weights: dict[str, float]
     next_actions: list[str]
+    termination_reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ContextSnapshot:
-        return cls(**data)
+        copied = dict(data)
+        copied.setdefault("termination_reason", "")
+        return cls(**copied)
 
 
 @dataclass(frozen=True)

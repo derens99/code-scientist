@@ -25,6 +25,7 @@ from code_scientist.supervisor import (
     complete_task,
     create_task,
     defer_task,
+    evaluate_termination_criteria,
     fail_task,
     pick_next_task,
     prepare_task_queue_for_resume,
@@ -3440,3 +3441,123 @@ def test_llm_safety_review_reject_is_quarantined():
     result = supervisor_module._apply_safety_quarantine([unsafe], [llm_reject])
 
     assert [item.status for item in result] == ["quarantined"]
+
+
+def _termination_snapshot(cycle: int, top_ids: list[str]) -> ContextSnapshot:
+    return ContextSnapshot(
+        id=f"ctx-{cycle}",
+        cycle=cycle,
+        generated_total=len(top_ids),
+        accepted_total=len(top_ids),
+        review_total=0,
+        match_total=0,
+        meta_review_total=0,
+        top_hypothesis_ids=list(top_ids),
+        origin_counts={},
+        status_counts={},
+        proximity_edge_count=0,
+        scheduler_weights={},
+        next_actions=[],
+    )
+
+
+def test_evaluate_termination_criteria_min_hypotheses():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(goal, termination_criteria=["min_hypotheses: 2"])
+    hypotheses = [_hypothesis("hyp-a"), _hypothesis("hyp-b")]
+
+    assert (
+        evaluate_termination_criteria(plan, hypotheses, [], [_termination_snapshot(1, ["hyp-a"])])
+        == "min_hypotheses:2"
+    )
+    # Below the threshold -> no termination.
+    assert (
+        evaluate_termination_criteria(plan, hypotheses[:1], [], [_termination_snapshot(1, ["hyp-a"])])
+        is None
+    )
+
+
+def test_evaluate_termination_criteria_ignores_default_plan_criteria():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(goal)
+    assert plan.termination_criteria == ["max_cycles", "max_hypotheses", "human_stop"]
+    hypotheses = [_hypothesis("hyp-a"), _hypothesis("hyp-b")]
+
+    assert (
+        evaluate_termination_criteria(plan, hypotheses, [], [_termination_snapshot(1, ["hyp-a"])])
+        is None
+    )
+
+
+def test_evaluate_termination_criteria_elo_plateau():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(goal, termination_criteria=["elo_plateau"])
+    hypotheses = [_hypothesis("hyp-a")]
+
+    plateau = [
+        _termination_snapshot(1, ["hyp-a"]),
+        _termination_snapshot(2, ["hyp-a"]),
+    ]
+    assert evaluate_termination_criteria(plan, hypotheses, [], plateau) == "elo_plateau:2"
+
+    changing = [
+        _termination_snapshot(1, ["hyp-b"]),
+        _termination_snapshot(2, ["hyp-a"]),
+    ]
+    assert evaluate_termination_criteria(plan, hypotheses, [], changing) is None
+
+
+def test_evaluate_termination_criteria_all_reviewed():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(goal, termination_criteria=["all_reviewed"])
+    hyp_a = _hypothesis("hyp-a")
+    hyp_b = _hypothesis("hyp-b")
+    review_a = Review(
+        id="rev-a",
+        hypothesis_id="hyp-a",
+        decision="accept",
+        scores={"alignment": 4},
+        strengths=["clear"],
+        weaknesses=[],
+        safety_notes=[],
+    )
+    review_b = Review(
+        id="rev-b",
+        hypothesis_id="hyp-b",
+        decision="accept",
+        scores={"alignment": 4},
+        strengths=["clear"],
+        weaknesses=[],
+        safety_notes=[],
+    )
+
+    assert evaluate_termination_criteria(plan, [hyp_a, hyp_b], [review_a], []) is None
+    assert (
+        evaluate_termination_criteria(plan, [hyp_a, hyp_b], [review_a, review_b], [])
+        == "all_reviewed"
+    )
+
+
+def test_evaluate_termination_criteria_records_unevaluated_criterion():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(goal, termination_criteria=["converged budget"])
+    hypotheses = [_hypothesis("hyp-a")]
+    snapshots = [_termination_snapshot(1, ["hyp-a"])]
+
+    assert evaluate_termination_criteria(plan, hypotheses, [], snapshots) is None
+    assert "unevaluated:converged budget" in snapshots[-1].next_actions
+
+
+def test_run_terminates_early_when_min_hypotheses_criterion_met(tmp_path):
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(goal, termination_criteria=["min_hypotheses: 2"])
+    state = run_research_cycle(
+        objective=goal.objective,
+        cycles=5,
+        max_hypotheses=4,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        plan_config=plan,
+    )
+    assert len(state.context_snapshots) < 5
+    assert state.context_snapshots[-1].termination_reason.startswith("min_hypotheses")
