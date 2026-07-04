@@ -36,6 +36,7 @@ from code_scientist.supervisor import (
     score_task_priority,
     select_scheduler_task_pool,
     start_task,
+    unevaluated_termination_markers,
 )
 
 
@@ -3538,14 +3539,44 @@ def test_evaluate_termination_criteria_all_reviewed():
     )
 
 
-def test_evaluate_termination_criteria_records_unevaluated_criterion():
+def test_unevaluated_termination_markers_are_pure_and_skip_recognized_criteria():
     goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
-    plan = ResearchPlanConfig.from_goal(goal, termination_criteria=["converged budget"])
+    plan = ResearchPlanConfig.from_goal(
+        goal,
+        termination_criteria=[
+            "converged budget",
+            "min_hypotheses: 2",
+            "max_cycles",
+            "converged budget",
+        ],
+    )
+
+    assert unevaluated_termination_markers(plan) == ["unevaluated:converged budget"]
+
+    # The evaluator itself is pure: it neither terminates on nor mutates
+    # anything for unrecognized criteria.
     hypotheses = [_hypothesis("hyp-a")]
     snapshots = [_termination_snapshot(1, ["hyp-a"])]
+    original_actions = list(snapshots[-1].next_actions)
+    unknown_plan = ResearchPlanConfig.from_goal(goal, termination_criteria=["converged budget"])
+    assert evaluate_termination_criteria(unknown_plan, hypotheses, [], snapshots) is None
+    assert snapshots[-1].next_actions == original_actions
 
-    assert evaluate_termination_criteria(plan, hypotheses, [], snapshots) is None
-    assert "unevaluated:converged budget" in snapshots[-1].next_actions
+
+def test_run_records_unevaluated_criterion_in_persisted_snapshot(tmp_path):
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(goal, termination_criteria=["converged budget"])
+    state = run_research_cycle(
+        objective=goal.objective,
+        cycles=1,
+        max_hypotheses=4,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        plan_config=plan,
+    )
+    assert state.context_snapshots
+    assert "unevaluated:converged budget" in state.context_snapshots[-1].next_actions
+    assert state.context_snapshots[-1].termination_reason == ""
 
 
 def test_run_terminates_early_when_min_hypotheses_criterion_met(tmp_path):

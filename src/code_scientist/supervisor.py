@@ -77,6 +77,37 @@ _TERMINATION_IGNORE = {"max_cycles", "max_hypotheses", "human_stop"}
 _ELO_PLATEAU_DEFAULT = 2
 
 
+def _termination_criterion_kind(normalized: str) -> str:
+    """Classify a normalized (stripped, lowercased) termination criterion."""
+    if normalized.startswith("min_hypotheses") or (
+        "at least" in normalized and "hypothes" in normalized
+    ):
+        return "min_hypotheses"
+    if normalized.startswith("elo_plateau") or "elo plateau" in normalized:
+        return "elo_plateau"
+    if normalized == "all_reviewed" or "all reviewed" in normalized:
+        return "all_reviewed"
+    return "unevaluated"
+
+
+def unevaluated_termination_markers(plan: ResearchPlanConfig) -> list[str]:
+    """Pure helper: ``unevaluated:<text>`` markers for plan termination criteria
+    the deterministic evaluator does not recognize (ignore-set entries excluded).
+    """
+    markers: list[str] = []
+    for raw in plan.termination_criteria:
+        criterion = raw.strip()
+        normalized = criterion.lower()
+        if not normalized or normalized in _TERMINATION_IGNORE:
+            continue
+        if _termination_criterion_kind(normalized) != "unevaluated":
+            continue
+        marker = f"unevaluated:{criterion}"
+        if marker not in markers:
+            markers.append(marker)
+    return markers
+
+
 def evaluate_termination_criteria(
     plan: ResearchPlanConfig,
     hypotheses: list[Hypothesis],
@@ -85,55 +116,43 @@ def evaluate_termination_criteria(
 ) -> str | None:
     """Deterministically evaluate free-text plan termination criteria.
 
-    Returns a stable reason string for the first criterion that fires, or None
-    when no criterion terminates the run. Unrecognized criteria do not
-    terminate; they are recorded as ``unevaluated:<text>`` on the latest
-    snapshot's ``next_actions``.
+    Pure: reads its arguments and returns a stable reason string for the first
+    criterion that fires, or None when no criterion terminates the run.
+    Unrecognized criteria never terminate; callers surface them via
+    ``unevaluated_termination_markers`` (recorded on snapshot ``next_actions``).
     """
 
     active = _active_hypotheses(hypotheses)
 
     for raw in plan.termination_criteria:
-        criterion = raw.strip()
-        normalized = criterion.lower()
+        normalized = raw.strip().lower()
         if not normalized or normalized in _TERMINATION_IGNORE:
             continue
 
+        kind = _termination_criterion_kind(normalized)
         digits = re.findall(r"\d+", normalized)
 
-        if normalized.startswith("min_hypotheses") or (
-            "at least" in normalized and "hypothes" in normalized
-        ):
+        if kind == "min_hypotheses":
             threshold = int(digits[0]) if digits else 1
             if len(active) >= threshold:
                 return f"min_hypotheses:{threshold}"
-            continue
 
-        if normalized.startswith("elo_plateau") or "elo plateau" in normalized:
+        elif kind == "elo_plateau":
+            # Deterministic stand-in: an unchanged top-ranked hypothesis id
+            # across the window approximates an Elo plateau; real Elo-history
+            # deltas arrive in a later wave.
             window = int(digits[0]) if digits else _ELO_PLATEAU_DEFAULT
             if window >= 1 and len(context_snapshots) >= window:
                 recent = context_snapshots[-window:]
                 tops = [snapshot.top_hypothesis_ids[:1] for snapshot in recent]
                 if all(top and top == tops[0] for top in tops):
                     return f"elo_plateau:{window}"
-            continue
 
-        if normalized == "all_reviewed" or "all reviewed" in normalized:
+        elif kind == "all_reviewed":
             if active:
                 reviewed_ids = {review.hypothesis_id for review in reviews}
                 if all(item.id in reviewed_ids for item in active):
                     return "all_reviewed"
-            continue
-
-        # Unrecognized criterion: record it (do not terminate).
-        if context_snapshots:
-            latest = context_snapshots[-1]
-            marker = f"unevaluated:{criterion}"
-            if marker not in latest.next_actions:
-                context_snapshots[-1] = replace(
-                    latest,
-                    next_actions=[*latest.next_actions, marker],
-                )
 
     return None
 
@@ -3429,7 +3448,10 @@ def _build_context_snapshot(
         status_counts=dict(Counter(item.status for item in hypotheses)),
         proximity_edge_count=len(proximity_edges),
         scheduler_weights=scheduler_weights,
-        next_actions=_next_actions(hypotheses, reviews, matches, max_hypotheses),
+        next_actions=[
+            *_next_actions(hypotheses, reviews, matches, max_hypotheses),
+            *unevaluated_termination_markers(plan),
+        ],
     )
 
 
