@@ -7,6 +7,7 @@ import code_scientist.supervisor as supervisor_module
 from code_scientist.agents import ProximityAgent, RankingAgent
 from code_scientist.models import (
     CapabilityEvaluation,
+    ContextSnapshot,
     Evidence,
     Hypothesis,
     MetaReview,
@@ -395,6 +396,33 @@ def test_score_task_priority_uses_research_state_signals():
     assert old_score > new_score
     assert clustered_score > unclustered_score
     assert feedback_score > neutral_score
+
+
+def test_task_priority_uses_latest_snapshot_adjusted_weights():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(goal)
+    snapshot_weights = dict(plan.scheduler_weights)
+    snapshot_weights["generation"] = snapshot_weights.get("generation", 1.0) + 5.0
+    snapshot = ContextSnapshot(
+        id="ctx-latest",
+        cycle=1,
+        generated_total=0,
+        accepted_total=0,
+        review_total=0,
+        match_total=0,
+        meta_review_total=0,
+        top_hypothesis_ids=[],
+        origin_counts={},
+        status_counts={},
+        proximity_edge_count=0,
+        scheduler_weights=snapshot_weights,
+        next_actions=[],
+    )
+
+    task = create_task(cycle=2, plan=plan, kind="generate", payload={})
+    base = score_task_priority(task, plan=plan, context_snapshots=[])
+    boosted = score_task_priority(task, plan=plan, context_snapshots=[snapshot])
+    assert boosted > base
 
 
 def test_score_task_priority_uses_global_preference_rankings():

@@ -308,6 +308,7 @@ def run_research_cycle(
                         proximity_edges=proximity_edges,
                         user_feedback=user_feedback,
                         current_cycle=cycle,
+                        context_snapshots=context_snapshots,
                     ),
                 )
                 existing_task_index = next(
@@ -350,6 +351,7 @@ def run_research_cycle(
                     proximity_edges=proximity_edges,
                     user_feedback=user_feedback,
                     current_cycle=cycle,
+                    context_snapshots=context_snapshots,
                     max_pool_size=len(eligible_task_ids),
                     candidate_task_ids=eligible_task_ids,
                 )
@@ -363,6 +365,7 @@ def run_research_cycle(
                     proximity_edges=proximity_edges,
                     user_feedback=user_feedback,
                     current_cycle=cycle,
+                    context_snapshots=context_snapshots,
                 )
                 task_queue = [
                     replace(
@@ -2733,8 +2736,9 @@ def score_task_priority(
     proximity_edges: list[ProximityEdge] | None = None,
     user_feedback: list[UserFeedback] | None = None,
     current_cycle: int | None = None,
+    context_snapshots: list[ContextSnapshot] | None = None,
 ) -> float:
-    score = max(task.priority, _task_priority(plan, task.kind))
+    score = max(task.priority, _task_priority(plan, task.kind, context_snapshots))
     hypothesis_refs = _task_hypothesis_refs(task)
     hypotheses_by_id = {item.id: item for item in hypotheses or []}
     related_hypotheses = [
@@ -2775,6 +2779,7 @@ def rescore_task_queue(
     proximity_edges: list[ProximityEdge] | None = None,
     user_feedback: list[UserFeedback] | None = None,
     current_cycle: int | None = None,
+    context_snapshots: list[ContextSnapshot] | None = None,
 ) -> list[Task]:
     return [
         replace(
@@ -2787,6 +2792,7 @@ def rescore_task_queue(
                 proximity_edges=proximity_edges,
                 user_feedback=user_feedback,
                 current_cycle=current_cycle,
+                context_snapshots=context_snapshots,
             ),
         )
         if task.status == "queued"
@@ -2804,6 +2810,7 @@ def select_scheduler_task_pool(
     proximity_edges: list[ProximityEdge] | None = None,
     user_feedback: list[UserFeedback] | None = None,
     current_cycle: int | None = None,
+    context_snapshots: list[ContextSnapshot] | None = None,
     max_pool_size: int = 1,
     candidate_task_ids: set[str] | None = None,
     candidate_kinds: set[str] | None = None,
@@ -2816,6 +2823,7 @@ def select_scheduler_task_pool(
         proximity_edges=proximity_edges,
         user_feedback=user_feedback,
         current_cycle=current_cycle,
+        context_snapshots=context_snapshots,
     )
     queued = [
         task
@@ -3294,9 +3302,24 @@ def _task_weight_key(kind: str) -> str:
     }.get(kind, kind)
 
 
-def _task_priority(plan: ResearchPlanConfig, kind: str) -> float:
+def _effective_scheduler_weights(
+    plan: ResearchPlanConfig, context_snapshots: list[ContextSnapshot] | None
+) -> dict[str, float]:
+    if context_snapshots:
+        latest = context_snapshots[-1].scheduler_weights
+        if latest:
+            return dict(latest)
+    return dict(plan.scheduler_weights)
+
+
+def _task_priority(
+    plan: ResearchPlanConfig,
+    kind: str,
+    context_snapshots: list[ContextSnapshot] | None = None,
+) -> float:
     weight_key = _task_weight_key(kind)
-    return round(max(plan.scheduler_weights.get(weight_key, 1.0), 0.001), 3)
+    weights = _effective_scheduler_weights(plan, context_snapshots)
+    return round(max(weights.get(weight_key, 1.0), 0.001), 3)
 
 
 def _build_context_snapshot(
