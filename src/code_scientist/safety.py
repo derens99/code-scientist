@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -64,6 +64,7 @@ class SafetyPolicyRule:
 class SafetyPolicy:
     name: str
     rules: list[SafetyPolicyRule]
+    fail_closed: bool = False
 
 
 @dataclass(frozen=True)
@@ -137,6 +138,7 @@ def review_goal_safety_with_model(
     llm_client: Any | None,
     max_tokens: int = 1024,
     safety_policies: list[SafetyPolicy] | None = None,
+    fail_closed: bool = False,
 ) -> SafetyDecision:
     deterministic = review_goal_safety(objective, safety_policies=safety_policies)
     if not deterministic.allowed or llm_client is None:
@@ -147,6 +149,7 @@ def review_goal_safety_with_model(
         subject_type="goal",
         content=objective,
         deterministic=deterministic,
+        fail_closed=fail_closed,
     )
 
 
@@ -189,6 +192,7 @@ def review_hypothesis_safety_with_model(
     llm_client: Any | None,
     max_tokens: int = 1024,
     safety_policies: list[SafetyPolicy] | None = None,
+    fail_closed: bool = False,
 ) -> SafetyDecision:
     deterministic = review_hypothesis_safety(hypothesis, safety_policies=safety_policies)
     if not deterministic.allowed or llm_client is None:
@@ -204,6 +208,7 @@ def review_hypothesis_safety_with_model(
             f"Risks: {'; '.join(hypothesis.risks)}"
         ),
         deterministic=deterministic,
+        fail_closed=fail_closed,
     )
 
 
@@ -239,6 +244,7 @@ def review_evidence_safety_with_model(
     llm_client: Any | None,
     max_tokens: int = 1024,
     safety_policies: list[SafetyPolicy] | None = None,
+    fail_closed: bool = False,
 ) -> SafetyDecision:
     deterministic = review_evidence_safety(evidence, safety_policies=safety_policies)
     if not deterministic.allowed or llm_client is None:
@@ -255,6 +261,7 @@ def review_evidence_safety_with_model(
             f"Content: {evidence.content[:4000]}"
         ),
         deterministic=deterministic,
+        fail_closed=fail_closed,
     )
 
 
@@ -263,6 +270,7 @@ def screen_evidence_sources(
     llm_client: Any | None = None,
     max_tokens: int = 1024,
     safety_policies: list[SafetyPolicy] | None = None,
+    fail_closed: bool = False,
 ) -> tuple[list[Evidence], list[EvidenceSafetyFinding]]:
     allowed: list[Evidence] = []
     findings: list[EvidenceSafetyFinding] = []
@@ -272,6 +280,7 @@ def screen_evidence_sources(
             llm_client,
             max_tokens=max_tokens,
             safety_policies=safety_policies,
+            fail_closed=fail_closed,
         )
         if decision.allowed:
             allowed.append(item)
@@ -334,6 +343,7 @@ def _load_safety_policy(path: Path) -> SafetyPolicy:
     return SafetyPolicy(
         name=_clean_string(data.get("name"), path.stem),
         rules=rules,
+        fail_closed=bool(data.get("fail_closed", False)),
     )
 
 
@@ -442,6 +452,7 @@ def _review_with_model(
     subject_type: str,
     content: str,
     deterministic: SafetyDecision,
+    fail_closed: bool = False,
 ) -> SafetyDecision:
     try:
         response_text = llm_client.complete(
@@ -465,8 +476,15 @@ def _review_with_model(
             reason=model_reason,
             flags=combined_flags,
         )
-    except LLMResponseError:
-        return deterministic
+    except (LLMResponseError, OSError) as exc:
+        error_flags = _unique([*deterministic.flags, "safety-critic-error"])
+        if fail_closed:
+            return SafetyDecision(
+                allowed=False,
+                reason=f"Safety critic unavailable ({exc}); blocked pending manual review.",
+                flags=_unique([*error_flags, "manual-review-required"]),
+            )
+        return replace(deterministic, flags=error_flags)
 
 
 def _safety_prompt(subject_type: str, content: str) -> str:

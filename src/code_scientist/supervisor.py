@@ -112,6 +112,7 @@ def run_research_cycle(
         else plan_config or _plan_for_goal(goal, provider, model_client, max_tokens)
     )
     safety_llm_client = model_client if provider == "anthropic" else None
+    safety_fail_closed = any(policy.fail_closed for policy in safety_policies)
     safety = (
         existing_state.safety
         or review_goal_safety_with_model(
@@ -119,6 +120,7 @@ def run_research_cycle(
             safety_llm_client,
             max_tokens=max_tokens,
             safety_policies=safety_policies,
+            fail_closed=safety_fail_closed,
         )
         if existing_state
         else review_goal_safety_with_model(
@@ -126,6 +128,7 @@ def run_research_cycle(
             safety_llm_client,
             max_tokens=max_tokens,
             safety_policies=safety_policies,
+            fail_closed=safety_fail_closed,
         )
     )
     benchmarks = benchmark_results if benchmark_results is not None else (existing_state.benchmark_results if existing_state else [])
@@ -153,6 +156,7 @@ def run_research_cycle(
         llm_client=safety_llm_client,
         max_tokens=max_tokens,
         safety_policies=safety_policies,
+        fail_closed=safety_fail_closed,
     )
     evidence_safety_findings = _merge_evidence_safety_findings(
         existing_state.evidence_safety_findings if existing_state else [],
@@ -1365,6 +1369,7 @@ def _ensure_continuous_state(
     goal = ResearchGoal.from_objective_with_briefs(objective, _read_goal_briefs(goal_brief_paths or []))
     plan = ResearchPlanConfig.from_goal(goal)
     safety_policies = load_safety_policies(safety_policy_paths or [])
+    safety_fail_closed = any(policy.fail_closed for policy in safety_policies)
     seed_evidence = seed_paper_evidence()
     initial_state = RunState(
         goal=goal,
@@ -1398,6 +1403,7 @@ def _ensure_continuous_state(
         llm_client=safety_llm_client,
         max_tokens=max_tokens,
         safety_policies=safety_policies,
+        fail_closed=safety_fail_closed,
     )
     state = replace(
         initial_state,
@@ -1408,6 +1414,7 @@ def _ensure_continuous_state(
             safety_llm_client,
             max_tokens=max_tokens,
             safety_policies=safety_policies,
+            fail_closed=safety_fail_closed,
         ),
     )
     _write_state(state_path, state)

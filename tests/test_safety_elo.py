@@ -1,6 +1,7 @@
 import json
 
 from code_scientist.elo import update_elo
+from code_scientist.llm import LLMResponseError
 from code_scientist.models import Evidence, Hypothesis, TestPlan
 from code_scientist.safety import (
     load_safety_policies,
@@ -343,8 +344,74 @@ def test_model_safety_critic_falls_back_when_schema_is_incomplete():
     )
 
     assert decision.allowed is True
-    assert decision.flags == []
+    assert decision.flags == ["safety-critic-error"]
     assert decision.reason == "Objective is allowed for local research planning."
+
+
+class ExplodingClient:
+    def complete(self, prompt, max_tokens=0):
+        raise LLMResponseError("model unavailable")
+
+
+class RefusedConnectionClient:
+    def complete(self, prompt, max_tokens=0):
+        raise OSError("connection refused")
+
+
+def test_safety_critic_failure_is_flagged_not_silent():
+    decision = review_goal_safety_with_model(
+        "Find testable ideas to improve LLM coding agents",
+        ExplodingClient(),
+        max_tokens=64,
+    )
+
+    assert decision.allowed is True
+    assert "safety-critic-error" in decision.flags
+
+
+def test_safety_critic_failure_fail_closed_blocks_for_manual_review():
+    decision = review_goal_safety_with_model(
+        "Find testable ideas to improve LLM coding agents",
+        ExplodingClient(),
+        max_tokens=64,
+        fail_closed=True,
+    )
+
+    assert decision.allowed is False
+    assert "manual-review-required" in decision.flags
+    assert "safety-critic-error" in decision.flags
+
+
+def test_safety_critic_transport_error_is_flagged_not_raised():
+    decision = review_goal_safety_with_model(
+        "Find testable ideas to improve LLM coding agents",
+        RefusedConnectionClient(),
+        max_tokens=64,
+    )
+
+    assert decision.allowed is True
+    assert "safety-critic-error" in decision.flags
+
+
+def test_safety_policy_fail_closed_field_parses_tolerantly(tmp_path):
+    rule = {
+        "id": "customer-data",
+        "scope": ["goal"],
+        "contains": ["private customer logs"],
+        "reason": "Customer logs are outside the approved research corpus.",
+    }
+    fail_closed_path = tmp_path / "fail-closed-policy.json"
+    fail_closed_path.write_text(
+        json.dumps({"fail_closed": True, "rules": [rule]}),
+        encoding="utf-8",
+    )
+    legacy_path = tmp_path / "legacy-policy.json"
+    legacy_path.write_text(json.dumps({"rules": [rule]}), encoding="utf-8")
+
+    fail_closed_policy, legacy_policy = load_safety_policies([fail_closed_path, legacy_path])
+
+    assert fail_closed_policy.fail_closed is True
+    assert legacy_policy.fail_closed is False
 
 
 def test_model_safety_critic_quarantines_evidence_before_agent_use():
