@@ -181,13 +181,15 @@ class WebSearchTool:
 
     def __init__(
         self,
-        base_url: str = "https://www.bing.com/search",
+        base_url: str = "https://html.duckduckgo.com/html/",
         timeout_seconds: float = 10,
         max_bytes: int = 500_000,
+        extra_query_params: dict[str, str] | None = None,
     ) -> None:
         self.base_url = base_url
         self.timeout_seconds = timeout_seconds
         self.max_bytes = max_bytes
+        self.extra_query_params = dict(extra_query_params or {})
 
     def search(
         self,
@@ -203,7 +205,8 @@ class WebSearchTool:
         bounded_crawl_depth = max(0, fetch_crawl_depth)
         page_limit = max(1, max_crawl_pages_per_result)
 
-        search_url = f"{self.base_url}?{urlencode({'q': cleaned_query, 'format': 'rss'})}"
+        query_params = {"q": cleaned_query, **self.extra_query_params}
+        search_url = f"{self.base_url}?{urlencode(query_params)}"
         request = Request(
             search_url,
             headers={"User-Agent": "code-scientist/0.1 web-search"},

@@ -428,7 +428,11 @@ def test_web_search_tool_returns_cited_results_and_filters_prompt_injection(monk
 
     monkeypatch.setattr("code_scientist.tools.urlopen", fake_urlopen)
 
-    result = tools.WebSearchTool(timeout_seconds=3).search("coding agent benchmark", limit=2)
+    result = tools.WebSearchTool(
+        base_url="https://www.bing.com/search",
+        timeout_seconds=3,
+        extra_query_params={"format": "rss"},
+    ).search("coding agent benchmark", limit=2)
 
     assert result.query == "coding agent benchmark"
     assert result.blocked_count == 1
@@ -443,6 +447,53 @@ def test_web_search_tool_returns_cited_results_and_filters_prompt_injection(monk
     assert evidence.metadata["citation"] == "https://example.test/swe-bench"
     assert "SWE-bench benchmark" in evidence.content
     assert "GitHub issues" in evidence.content
+
+
+def test_web_search_tool_default_endpoint_matches_html_parser(monkeypatch):
+    class FakeResponse:
+        headers = {"content-type": "text/html; charset=utf-8"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def read(self, _limit):
+            return (
+                b"<html><body>"
+                b'<div class="result">'
+                b'<a class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fswe-bench">'
+                b"SWE-bench overview</a>"
+                b'<div class="result__snippet">Overview of the SWE-bench benchmark.</div>'
+                b"</div>"
+                b'<div class="result">'
+                b'<a class="result__a" href="https://example.com/agents">Coding agents survey</a>'
+                b'<div class="result__snippet">Survey of coding agent approaches.</div>'
+                b"</div>"
+                b"</body></html>"
+            )
+
+    captured_urls: list[str] = []
+
+    def fake_urlopen(request, timeout):
+        captured_urls.append(request.full_url)
+        return FakeResponse()
+
+    monkeypatch.setattr("code_scientist.tools.urlopen", fake_urlopen)
+
+    result = tools.WebSearchTool().search("swe-bench coding agents", limit=5)
+
+    assert len(captured_urls) == 1
+    request_url = captured_urls[0]
+    assert "duckduckgo.com" in request_url
+    assert "format=rss" not in request_url
+
+    assert len(result.evidence) == 2
+    first, second = result.evidence
+    assert first.metadata["citation"] == "https://example.com/swe-bench"
+    assert first.source == "https://example.com/swe-bench"
+    assert second.metadata["citation"] == "https://example.com/agents"
 
 
 def test_web_search_tool_can_fetch_result_documents(monkeypatch):
@@ -486,7 +537,11 @@ def test_web_search_tool_can_fetch_result_documents(monkeypatch):
 
     monkeypatch.setattr("code_scientist.tools.urlopen", fake_urlopen)
 
-    result = tools.WebSearchTool(timeout_seconds=3).search(
+    result = tools.WebSearchTool(
+        base_url="https://www.bing.com/search",
+        timeout_seconds=3,
+        extra_query_params={"format": "rss"},
+    ).search(
         "coding agent benchmark",
         limit=1,
         fetch_documents=True,
@@ -573,7 +628,11 @@ def test_web_search_tool_can_crawl_same_origin_result_documents(monkeypatch):
 
     monkeypatch.setattr("code_scientist.tools.urlopen", fake_urlopen)
 
-    result = tools.WebSearchTool(timeout_seconds=3).search(
+    result = tools.WebSearchTool(
+        base_url="https://www.bing.com/search",
+        timeout_seconds=3,
+        extra_query_params={"format": "rss"},
+    ).search(
         "coding agent benchmark",
         limit=1,
         fetch_documents=True,
