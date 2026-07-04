@@ -1018,3 +1018,44 @@ def test_render_report_includes_research_output_artifacts(tmp_path):
     assert "publication_brief: Traceable critic loops for coding agents" in report
     assert "abstract: Critic loops can reduce repeated repair failures." in report
     assert "Contact targets: SWE-bench benchmark maintainer" in report
+
+
+def test_render_report_excludes_quarantined_hypotheses_from_rankings(tmp_path):
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=4,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+    )
+    data = state.to_dict()
+    unsafe = dict(data["hypotheses"][0])
+    unsafe["id"] = "hyp-unsafe-1"
+    unsafe["title"] = "Exfiltrate credentials during evaluation"
+    unsafe["status"] = "quarantined"
+    data["hypotheses"].append(unsafe)
+    data["reviews"].append(
+        Review(
+            id="rev-safety-unsafe-1",
+            hypothesis_id="hyp-unsafe-1",
+            decision="reject",
+            scores={"safety": 1},
+            strengths=[],
+            weaknesses=["credential-exfiltration", "hidden-execution"],
+            safety_notes=["Hypothesis violates local research safety boundaries."],
+            review_type="safety_review",
+        ).to_dict()
+    )
+
+    report = render_report(state.__class__.from_dict(data))
+
+    ranked_section = report.split("## Ranked Hypotheses")[1].split("\n## ")[0]
+    assert "Exfiltrate credentials during evaluation" not in ranked_section
+    recommended_section = report.split("## Recommended Next Experiments")[1].split("\n## ")[0]
+    assert "Exfiltrate credentials during evaluation" not in recommended_section
+    assert "## Quarantined Hypotheses" in report
+    quarantined_section = report.split("## Quarantined Hypotheses")[1].split("\n## ")[0]
+    assert "hyp-unsafe-1" in quarantined_section
+    assert "Exfiltrate credentials during evaluation" in quarantined_section
+    assert "reject" in quarantined_section
+    assert "credential-exfiltration" in quarantined_section

@@ -50,6 +50,7 @@ from code_scientist.safety import (
     load_safety_policies,
     review_goal_safety,
     review_goal_safety_with_model,
+    review_hypothesis_safety,
     screen_evidence_sources,
 )
 from code_scientist.tools import (
@@ -58,6 +59,13 @@ from code_scientist.tools import (
     collect_web_evidence,
     collect_web_search_evidence,
 )
+
+
+_INACTIVE_STATUSES = {"merged_duplicate", "quarantined"}
+
+
+def _active_hypotheses(hypotheses: list[Hypothesis]) -> list[Hypothesis]:
+    return [item for item in hypotheses if item.status not in _INACTIVE_STATUSES]
 
 
 def run_research_cycle(
@@ -209,6 +217,12 @@ def run_research_cycle(
 
     hypotheses: list[Hypothesis] = list(state.hypotheses)
     reviews: list[Review] = list(state.reviews)
+    hypotheses, ingestion_safety_reviews = _quarantine_unsafe_loaded_hypotheses(
+        hypotheses,
+        reviews,
+        safety_policies=safety_policies,
+    )
+    reviews = [*reviews, *ingestion_safety_reviews]
     matches: list[Match] = list(state.matches)
     proximity_edges: list[ProximityEdge] = list(state.proximity_edges)
     capability_evaluations = list(state.capability_evaluations)
@@ -524,6 +538,8 @@ def run_research_cycle(
                     execute_empty_review,
                 )
 
+            hypotheses = _apply_safety_quarantine(hypotheses, reviews)
+
             def execute_proximity(_task: Task) -> list[str]:
                 nonlocal hypotheses, proximity_edges
                 proximity_edges = proximity.compute_goal_aware(goal, hypotheses, reviews, evidence_store)
@@ -749,7 +765,7 @@ def run_research_cycle(
 
             top_hypothesis_ids = [
                 item.id
-                for item in sorted(hypotheses, key=lambda hyp: hyp.elo, reverse=True)[:3]
+                for item in sorted(_active_hypotheses(hypotheses), key=lambda hyp: hyp.elo, reverse=True)[:3]
             ]
 
             def execute_meta_review(_task: Task) -> list[str]:
@@ -807,13 +823,15 @@ def run_research_cycle(
             run_ready_cycle_tasks(ready_meta_ids)
             top_hypothesis_ids = [
                 item.id
-                for item in sorted(hypotheses, key=lambda hyp: hyp.elo, reverse=True)[:3]
+                for item in sorted(_active_hypotheses(hypotheses), key=lambda hyp: hyp.elo, reverse=True)[:3]
             ]
 
             def execute_overview(_task: Task) -> list[str]:
                 nonlocal research_overview
                 meta = metas[-1]
-                research_overview = meta_review.build_overview(goal, hypotheses, metas, cycle=cycle)
+                research_overview = meta_review.build_overview(
+                    goal, _active_hypotheses(hypotheses), metas, cycle=cycle
+                )
                 research_overview = _apply_overview_feedback(research_overview, overview_feedback)
                 task_retrievals = evidence_store.consume_retrieval_memory(
                     cycle=cycle,
@@ -861,7 +879,7 @@ def run_research_cycle(
                 nonlocal research_output_artifacts
                 cycle_outputs = meta_review.build_research_output_artifacts(
                     goal,
-                    hypotheses,
+                    _active_hypotheses(hypotheses),
                     metas,
                     research_overview,
                     cycle=cycle,
@@ -1970,6 +1988,8 @@ def _allocate_generation_methods(
     control_counts: Counter[str] = Counter()
 
     for hypothesis in hypotheses or []:
+        if hypothesis.status == "quarantined":
+            continue
         mode = _generation_method_for_origin(hypothesis.origin, unique_modes)
         if not mode:
             continue
@@ -2202,6 +2222,71 @@ def _use_multi_round_debate(plan: ResearchPlanConfig) -> bool:
     return bool({"simulated_debate", "multi_round_debate", "multi_turn_debate"} & normalized)
 
 
+def _safety_rejected_hypothesis_ids(reviews: list[Review]) -> set[str]:
+    return {
+        review.hypothesis_id
+        for review in reviews
+        if review.review_type == "safety_review" and review.decision == "reject"
+    }
+
+
+def _apply_safety_quarantine(hypotheses: list[Hypothesis], reviews: list[Review]) -> list[Hypothesis]:
+    rejected_ids = _safety_rejected_hypothesis_ids(reviews)
+    if not rejected_ids:
+        return hypotheses
+    return [
+        item.with_status("quarantined")
+        if item.id in rejected_ids and item.status not in _INACTIVE_STATUSES
+        else item
+        for item in hypotheses
+    ]
+
+
+def _quarantine_unsafe_loaded_hypotheses(
+    hypotheses: list[Hypothesis],
+    reviews: list[Review],
+    safety_policies: list[SafetyPolicy] | None = None,
+) -> tuple[list[Hypothesis], list[Review]]:
+    """Quarantine unsafe hypotheses at ingestion (state load / manual additions).
+
+    Runs the deterministic hypothesis safety gate over every loaded hypothesis so
+    pre-existing or manually injected candidates cannot enter the tournament,
+    evolution, or research output when they violate safety boundaries. Emits a
+    synthetic safety_review reject Review for audit when none exists yet.
+    """
+    already_rejected = _safety_rejected_hypothesis_ids(reviews)
+    updated: list[Hypothesis] = []
+    new_reviews: list[Review] = []
+    for hypothesis in hypotheses:
+        if hypothesis.status in _INACTIVE_STATUSES:
+            updated.append(hypothesis)
+            continue
+        decision = review_hypothesis_safety(hypothesis, safety_policies=safety_policies or [])
+        if decision.allowed:
+            updated.append(hypothesis)
+            continue
+        updated.append(hypothesis.with_status("quarantined"))
+        if hypothesis.id not in already_rejected:
+            new_reviews.append(
+                Review(
+                    id=stable_id("rev", f"safety-ingestion:{hypothesis.id}"),
+                    hypothesis_id=hypothesis.id,
+                    decision="reject",
+                    scores={"safety": 1},
+                    strengths=[],
+                    weaknesses=list(decision.flags),
+                    safety_notes=[decision.reason],
+                    review_type="safety_review",
+                    findings=[
+                        f"Hypothesis safety gate blocked this candidate at ingestion: {decision.reason}"
+                    ],
+                    confidence=0.9,
+                    requires_revision=True,
+                )
+            )
+    return updated, new_reviews
+
+
 def _accepted_hypothesis_ids(hypotheses: list[Hypothesis], reviews: list[Review]) -> set[str]:
     reviews_by_hypothesis: dict[str, list[Review]] = {item.id: [] for item in hypotheses}
     for review in reviews:
@@ -2243,9 +2328,9 @@ def _apply_proximity_deduplication(
             keeper, duplicate = _deduplication_representative(source, target)
             keeper = by_id[keeper.id]
             duplicate = by_id[duplicate.id]
-            if keeper.status == "merged_duplicate" or duplicate.status == "merged_duplicate":
+            if keeper.status in _INACTIVE_STATUSES or duplicate.status in _INACTIVE_STATUSES:
                 continue
-            active_count = len([item for item in by_id.values() if item.status != "merged_duplicate"])
+            active_count = len([item for item in by_id.values() if item.status not in _INACTIVE_STATUSES])
             if active_count <= 2:
                 continue
             detail = _proximity_edge_detail(edge)
@@ -2263,7 +2348,7 @@ def _apply_proximity_deduplication(
             detail = _proximity_edge_detail(edge)
             for hypothesis_id in (edge.source, edge.target):
                 item = by_id.get(hypothesis_id)
-                if item is not None and item.status != "merged_duplicate":
+                if item is not None and item.status not in _INACTIVE_STATUSES:
                     by_id[hypothesis_id] = _with_proximity_note(
                         item,
                         f"Preserved for diversity via {detail}.",
@@ -2340,7 +2425,7 @@ def _select_diverse_evolution_leaders(
     active = [
         item
         for item in sorted(hypotheses, key=lambda hyp: hyp.elo, reverse=True)
-        if item.status != "merged_duplicate"
+        if item.status not in _INACTIVE_STATUSES
     ]
     edge_by_pair = {_pair_key(edge.source, edge.target): edge for edge in proximity_edges}
     selected: list[Hypothesis] = []
@@ -2385,7 +2470,7 @@ def _schedule_pairs(
     max_matches: int,
     reviews: list[Review] | None = None,
 ) -> list[tuple[Hypothesis, Hypothesis]]:
-    active_hypotheses = [item for item in hypotheses if item.status != "merged_duplicate"]
+    active_hypotheses = _active_hypotheses(hypotheses)
     if max_matches <= 0 or len(active_hypotheses) < 2:
         return []
 

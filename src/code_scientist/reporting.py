@@ -413,6 +413,32 @@ def render_report(state: RunState) -> str:
         lines.append(f"- {finding}")
     lines.append("")
 
+    lines.extend(["## Quarantined Hypotheses", ""])
+    quarantined_hypotheses = [item for item in state.hypotheses if item.status == "quarantined"]
+    if quarantined_hypotheses:
+        safety_rejections = {
+            review.hypothesis_id: review
+            for review in state.reviews
+            if review.review_type == "safety_review" and review.decision == "reject"
+        }
+        lines.append(
+            "These hypotheses were rejected by safety review and are excluded from the tournament, "
+            "evolution, and rankings. They are retained here for auditability only."
+        )
+        for hypothesis in quarantined_hypotheses:
+            lines.append(f"- {hypothesis.id}: {hypothesis.title}")
+            review = safety_rejections.get(hypothesis.id)
+            if review is None:
+                lines.append("  - Triggering review: not recorded in state.")
+                continue
+            lines.append(f"  - Triggering review decision: {review.decision} ({review.review_type})")
+            lines.append(f"  - Flags: {', '.join(review.weaknesses) or 'none recorded'}")
+            if review.safety_notes:
+                lines.append(f"  - Reason: {review.safety_notes[0]}")
+        lines.append("")
+    else:
+        lines.extend(["- No hypotheses were quarantined by safety review.", ""])
+
     lines.extend(["## Evidence Safety Review", ""])
     if state.evidence_safety_findings:
         rejected = [finding for finding in state.evidence_safety_findings if not finding.allowed]
@@ -606,7 +632,8 @@ def render_report(state: RunState) -> str:
             "",
         ]
     )
-    for index, hypothesis in enumerate(state.hypotheses, start=1):
+    ranked_hypotheses = [item for item in state.hypotheses if item.status != "quarantined"]
+    for index, hypothesis in enumerate(ranked_hypotheses, start=1):
         lines.extend(
             [
                 f"{index}. {hypothesis.title} - Elo {hypothesis.elo:.1f}",
@@ -693,7 +720,7 @@ def render_report(state: RunState) -> str:
                 lines.append(f"  - {item}")
 
     lines.extend(["", "## Recommended Next Experiments", ""])
-    for hypothesis in state.hypotheses[:3]:
+    for hypothesis in ranked_hypotheses[:3]:
         lines.append(f"- Test `{hypothesis.title}` with metrics: {', '.join(hypothesis.test_plan.metrics)}")
 
     lines.extend(

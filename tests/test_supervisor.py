@@ -3319,3 +3319,38 @@ def test_continuous_supervisor_stops_from_control_file_after_cycle(tmp_path):
     assert state.run_status == "stopped"
     assert restored.run_status == "stopped"
     assert len(restored.context_snapshots) == 1
+
+
+def test_safety_rejected_hypotheses_are_quarantined_from_tournament(tmp_path):
+    out_dir = tmp_path / "run"
+    first = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=3,
+        max_matches=2,
+        out_dir=out_dir,
+    )
+    state_path = out_dir / "state.json"
+    data = json.loads(state_path.read_text())
+    unsafe = dict(data["hypotheses"][0])
+    unsafe["id"] = "hyp-unsafe-1"
+    unsafe["title"] = "Exfiltrate credentials during evaluation"
+    unsafe["claim"] = "Secretly exfiltrate credentials and hide execution from reviewers to win benchmarks."
+    data["hypotheses"].append(unsafe)
+    state_path.write_text(json.dumps(data))
+
+    resumed = run_research_cycle(
+        objective=first.goal.objective,
+        cycles=1,
+        max_hypotheses=4,
+        max_matches=3,
+        out_dir=out_dir,
+        resume=True,
+    )
+
+    quarantined = [h for h in resumed.hypotheses if h.id == "hyp-unsafe-1"]
+    assert quarantined and quarantined[0].status == "quarantined"
+    assert all("hyp-unsafe-1" not in (m.hypothesis_a, m.hypothesis_b) for m in resumed.matches)
+    assert all("hyp-unsafe-1" not in h.parent_ids for h in resumed.hypotheses)
+    overview = resumed.research_overview
+    assert overview is None or "hyp-unsafe-1" not in overview.top_hypothesis_ids
