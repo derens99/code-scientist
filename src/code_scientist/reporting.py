@@ -10,7 +10,7 @@ from code_scientist.evaluation import (
     summarize_capability_study_from_states,
 )
 from code_scientist.models import BenchmarkResult, Evidence, ProximityEdge, RunState
-from code_scientist.supervisor import (
+from code_scientist.safety import (
     _SAFETY_REVIEW_TYPES,
     _safety_rejected_hypothesis_ids,
 )
