@@ -1544,6 +1544,41 @@ def test_cli_run_accepts_goal_brief_paths(tmp_path, monkeypatch):
     assert captured["goal_brief_paths"] == [str(brief)]
 
 
+def test_cli_run_continuous_forwards_review_concurrency(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_run_continuous_research(**kwargs):
+        captured["review_concurrency"] = kwargs.get("review_concurrency")
+        out_dir = Path(kwargs["out_dir"])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        goal = ResearchGoal.from_objective(kwargs["objective"])
+        state = RunState(goal=goal, plan=ResearchPlanConfig.from_goal(goal), run_status="completed")
+        (out_dir / "state.json").write_text(json.dumps(state.to_dict()), encoding="utf-8")
+        return state
+
+    monkeypatch.setattr(cli_module, "run_continuous_research", fake_run_continuous_research)
+    out_dir = tmp_path / "continuous-demo"
+
+    exit_code = main(
+        [
+            "run",
+            "Find concurrency-tolerant coding-agent research ideas",
+            "--continuous",
+            "--interval-seconds",
+            "0",
+            "--max-continuous-cycles",
+            "1",
+            "--review-concurrency",
+            "4",
+            "--out",
+            str(out_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["review_concurrency"] == 4
+
+
 def test_cli_run_accepts_review_concurrency(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
 

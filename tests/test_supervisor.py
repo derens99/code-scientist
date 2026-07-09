@@ -3851,6 +3851,30 @@ def test_llm_safety_review_reject_is_quarantined():
     assert [item.status for item in result] == ["quarantined"]
 
 
+def test_build_context_snapshot_excludes_quarantined_hypotheses_from_leaders():
+    active_low = _hypothesis("hyp-active-low", elo=1100.0)
+    active_mid = _hypothesis("hyp-active-mid", elo=1150.0)
+    quarantined_high = replace(
+        _hypothesis("hyp-quarantined-high", elo=9999.0), status="quarantined"
+    )
+
+    snapshot = supervisor_module._build_context_snapshot(
+        1,
+        ResearchPlanConfig.from_goal(
+            ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+        ),
+        [active_low, active_mid, quarantined_high],
+        [],
+        [],
+        0,
+        [],
+        4,
+    )
+
+    assert "hyp-quarantined-high" not in snapshot.top_hypothesis_ids
+    assert snapshot.top_hypothesis_ids[0] == "hyp-active-mid"
+
+
 def _termination_snapshot(cycle: int, top_ids: list[str]) -> ContextSnapshot:
     return ContextSnapshot(
         id=f"ctx-{cycle}",
@@ -3913,6 +3937,31 @@ def test_evaluate_termination_criteria_elo_plateau():
         _termination_snapshot(2, ["hyp-a"]),
     ]
     assert evaluate_termination_criteria(plan, hypotheses, [], changing) is None
+
+
+def test_evaluate_termination_criteria_elo_plateau_uses_active_only_top_ids():
+    # Simulates the fixed behavior: snapshot top_hypothesis_ids are computed
+    # from active hypotheses only, so a quarantined high-Elo hypothesis never
+    # pins the top slot. Here the active leaderboard is still churning
+    # (differing top ids across the window), so no plateau should fire even
+    # though a stale quarantined hypothesis would have been tied for first
+    # across both snapshots if it had been included.
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(goal, termination_criteria=["elo_plateau"])
+    hypotheses = [_hypothesis("hyp-a"), _hypothesis("hyp-b")]
+
+    churning = [
+        _termination_snapshot(1, ["hyp-a"]),
+        _termination_snapshot(2, ["hyp-b"]),
+    ]
+    assert evaluate_termination_criteria(plan, hypotheses, [], churning) is None
+
+    # Positive control: identical non-empty top ids across the window fire.
+    settled = [
+        _termination_snapshot(1, ["hyp-a"]),
+        _termination_snapshot(2, ["hyp-a"]),
+    ]
+    assert evaluate_termination_criteria(plan, hypotheses, [], settled) == "elo_plateau:2"
 
 
 def test_evaluate_termination_criteria_all_reviewed():

@@ -377,6 +377,7 @@ def main(argv: list[str] | None = None) -> int:
                 max_wall_minutes=args.max_wall_minutes,
                 max_continuous_cycles=args.max_continuous_cycles,
                 after_cycle=write_report,
+                review_concurrency=args.review_concurrency,
             )
         else:
             state = run_research_cycle(

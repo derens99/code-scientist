@@ -1198,6 +1198,7 @@ def run_continuous_research(
     max_wall_minutes: float | None = None,
     max_continuous_cycles: int | None = None,
     after_cycle: Callable[[RunState], None] | None = None,
+    review_concurrency: int = 1,
 ) -> RunState:
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -1272,6 +1273,7 @@ def run_continuous_research(
             resume=True,
             run_status="running",
             control_path=control_path,
+            review_concurrency=review_concurrency,
         )
         if state.run_status == "stopped":
             return state
@@ -3515,7 +3517,7 @@ def _build_context_snapshot(
     proximity_edges: list[ProximityEdge],
     max_hypotheses: int,
 ) -> ContextSnapshot:
-    leaders = sorted(hypotheses, key=lambda item: item.elo, reverse=True)[:3]
+    leaders = sorted(_active_hypotheses(hypotheses), key=lambda item: item.elo, reverse=True)[:3]
     scheduler_weights = _adjust_scheduler_weights(plan, hypotheses, reviews, matches, max_hypotheses)
     return ContextSnapshot(
         id=stable_id("ctx", f"{plan.id}:{cycle}:{len(hypotheses)}:{len(reviews)}:{len(matches)}"),
