@@ -3522,6 +3522,23 @@ def test_supervisor_records_feedback_loop_evaluation_for_reused_meta_feedback(tm
     assert "feedback items" in evaluation.summary
 
 
+def test_feedback_loop_evaluation_measures_weakness_recurrence(tmp_path):
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=3,
+        max_hypotheses=4,
+        max_matches=2,
+        out_dir=tmp_path / "run",
+    )
+    records = state.feedback_loop_evaluations
+    assert records, "expected proxy feedback-loop records"
+    latest = records[-1]
+    assert "weakness_recurrence_before" in latest.baseline_quality
+    assert "weakness_recurrence_after" in latest.observed_quality
+    assert 0.0 <= latest.baseline_quality["weakness_recurrence_before"] <= 1.0
+    assert 0.0 <= latest.observed_quality["weakness_recurrence_after"] <= 1.0
+
+
 def test_supervisor_generates_publication_grant_and_contact_artifacts(tmp_path):
     state = run_research_cycle(
         objective="Find testable ideas to improve LLM coding agents",

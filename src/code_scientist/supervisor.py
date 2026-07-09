@@ -1868,6 +1868,66 @@ def _review_for_plan(
     return reviews
 
 
+_FEEDBACK_STOPWORDS = {
+    "hypothesis", "hypotheses", "review", "reviews", "should", "improve",
+    "improved", "improving", "feedback", "consider", "ensure", "provide",
+    "provided", "include", "clarify", "clearer", "better", "additional",
+    "further", "please", "before", "after", "during", "which", "there",
+}
+
+
+def _weakness_term_source_texts(meta: MetaReview) -> list[str]:
+    texts = list(meta.common_weaknesses)
+    for items in _all_agent_feedback(meta):
+        texts.extend(items)
+    return texts
+
+
+def _all_agent_feedback(meta: MetaReview) -> list[list[str]]:
+    return list(meta.agent_feedback.values())
+
+
+def _terms_from_texts(texts: list[str]) -> set[str]:
+    terms: set[str] = set()
+    for text in texts:
+        terms.update(token for token in re.findall(r"[a-z]{5,}", text.lower()))
+    return terms - _FEEDBACK_STOPWORDS
+
+
+def _weakness_terms(meta: MetaReview) -> set[str]:
+    return _terms_from_texts(_weakness_term_source_texts(meta))
+
+
+def _review_text(review: Review) -> str:
+    return " ".join([*review.weaknesses, *review.findings]).lower()
+
+
+def _weakness_recurrence_rate(terms: set[str], reviews: list[Review]) -> float:
+    if not terms or not reviews:
+        return 0.0
+    hits = sum(1 for review in reviews if any(term in _review_text(review) for term in terms))
+    return round(hits / len(reviews), 3)
+
+
+def _feedback_item_adopted(terms: set[str], reviews: list[Review]) -> bool:
+    if not terms or not reviews:
+        return False
+    combined = " ".join(_review_text(review) for review in reviews)
+    return not any(term in combined for term in terms)
+
+
+def _reviews_for_cycle(
+    target_cycle: int, reviews: list[Review], agent_traces: list[AgentTrace]
+) -> list[Review]:
+    review_cycle = {
+        ref: trace.cycle
+        for trace in agent_traces
+        if trace.agent == "reflection"
+        for ref in trace.output_refs
+    }
+    return [review for review in reviews if review_cycle.get(review.id) == target_cycle]
+
+
 def _build_feedback_loop_evaluation(
     cycle: int,
     source_meta: MetaReview | None,
@@ -1882,7 +1942,7 @@ def _build_feedback_loop_evaluation(
     feedback_items = _feedback_items(source_meta)
     if not source_meta or not feedback_items:
         return None
-    artifact_text, artifact_refs = _feedback_artifact_text_and_refs(
+    _artifact_text, artifact_refs = _feedback_artifact_text_and_refs(
         cycle=cycle,
         hypotheses=hypotheses,
         reviews=reviews,
@@ -1891,12 +1951,20 @@ def _build_feedback_loop_evaluation(
         research_overview=research_overview,
         agent_traces=agent_traces,
     )
+    prior_cycle_reviews = _reviews_for_cycle(cycle - 1, reviews, agent_traces)
+    current_cycle_reviews = _reviews_for_cycle(cycle, reviews, agent_traces)
+    weakness_terms = _weakness_terms(source_meta)
+    recurrence_before = _weakness_recurrence_rate(weakness_terms, prior_cycle_reviews)
+    recurrence_after = _weakness_recurrence_rate(weakness_terms, current_cycle_reviews)
+
     adopted = [
-        feedback
-        for _agent, feedback in feedback_items
-        if feedback.lower() in artifact_text.lower()
+        (agent, item)
+        for agent, item in feedback_items
+        if _feedback_item_adopted(_terms_from_texts([item]), current_cycle_reviews)
     ]
     observed_quality = _feedback_quality_metrics(hypotheses, reviews)
+    observed_quality["weakness_recurrence_after"] = recurrence_after
+    baseline_quality = {**baseline_quality, "weakness_recurrence_before": recurrence_before}
     deltas = {
         key: round(observed_quality.get(key, 0.0) - value, 3)
         for key, value in baseline_quality.items()
@@ -1906,7 +1974,8 @@ def _build_feedback_loop_evaluation(
     adoption_rate = round(adopted_count / feedback_count, 3) if feedback_count else 0.0
     agents = sorted({agent for agent, _feedback in feedback_items})
     summary = (
-        f"{adopted_count}/{feedback_count} feedback items appeared in later artifacts; "
+        f"{adopted_count}/{feedback_count} feedback items' flagged weaknesses did not recur in "
+        f"cycle {cycle} reviews (recurrence {recurrence_before} -> {recurrence_after}); "
         "quality metrics are proxy counts, not external validation."
     )
     return FeedbackLoopEvaluation(
