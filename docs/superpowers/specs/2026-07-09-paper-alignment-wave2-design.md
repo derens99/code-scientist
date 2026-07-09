@@ -22,7 +22,7 @@ Out of scope (later waves): LLM-as-judge preference auto-evaluation, frontier-mo
 
 - `load_objective_benchmark(path)` — JSON fixture `{"name": str, "question": str, "answer": str, "answer_pattern": optional regex str}`. Default pattern: `answer\s*[:=]\s*([A-Za-z0-9_.-]+)` (case-insensitive), matched over `title + claim + rationale`.
 - `grade_hypotheses(benchmark, hypotheses, grades=None)` → `dict[hypothesis_id, bool]`. Extract each hypothesis's declared answer via the pattern; compare case-insensitively to `benchmark["answer"]`. Hypotheses with no extractable answer are ungraded (excluded from the dict). An optional explicit `grades` map (`{hypothesis_id: bool}`, e.g. from an external grader or human) overrides/extends extraction.
-- `compute_elo_concordance(benchmark_name, hypotheses, correctness)` → `EloConcordanceResult`:
+- `compute_elo_concordance(benchmark_name, question, hypotheses, correctness)` → `EloConcordanceResult`:
   - Graded set = active hypotheses (status not in inactive set) present in `correctness`.
   - **Buckets**: sort graded by Elo desc, split into up to 4 near-equal contiguous buckets (fewer when <4 graded); per bucket record elo_max/elo_min/count/accuracy.
   - **Top-1**: whether the highest-Elo graded hypothesis is correct.

@@ -105,7 +105,7 @@ top_slice = ranked_elos[: min(10, len(ranked_elos))]
 elo_trajectory.append(
     EloTrajectoryPoint(
         cycle=cycle,
-        match_index=len(elo_trajectory),
+        match_index=len(matches) - 1,  # match just appended; stays monotonic even when resuming a pre-feature state whose matches predate the trajectory
         match_id=match.id,
         best_elo=round(ranked_elos[0], 3) if ranked_elos else 0.0,
         top_avg_elo=round(sum(top_slice) / len(top_slice), 3) if top_slice else 0.0,
@@ -474,9 +474,10 @@ def compute_elo_concordance(
 
 **Files:**
 - Modify: `src/code_scientist/cli.py` (new subcommand parser + branch, following the `agent-packets` pattern)
-- Modify: `src/code_scientist/reporting.py` ("Elo Concordance" section)
-- Modify: `src/code_scientist/evaluation.py` (`audit_capability_study_coverage` gains `elo_concordance_count` and `elo_trajectory_point_count`)
-- Test: `tests/test_cli.py`, `tests/test_reporting.py`, the evaluation-coverage test file (`grep -rln "audit_capability_study_coverage" tests/`)
+- Modify: `src/code_scientist/reporting.py` ("Elo Concordance" section; study-coverage block ~129-143 renders the two new counts)
+- Modify: `src/code_scientist/evaluation.py` (`audit_capability_study_coverage` ~1136-1203 passes the two new counts into the `CapabilityStudyCoverage(...)` constructor)
+- Modify: `src/code_scientist/models.py` (`CapabilityStudyCoverage` ~560-591: add `elo_concordance_count: int = 0` and `elo_trajectory_point_count: int = 0` fields, plus `setdefault(..., 0)` for each in `from_dict` per repo convention — without this the evaluation.py constructor call raises TypeError)
+- Test: `tests/test_cli.py`, `tests/test_reporting.py`, the evaluation-coverage test file (`grep -rln "audit_capability_study_coverage" tests/`) — extend it to assert the two new fields round-trip and default to 0 on old dicts
 
 - [ ] **Step 1: Write the failing CLI test.**
 
@@ -526,7 +527,7 @@ elo_concordance_parser.add_argument("--objective-benchmark", required=True)
 elo_concordance_parser.add_argument("--grades", default="")
 ```
 
-Branch: load state; `benchmark = load_objective_benchmark(args.objective_benchmark)`; optional grades JSON (`json.loads(Path(args.grades).read_text())` mapping id→bool) when provided; `correctness = grade_hypotheses(benchmark, state.hypotheses, grades=grades)`; `result = compute_elo_concordance(benchmark.name, benchmark.question, state.hypotheses, correctness)`; append via `dataclasses.replace(state, elo_concordance=[*state.elo_concordance, result])`; save with the same persistence helper other state-mutating CLI branches use; print `overall_accuracy`, `top_hypothesis_correct`, `concordance_index`; return 0.
+Branch: load state; `benchmark = load_objective_benchmark(args.objective_benchmark)`; optional grades JSON (`json.loads(Path(args.grades).read_text())` mapping id→bool) when provided; `correctness = grade_hypotheses(benchmark, state.hypotheses, grades=grades)`; `result = compute_elo_concordance(benchmark.name, benchmark.question, state.hypotheses, correctness)`; append via `dataclasses.replace(state, elo_concordance=[*state.elo_concordance, result])`. There is no shared persistence helper — persist with the inline idiom the sibling state-mutating branches use (see `evaluation-return`/`source-attachment` at cli.py ~438/452): write `state.json` via `json.dumps(state.to_dict(), indent=2)` and re-render `report.md` via `render_report(state)`, both into the state file's directory. Print `overall_accuracy`, `top_hypothesis_correct`, `concordance_index`; return 0. Repeated identical runs append duplicate results — accepted, consistent with the sibling append-style branches; do not add dedup.
 
 - [ ] **Step 4: Reporting + coverage tests then implementation.** Failing tests first:
 
@@ -575,7 +576,11 @@ Write these as real tests using the file's existing fixtures — the comments ab
 
 - [ ] **Step 2: Run to verify failure.** Expected: FAIL — with the current single shared list, the worker's consume drains the main thread's records too (record contents/task_id assertions break).
 
-- [ ] **Step 3: Implement.** In `EvidenceStore.__init__`: replace the `_retrieval_memory` list with `self._retrieval_local = threading.local()` and a private accessor:
+- [ ] **Step 3: Implement.** CRITICAL — the two buffers need DIFFERENT treatments; do not mechanically mirror one onto the other:
+
+**(a) `_LLMTraceMixin` (agents.py): the buffer is captured BY REFERENCE.** `_init_llm_trace` builds `_TraceableLLMClient(llm_client, self._llm_interactions)` (agents.py ~51-54) and `_TraceableLLMClient.complete` appends to that captured `self._sink` (~32-36). Making `_llm_interactions` thread-local without touching `_TraceableLLMClient` silently loses every worker-thread interaction (the client appends to the main thread's list while `consume_llm_interactions` reads the empty thread-local one). Refactor `_TraceableLLMClient` to resolve the sink per call: it holds a `sink_factory: Callable[[], list]` and appends via `self._sink_factory().append(...)`; `_init_llm_trace` passes the mixin's thread-local buffer accessor. `consume_llm_interactions` drains via the same accessor.
+
+**(b) `EvidenceStore` (evidence.py): plain attribute, mechanical swap works.** In `EvidenceStore.__init__`: replace the `_retrieval_memory` list with `self._retrieval_local = threading.local()` and a private accessor:
 
 ```python
 def _retrieval_buffer(self) -> list[...]:
