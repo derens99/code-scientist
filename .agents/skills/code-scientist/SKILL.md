@@ -1,6 +1,6 @@
 ---
 name: code-scientist
-description: Run the Code Scientist research engine for a user objective, generate host-agent subagent packets from the saved run state, spawn independent packet reviewers, and consolidate their findings. Use when the user invokes code-scientist, asks for Code Scientist research, or wants Claude Code/Codex subagent orchestration over generated hypotheses.
+description: Run the Code Scientist research engine for a user objective, generate host-agent subagent packets from the saved run state, spawn independent packet reviewers, and consolidate their findings. Also discovers candidate research objectives from a repository when the user has nothing specific in mind. Use when the user invokes code-scientist, asks for Code Scientist research, asks to find something to research, or wants Claude Code/Codex subagent orchestration over generated hypotheses.
 ---
 
 # Code Scientist
@@ -14,6 +14,8 @@ Invoke explicitly in Codex with `$code-scientist` or through the skills picker. 
 ## Inputs
 
 Treat `$ARGUMENTS` or the user's current request as the research objective unless the user points at an existing `runs/<run-id>/state.json`.
+
+If the user supplies no objective, or asks to "find something to research", use discovery mode (Workflow step 2) to mine the repository for candidate objectives before running the engine.
 
 Use conservative defaults when the user does not specify run options:
 
@@ -31,16 +33,21 @@ Always use `uv` for Python commands.
 1. Inspect the current state before running anything:
    - `git status --short --branch`
    - `uv run code-scientist --help`
-2. If the user supplied an existing state file, skip directly to packet generation.
-3. Otherwise run Code Scientist:
+2. Discovery mode — only when there is no objective yet:
+   - `uv run code-scientist discover . --limit 5 --out runs/discovery/objective-candidates.json`
+   - The command mines prior run overviews (`runs/*/state.json` next experiments and limitations), gap language in markdown docs, and TODO/FIXME comments, strongest signal first.
+   - Present the numbered candidates with their sources and ask the user to pick one (or confirm the top candidate when the user asked you to just proceed). The chosen candidate's `objective` string becomes the research objective for the steps below.
+   - If discovery returns nothing, say so and ask the user for an objective instead of inventing one.
+3. If the user supplied an existing state file, skip directly to packet generation.
+4. Otherwise run Code Scientist:
    - `uv run code-scientist run "<objective>" --cycles <n> --max-hypotheses <n> --max-matches <n> --out runs/<run-id>`
    - Preserve user-supplied flags such as `--provider`, `--goal-brief`, `--evidence-path`, `--evidence-index`, `--repo-search-path`, `--web-search-query`, or `--continuous`.
-4. Generate subagent packets:
+5. Generate subagent packets:
    - `uv run code-scientist agent-packets runs/<run-id>/state.json --out runs/<run-id>/agent-packets --limit <n>`
-5. Read `runs/<run-id>/agent-packets/packet-index.json`.
-6. Spawn one independent subagent per packet. Prefer a project custom agent named `code-scientist-packet-reviewer` when available. If the host tool does not expose custom agents, spawn generic read-only reviewer subagents.
-7. Give each subagent only the packet path or packet contents, not the entire `state.json`, unless it asks for a specific referenced id.
-8. Wait for all subagents and consolidate:
+6. Read `runs/<run-id>/agent-packets/packet-index.json`.
+7. Spawn one independent subagent per packet. Prefer a project custom agent named `code-scientist-packet-reviewer` when available. If the host tool does not expose custom agents, spawn generic read-only reviewer subagents.
+8. Give each subagent only the packet path or packet contents, not the entire `state.json`, unless it asks for a specific referenced id.
+9. Wait for all subagents and consolidate:
    - top recommendation per packet,
    - disagreements or weak evidence,
    - highest-value next experiment or implementation step,

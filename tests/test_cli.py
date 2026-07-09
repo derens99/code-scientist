@@ -3449,3 +3449,26 @@ def test_uv_run_exposes_console_script():
 
     assert result.returncode == 0
     assert "Run a bounded research cycle" in result.stdout
+
+
+def test_cli_discover_prints_and_writes_objective_candidates(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "planner.py").write_text(
+        "# TODO: measure whether plan critiques reduce implementation retries\n",
+        encoding="utf-8",
+    )
+    out_path = tmp_path / "candidates.json"
+
+    exit_code = main(["discover", str(repo), "--limit", "3", "--out", str(out_path)])
+
+    assert exit_code == 0
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    assert payload["repo"] == str(repo)
+    assert payload["candidate_count"] == len(payload["candidates"]) == 1
+    candidate = payload["candidates"][0]
+    assert {"objective", "source_kind", "source", "signal"} <= set(candidate)
+    assert candidate["source_kind"] == "todo_comment"
+    captured = capsys.readouterr()
+    assert "1." in captured.out
+    assert "plan critiques" in captured.out

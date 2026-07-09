@@ -22,6 +22,14 @@ This repository includes project-scoped agent entry points:
 
 The shared workflow runs Code Scientist, writes a normal `state.json` and `report.md`, converts top hypotheses into bounded subagent packets, then asks one independent read-only reviewer subagent to review each packet.
 
+When the operator has no objective yet, discovery mode mines the repository for candidates first — prior run overviews (`runs/*/state.json` next experiments and limitations), gap language in markdown docs, and TODO/FIXME comments, ranked strongest signal first:
+
+```bash
+uv run code-scientist discover . --limit 5 --out runs/discovery/objective-candidates.json
+```
+
+The command prints numbered candidates with their provenance and writes the same list as JSON; the chosen candidate's `objective` string feeds the normal run:
+
 ```bash
 uv run code-scientist run "Find testable ideas to improve coding-agent subagent orchestration" \
   --cycles 1 \

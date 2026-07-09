@@ -35,6 +35,7 @@ from code_scientist.evaluation import (
 )
 from code_scientist.llm import DEFAULT_ANTHROPIC_MODEL
 from code_scientist.models import UserFeedback, stable_id
+from code_scientist.objective_discovery import discover_objectives
 from code_scientist.reporting import (
     render_benchmark_comparison_study_report,
     render_capability_study_report,
@@ -240,6 +241,14 @@ def build_parser() -> argparse.ArgumentParser:
     agent_packets_parser.add_argument("state_json")
     agent_packets_parser.add_argument("--out", required=True)
     agent_packets_parser.add_argument("--limit", type=int, default=3)
+
+    discover_parser = subparsers.add_parser(
+        "discover",
+        help="Mine a repository for candidate research objectives.",
+    )
+    discover_parser.add_argument("repo", nargs="?", default=".")
+    discover_parser.add_argument("--limit", type=int, default=5)
+    discover_parser.add_argument("--out", default="")
 
     benchmark_comparison_parser = subparsers.add_parser(
         "benchmark-suite-comparison",
@@ -453,6 +462,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote {output / 'packet-index.json'}")
         for packet in index["packets"]:
             print(f"Wrote {output / packet['path']}")
+        return 0
+    if args.command == "discover":
+        candidates = discover_objectives(args.repo, limit=args.limit)
+        if not candidates:
+            print("No candidate objectives found.")
+        for index, candidate in enumerate(candidates, start=1):
+            print(f"{index}. {candidate['objective']}")
+            print(f"   source: {candidate['source_kind']} ({candidate['source']})")
+        if args.out:
+            out_path = Path(args.out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "repo": str(Path(args.repo)),
+                "candidate_count": len(candidates),
+                "candidates": candidates,
+            }
+            out_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            print(f"Wrote {out_path}")
         return 0
     if args.command == "baseline-run":
         out_dir = Path(args.out)
