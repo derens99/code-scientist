@@ -1,4 +1,5 @@
 import json
+import threading
 from dataclasses import replace
 
 from code_scientist.agents import (
@@ -2056,3 +2057,44 @@ def test_meta_review_can_use_llm_schema_summary_and_overview():
     assert overview.generated_by == "llm_meta_review"
     assert overview.summary == "Top candidates should move toward benchmark-grounded critic loops."
     assert overview.top_hypothesis_ids == ["hyp-a"]
+
+
+def test_llm_interactions_are_isolated_per_thread():
+    class FakeLLM:
+        def complete(self, prompt, max_tokens):
+            return json.dumps(
+                {
+                    "hypotheses": [
+                        {
+                            "title": "Thread isolation probe",
+                            "claim": "A dedicated buffer keeps worker-thread interactions separate.",
+                            "rationale": "Thread-local sinks avoid cross-thread trace loss.",
+                            "assumptions": ["Threads run concurrently."],
+                            "risks": ["Shared mutable state races."],
+                        }
+                    ]
+                }
+            )
+
+    main_goal = ResearchGoal.from_objective("Improve LLM coding agents main-thread objective")
+    worker_goal = ResearchGoal.from_objective("Improve LLM coding agents worker-thread objective")
+    agent = GenerationAgent(llm_client=FakeLLM(), llm_max_tokens=64)
+
+    agent.generate(main_goal, seed_paper_evidence(), limit=1)
+
+    worker_interactions: list = []
+
+    def worker() -> None:
+        agent.generate(worker_goal, seed_paper_evidence(), limit=1)
+        worker_interactions.extend(agent.consume_llm_interactions())
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+
+    main_interactions = agent.consume_llm_interactions()
+
+    assert len(worker_interactions) == 1
+    assert len(main_interactions) == 1
+    assert "worker-thread objective" in worker_interactions[0]["prompt"]
+    assert "main-thread objective" in main_interactions[0]["prompt"]

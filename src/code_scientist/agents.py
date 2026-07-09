@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from collections import Counter
 from dataclasses import replace
 from itertools import combinations
@@ -27,13 +28,13 @@ from code_scientist.safety import SafetyPolicy, review_evidence_safety, review_h
 
 
 class _TraceableLLMClient:
-    def __init__(self, client: Any, sink: list[dict[str, str]]) -> None:
+    def __init__(self, client: Any, sink_factory: Callable[[], list[dict[str, str]]]) -> None:
         self._client = client
-        self._sink = sink
+        self._sink_factory = sink_factory
 
     def complete(self, prompt: str, max_tokens: int) -> str:
         response = self._client.complete(prompt, max_tokens=max_tokens)
-        self._sink.append(
+        self._sink_factory().append(
             {
                 "turn": _llm_turn_label(prompt),
                 "prompt": str(prompt),
@@ -49,16 +50,24 @@ class _TraceableLLMClient:
 
 class _LLMTraceMixin:
     def _init_llm_trace(self, llm_client: Any | None) -> None:
-        self._llm_interactions: list[dict[str, str]] = []
+        self._llm_interactions_local = threading.local()
         self.llm_client = (
-            _TraceableLLMClient(llm_client, self._llm_interactions)
+            _TraceableLLMClient(llm_client, self._llm_interactions_buffer)
             if llm_client is not None
             else None
         )
 
+    def _llm_interactions_buffer(self) -> list[dict[str, str]]:
+        buffer = getattr(self._llm_interactions_local, "records", None)
+        if buffer is None:
+            buffer = []
+            self._llm_interactions_local.records = buffer
+        return buffer
+
     def consume_llm_interactions(self) -> list[dict[str, str]]:
-        interactions = list(self._llm_interactions)
-        self._llm_interactions.clear()
+        buffer = self._llm_interactions_buffer()
+        interactions = list(buffer)
+        buffer.clear()
         return interactions
 
 

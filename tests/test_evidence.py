@@ -1,6 +1,8 @@
 import json
+import threading
 
 from code_scientist.evidence import EvidenceStore
+from code_scientist.models import Evidence
 
 
 def test_evidence_store_ingests_local_files_and_returns_cited_snippets(tmp_path):
@@ -290,3 +292,36 @@ def test_evidence_index_records_local_embedding_retrieval_metadata(tmp_path):
     assert "local_embedding" in data["retrieval_methods"]
     assert data["embedding_model"] == "local-hashed-char-ngram-v1"
     assert data["embedding_dimensions"] > 0
+
+
+def test_retrieval_memory_is_isolated_per_thread():
+    store = EvidenceStore(
+        [
+            Evidence(id="ev-1", kind="local_source", source="a.md", content="query one topic alpha"),
+            Evidence(id="ev-2", kind="local_source", source="b.md", content="query two topic beta"),
+        ]
+    )
+
+    store.retrieve("query one")
+
+    worker_records: list = []
+
+    def worker() -> None:
+        store.retrieve("query two")
+        worker_records.extend(
+            store.consume_retrieval_memory(cycle=1, agent="reflection", task_id="task-w", reason="r")
+        )
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+
+    main_records = store.consume_retrieval_memory(cycle=1, agent="reflection", task_id="task-m", reason="r")
+
+    assert len(worker_records) == 1
+    assert worker_records[0].query == "query two"
+    assert worker_records[0].task_id == "task-w"
+
+    assert len(main_records) == 1
+    assert main_records[0].query == "query one"
+    assert main_records[0].task_id == "task-m"

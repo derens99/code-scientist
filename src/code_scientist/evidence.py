@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import threading
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
@@ -51,7 +52,14 @@ class EvidenceBundle:
 class EvidenceStore:
     def __init__(self, evidence: Iterable[Evidence] = ()) -> None:
         self.evidence = list(evidence)
-        self._retrieval_memory: list[RetrievalMemoryRecord] = []
+        self._retrieval_local = threading.local()
+
+    def _retrieval_buffer(self) -> list[RetrievalMemoryRecord]:
+        buffer = getattr(self._retrieval_local, "records", None)
+        if buffer is None:
+            buffer = []
+            self._retrieval_local.records = buffer
+        return buffer
 
     @classmethod
     def from_paths(cls, paths: Iterable[str | Path]) -> EvidenceStore:
@@ -282,11 +290,12 @@ class EvidenceStore:
         else:
             raise ValueError(f"Unknown evidence retrieval mode: {mode}")
         bundle = EvidenceBundle(query=query, evidence=evidence, retrieval_method=mode)
-        self._retrieval_memory.append(
+        buffer = self._retrieval_buffer()
+        buffer.append(
             RetrievalMemoryRecord(
                 id=stable_id(
                     "retrieval",
-                    f"{len(self._retrieval_memory)}:{query}:{mode}:{','.join(bundle.evidence_refs)}",
+                    f"{len(buffer)}:{query}:{mode}:{','.join(bundle.evidence_refs)}",
                 ),
                 query=query,
                 retrieval_method=mode,
@@ -305,6 +314,7 @@ class EvidenceStore:
         task_id: str,
         reason: str = "",
     ) -> list[RetrievalMemoryRecord]:
+        buffer = self._retrieval_buffer()
         records = [
             replace(
                 record,
@@ -320,9 +330,9 @@ class EvidenceStore:
                 task_id=task_id,
                 reason=reason or record.reason,
             )
-            for index, record in enumerate(self._retrieval_memory)
+            for index, record in enumerate(buffer)
         ]
-        self._retrieval_memory.clear()
+        buffer.clear()
         return records
 
     def add(self, evidence: Evidence) -> None:
