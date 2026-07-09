@@ -1283,6 +1283,21 @@ def test_supervisor_anthropic_provider_drives_plan_and_all_agent_roles(tmp_path)
                         ]
                     }
                 )
+            if "multi-round debate round" in lowered:
+                return json.dumps(
+                    {"debate_transcript": ["Round argument: first candidate cites benchmark evidence."]}
+                )
+            if "multi-round debate final judge" in lowered:
+                return json.dumps(
+                    {
+                        "winner": "first",
+                        "rationale": "First candidate is more directly measurable.",
+                        "judge_trace": "llm judge compared evidence and reviews.",
+                        "uncertainty": 0.31,
+                        "debate_transcript": ["Pro first: direct metric.", "Judge: first wins."],
+                        "outcome": "win",
+                    }
+                )
             if "pairwise debate judge" in lowered:
                 return json.dumps(
                     {
@@ -1338,7 +1353,9 @@ def test_supervisor_anthropic_provider_drives_plan_and_all_agent_roles(tmp_path)
     assert all(review.review_type == "llm_deep_verification" for review in state.reviews)
     assert any(edge.method == "llm_goal_aware_proximity" for edge in state.proximity_edges)
     assert state.matches
-    assert state.matches[0].comparison_mode == "llm_debate_judge"
+    # Two active hypotheses means both sit in the top Elo tier, so the rank-tiered
+    # scheduler runs the LLM multi-round debate path for this pair.
+    assert state.matches[0].comparison_mode == "llm_multi_round_debate_judge"
     assert state.meta_reviews[0].common_weaknesses == ["needs prospective validation"]
     assert state.research_overview is not None
     assert state.research_overview.generated_by == "llm_meta_review"
@@ -2410,7 +2427,10 @@ def test_supervisor_records_embedding_proximity_and_debate_matches(tmp_path):
     assert any(edge.method == "embedding_proximity" for edge in state.proximity_edges)
     assert any(edge.evidence_refs or edge.review_refs for edge in state.proximity_edges)
     assert state.matches
-    assert all(match.comparison_mode == "deterministic_debate_judge" for match in state.matches)
+    assert all(
+        match.comparison_mode in {"deterministic_debate_judge", "deterministic_multi_round_debate_judge"}
+        for match in state.matches
+    )
     assert all(match.debate_transcript for match in state.matches)
     assert any(match.evidence_refs for match in state.matches)
     assert any(trace.agent == "ranking" and trace.evidence_refs for trace in state.agent_traces)
@@ -2483,6 +2503,7 @@ def test_supervisor_passes_evidence_store_to_ranking_debate(tmp_path, monkeypatc
     )
     captured_stores: list[object | None] = []
     original_compare = RankingAgent.compare_debate
+    original_compare_multi = RankingAgent.compare_multi_round_debate
 
     def spy_compare(self, goal, first, second, reviews=None, evidence_store=None):
         captured_stores.append(evidence_store)
@@ -2490,7 +2511,14 @@ def test_supervisor_passes_evidence_store_to_ranking_debate(tmp_path, monkeypatc
             return original_compare(self, goal, first, second, reviews=reviews)
         return original_compare(self, goal, first, second, reviews=reviews, evidence_store=evidence_store)
 
+    def spy_compare_multi(self, goal, first, second, reviews=None, rounds=2, evidence_store=None):
+        captured_stores.append(evidence_store)
+        return original_compare_multi(
+            self, goal, first, second, reviews=reviews, rounds=rounds, evidence_store=evidence_store
+        )
+
     monkeypatch.setattr(RankingAgent, "compare_debate", spy_compare)
+    monkeypatch.setattr(RankingAgent, "compare_multi_round_debate", spy_compare_multi)
 
     state = run_research_cycle(
         objective="Find testable ideas to improve LLM coding agents",
@@ -2536,6 +2564,48 @@ def test_supervisor_uses_multi_round_debate_when_plan_requests_simulated_debate(
     ranking_tasks = [task for task in state.task_queue if task.kind == "ranking"]
     assert ranking_tasks
     assert ranking_tasks[-1].payload["comparison_mode"] == "deterministic_multi_round_debate_judge"
+
+
+def test_top_tier_pairs_use_multi_round_debate_and_others_single_turn(tmp_path):
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=2,
+        max_hypotheses=8,
+        max_matches=6,
+        out_dir=tmp_path / "run",
+    )
+
+    assert state.matches, "expected matches"
+    multi = [m for m in state.matches if "debate_tier=top" in m.judge_trace]
+    single = [m for m in state.matches if "debate_tier=standard" in m.judge_trace]
+    assert len(multi) + len(single) == len(state.matches), "every match records its tier"
+    assert multi, "expected at least one top-tier multi-round match"
+    assert single, "expected at least one single-turn match"
+    # Prove the real code path ran, not just the label: multi-round matches carry
+    # rebuttal rounds in the transcript and the multi-round comparison mode.
+    for match in multi:
+        assert match.comparison_mode == "deterministic_multi_round_debate_judge"
+        assert any("Rebuttal" in line for line in match.debate_transcript)
+    for match in single:
+        assert match.comparison_mode == "deterministic_debate_judge"
+        assert not any("Rebuttal" in line for line in match.debate_transcript)
+
+
+def test_debate_depth_override_reads_plan_signals():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    base = replace(
+        ResearchPlanConfig.from_goal(goal),
+        generation_methods=["paper_seeded_idea_generation"],
+        review_types=["initial_review"],
+        allowed_tools=[],
+    )
+
+    multi_plan = replace(base, generation_methods=["paper_seeded_idea_generation", "multi-round-debate"])
+    single_plan = replace(base, review_types=["initial_review", "single_turn_debate"])
+
+    assert supervisor_module._debate_depth_override(multi_plan) == "multi"
+    assert supervisor_module._debate_depth_override(single_plan) == "single"
+    assert supervisor_module._debate_depth_override(base) is None
 
 
 def test_task_queue_priorities_reflect_scheduler_weights(tmp_path):

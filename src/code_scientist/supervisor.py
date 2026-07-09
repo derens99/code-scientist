@@ -686,12 +686,24 @@ def run_research_cycle(
                 execute_proximity,
             )
 
+            debate_depth_override = _debate_depth_override(plan)
+
             def execute_ranking(_task: Task) -> list[str]:
                 nonlocal hypotheses
                 cycle_match_ids: list[str] = []
                 cycle_match_evidence_refs: list[str] = []
-                use_multi_round_debate = _use_multi_round_debate(plan)
+                multi_round_count = 0
+                single_turn_count = 0
                 for first, second in _schedule_pairs(hypotheses, proximity_edges, matches, max_matches, reviews):
+                    # Per-pair depth decision (paper's compute optimization): top-tier
+                    # pairs get multi-round debates, others single-turn. Tier membership
+                    # uses Elo at match time, so earlier matches in this loop count.
+                    top_tier = _top_debate_tier_ids(hypotheses)
+                    use_multi_round = debate_depth_override == "multi" or (
+                        debate_depth_override is None
+                        and first.id in top_tier
+                        and second.id in top_tier
+                    )
                     pair_reviews = _reviews_for_pair(reviews, first.id, second.id)
                     ranked_pair, match = (
                         ranking.compare_multi_round_debate(
@@ -702,7 +714,7 @@ def run_research_cycle(
                             rounds=2,
                             evidence_store=evidence_store if use_grounded_review else None,
                         )
-                        if use_multi_round_debate
+                        if use_multi_round
                         else ranking.compare_debate(
                             goal,
                             first,
@@ -710,6 +722,15 @@ def run_research_cycle(
                             reviews=pair_reviews,
                             evidence_store=evidence_store if use_grounded_review else None,
                         )
+                    )
+                    if use_multi_round:
+                        multi_round_count += 1
+                    else:
+                        single_turn_count += 1
+                    tier_note = f"debate_tier={'top' if use_multi_round else 'standard'}"
+                    match = replace(
+                        match,
+                        judge_trace=f"{match.judge_trace}; {tier_note}" if match.judge_trace else tier_note,
                     )
                     match = _apply_match_feedback(match, ranking_feedback)
                     hypotheses = _replace_hypotheses(hypotheses, ranked_pair)
@@ -723,9 +744,19 @@ def run_research_cycle(
                     reason="ranking pair evidence retrieval",
                 )
                 retrieval_memory.extend(task_retrievals)
-                action = "multi_round_debate_pairwise_compare" if use_multi_round_debate else "debate_pairwise_compare"
-                comparison_label = "multi-round debate" if use_multi_round_debate else "deterministic debate"
-                notes = f"Ran {len(cycle_match_ids)} {comparison_label} matches."
+                if debate_depth_override == "multi":
+                    action = "multi_round_debate_pairwise_compare"
+                    comparison_label = "multi-round debate"
+                elif debate_depth_override == "single":
+                    action = "debate_pairwise_compare"
+                    comparison_label = "deterministic debate"
+                else:
+                    action = "rank_tiered_debate_pairwise_compare"
+                    comparison_label = "rank-tiered debate"
+                notes = (
+                    f"Ran {len(cycle_match_ids)} {comparison_label} matches "
+                    f"({multi_round_count} multi-round, {single_turn_count} single-turn)."
+                )
                 if ranking_feedback:
                     notes += f" Agent feedback: {'; '.join(ranking_feedback)}."
                 agent_traces.append(
@@ -756,8 +787,10 @@ def run_research_cycle(
                 {
                     "comparison_mode": (
                         "deterministic_multi_round_debate_judge"
-                        if _use_multi_round_debate(plan)
+                        if debate_depth_override == "multi"
                         else "deterministic_debate_judge"
+                        if debate_depth_override == "single"
+                        else "rank_tiered_debate_judge"
                     ),
                     "hypothesis_ids": [item.id for item in hypotheses],
                     "agent_feedback": ranking_feedback,
@@ -2320,14 +2353,27 @@ def _active_evolution_strategy(
     return strategies[index].strip().lower().replace("-", "_") or "simplification"
 
 
-def _use_multi_round_debate(plan: ResearchPlanConfig) -> bool:
+def _debate_depth_override(plan: ResearchPlanConfig) -> str | None:
+    """Plan-level debate-depth override: "multi", "single", or None for rank-tiered."""
     signals = [
         *plan.generation_methods,
         *plan.review_types,
         *plan.allowed_tools,
     ]
     normalized = {signal.lower().replace("-", "_") for signal in signals}
-    return bool({"simulated_debate", "multi_round_debate", "multi_turn_debate"} & normalized)
+    if {"single_turn_debate", "single_round_debate"} & normalized:
+        return "single"
+    if {"simulated_debate", "multi_round_debate", "multi_turn_debate"} & normalized:
+        return "multi"
+    return None
+
+
+def _top_debate_tier_ids(hypotheses: list[Hypothesis]) -> set[str]:
+    """Top Elo tier (top 25% of active hypotheses, minimum tier size 2) at match time."""
+    active = _active_hypotheses(hypotheses)
+    ranked_ids = [item.id for item in sorted(active, key=lambda item: item.elo, reverse=True)]
+    tier_size = max(2, len(ranked_ids) // 4)
+    return set(ranked_ids[:tier_size])
 
 
 def _apply_safety_quarantine(hypotheses: list[Hypothesis], reviews: list[Review]) -> list[Hypothesis]:

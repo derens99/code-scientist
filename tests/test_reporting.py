@@ -645,7 +645,8 @@ def test_render_report_includes_debate_match_transcripts(tmp_path):
 
     report = render_report(state)
 
-    assert "deterministic_debate_judge" in report
+    # Rank-tiered scheduling picks per-pair depth, so either judge mode may appear.
+    assert "deterministic_debate_judge" in report or "deterministic_multi_round_debate_judge" in report
     assert "Debate transcript" in report
     assert "Evidence refs" in report
 
