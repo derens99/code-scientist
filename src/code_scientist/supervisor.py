@@ -529,6 +529,7 @@ def run_research_cycle(
                     proximity_edges=proximity_edges,
                     generation_allocations=generation_allocations,
                     retrieval_memory=retrieval_memory,
+                    research_overview=research_overview,
                 )
                 generated = [item for item in generated_candidates if item.id not in existing_ids]
                 return [item.id for item in generated]
@@ -549,6 +550,8 @@ def run_research_cycle(
                         safety_feedback=safety_feedback,
                         task_id=_task.id,
                         retrieval_memory=retrieval_memory,
+                        matches=matches,
+                        prior_reviews=reviews,
                     )
                     reviewed.extend(task_reviews)
                     accepted_ids = _accepted_hypothesis_ids([target], task_reviews)
@@ -616,6 +619,8 @@ def run_research_cycle(
                     safety_feedback=safety_feedback,
                     task_id=_task.id,
                     retrieval_memory=retrieval_memory,
+                    matches=matches,
+                    prior_reviews=reviews,
                 )
                 return [item.id for item in reviewed]
 
@@ -868,6 +873,8 @@ def run_research_cycle(
                         agent_traces=agent_traces,
                         task_id=_task.id,
                         retrieval_memory=retrieval_memory,
+                        matches=matches,
+                        prior_reviews=reviews,
                     )
                     accepted_child_ids = _accepted_hypothesis_ids(children, child_reviews)
                     hypotheses = _merge_hypotheses(
@@ -1725,6 +1732,7 @@ def _generate_for_plan(
     proximity_edges: list[ProximityEdge] | None = None,
     generation_allocations: list[dict[str, Any]] | None = None,
     retrieval_memory: list[RetrievalMemoryRecord] | None = None,
+    research_overview: ResearchOverview | None = None,
 ) -> list[Hypothesis]:
     if limit <= 0:
         return []
@@ -1753,7 +1761,13 @@ def _generate_for_plan(
             else evidence
         )
         mode_items = generation.generate_with_mode(
-            goal, source, mode=mode, limit=mode_limit, agent_feedback=agent_feedback
+            goal,
+            source,
+            mode=mode,
+            limit=mode_limit,
+            agent_feedback=agent_feedback,
+            existing_hypotheses=existing_hypotheses,
+            research_overview=research_overview,
         )
         mode_retrievals = evidence_store.consume_retrieval_memory(
             cycle=cycle,
@@ -1811,6 +1825,8 @@ def _review_for_plan(
     safety_feedback: list[str] | None = None,
     task_id: str = "",
     retrieval_memory: list[RetrievalMemoryRecord] | None = None,
+    matches: list[Match] | None = None,
+    prior_reviews: list[Review] | None = None,
 ) -> list[Review]:
     reviews: list[Review] = []
     for review_type in _active_review_types(plan, use_grounded):
@@ -1826,6 +1842,8 @@ def _review_for_plan(
                 review_type,
                 evidence_store if use_grounded else None,
                 agent_feedback=review_feedback,
+                matches=matches,
+                prior_reviews=prior_reviews,
             )
             for item in hypotheses
         ]

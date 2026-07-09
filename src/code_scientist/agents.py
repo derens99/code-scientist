@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from dataclasses import replace
 from itertools import combinations
@@ -229,6 +230,8 @@ class GenerationAgent(_LLMTraceMixin):
         mode: str,
         limit: int = 6,
         agent_feedback: list[str] | None = None,
+        existing_hypotheses: list[Hypothesis] | None = None,
+        research_overview: Any | None = None,
     ) -> list[Hypothesis]:
         if mode == "paper_seeded_idea_generation":
             source_evidence = evidence.evidence if isinstance(evidence, EvidenceStore) else evidence
@@ -246,9 +249,40 @@ class GenerationAgent(_LLMTraceMixin):
             return _assumption_decomposition_hypotheses(goal, source_evidence, limit)
         if mode == "research_expansion_from_meta_review":
             source_evidence = evidence.evidence if isinstance(evidence, EvidenceStore) else evidence
+            known = existing_hypotheses or []
+            if self.llm_client:
+                return self._generate_expansion_with_llm(
+                    goal, source_evidence, limit, agent_feedback, known, research_overview
+                )
+            known_tokens = {
+                token
+                for item in known
+                for token in re.findall(r"[a-z]{5,}", f"{item.title} {item.claim}".lower())
+            }
+            overview_note = ""
+            if research_overview is not None and getattr(research_overview, "limitations", None):
+                overview_note = (
+                    f" Overview gaps considered: {'; '.join(research_overview.limitations[:2])}."
+                )
+            candidates = self.generate(goal, source_evidence, limit=limit * 3, agent_feedback=agent_feedback)
+            known_claims = {item.claim for item in known}
+            fresh = [
+                item
+                for item in candidates
+                if item.claim not in known_claims
+                and len(known_tokens & set(re.findall(r"[a-z]{5,}", item.claim.lower()))) <= 2
+            ] or [item for item in candidates if item.claim not in known_claims]
             return [
-                replace(item, origin="generation:research_expansion_from_meta_review")
-                for item in self.generate(goal, source_evidence, limit=limit, agent_feedback=agent_feedback)
+                replace(
+                    item,
+                    id=stable_id("hyp", f"{goal.id}:expansion:{item.id}"),
+                    origin="generation:research_expansion_from_meta_review",
+                    rationale=(
+                        f"{item.rationale} Targets unexplored area relative to "
+                        f"{len(known)} existing hypotheses.{overview_note}"
+                    ),
+                )
+                for item in fresh[:limit]
             ]
         if mode in {"simulated_debate", "multi_round_debate", "multi_turn_debate"}:
             source_evidence = evidence.evidence if isinstance(evidence, EvidenceStore) else evidence
@@ -267,6 +301,45 @@ class GenerationAgent(_LLMTraceMixin):
                 limit=limit,
                 agent_feedback=agent_feedback,
             )
+        ]
+
+    def _generate_expansion_with_llm(
+        self,
+        goal: ResearchGoal,
+        evidence: list[Any],
+        limit: int,
+        agent_feedback: list[str] | None,
+        existing_hypotheses: list[Hypothesis],
+        research_overview: Any | None,
+    ) -> list[Hypothesis]:
+        response_text = self.llm_client.complete(
+            _generation_prompt(
+                goal,
+                evidence,
+                limit,
+                agent_feedback,
+                expansion_context=_expansion_context_block(existing_hypotheses, research_overview),
+            ),
+            max_tokens=self.llm_max_tokens,
+        )
+        hypotheses = self._parse_llm_hypotheses_with_repair(
+            response_text=response_text,
+            goal=goal,
+            evidence=evidence,
+            limit=limit,
+            origin=self.llm_origin,
+        )
+        return [
+            replace(
+                item,
+                id=stable_id("hyp", f"{goal.id}:expansion:{item.id}"),
+                origin="generation:research_expansion_from_meta_review",
+                rationale=(
+                    f"{item.rationale} Targets unexplored area relative to "
+                    f"{len(existing_hypotheses)} existing hypotheses."
+                ),
+            )
+            for item in hypotheses
         ]
 
     def _generate_with_llm(
@@ -525,6 +598,8 @@ class ReflectionAgent(_LLMTraceMixin):
         review_type: str,
         evidence_store: EvidenceStore | None = None,
         agent_feedback: list[str] | None = None,
+        matches: list[Match] | None = None,
+        prior_reviews: list[Review] | None = None,
     ) -> Review:
         if self.llm_client:
             try:
@@ -532,7 +607,9 @@ class ReflectionAgent(_LLMTraceMixin):
                     return self._deep_verification_with_llm(goal, hypothesis, evidence_store, agent_feedback)
                 if review_type == "safety_review":
                     return self._safety_review_with_llm(goal, hypothesis, evidence_store, agent_feedback)
-                return self._review_with_llm(goal, hypothesis, review_type, evidence_store, agent_feedback)
+                return self._review_with_llm(
+                    goal, hypothesis, review_type, evidence_store, agent_feedback, matches
+                )
             except LLMResponseError:
                 pass
         if review_type == "initial_review":
@@ -543,10 +620,21 @@ class ReflectionAgent(_LLMTraceMixin):
             result = self._safety_exploration_review(goal, hypothesis, evidence_store)
         elif review_type == "recurrent_tournament_review":
             base = self.review(goal, hypothesis)
+            record = [m for m in (matches or []) if hypothesis.id in (m.hypothesis_a, m.hypothesis_b)]
+            wins = sum(1 for m in record if m.winner == hypothesis.id)
+            losses = sum(1 for m in record if m.winner and m.winner != hypothesis.id)
+            recurring = _recurring_weakness_terms(prior_reviews or [], hypothesis.id)
+            findings = [
+                *base.findings,
+                f"Tournament record: won {wins} and lost {losses} of {len(record)} matches.",
+            ]
+            if recurring:
+                findings.append(f"Recurring weaknesses across prior reviews: {', '.join(sorted(recurring)[:3])}.")
             result = replace(
                 base,
-                id=stable_id("rev", f"{goal.id}:{hypothesis.id}:{review_type}:{base.decision}"),
+                id=stable_id("rev", f"{goal.id}:{hypothesis.id}:{review_type}:{wins}:{losses}"),
                 review_type=review_type,
+                findings=findings,
             )
         elif review_type == "novelty_review":
             result = self._novelty_review(goal, hypothesis, evidence_store)
@@ -882,10 +970,11 @@ class ReflectionAgent(_LLMTraceMixin):
         review_type: str,
         evidence_store: EvidenceStore | None,
         agent_feedback: list[str] | None = None,
+        matches: list[Match] | None = None,
     ) -> Review:
         evidence = evidence_store.search_hypothesis(hypothesis, limit=5) if evidence_store else []
         response_text = self.llm_client.complete(
-            _review_prompt(goal, hypothesis, review_type, evidence, agent_feedback),
+            _review_prompt(goal, hypothesis, review_type, evidence, agent_feedback, matches),
             max_tokens=self.llm_max_tokens,
         )
         return self._parse_llm_review(
@@ -2496,12 +2585,22 @@ def _bounded_float(value: Any, fallback: float) -> float:
     return round(min(max(number, 0.0), 1.0), 3)
 
 
+def _match_summary_line(hypothesis: Hypothesis, matches: list[Match] | None) -> str:
+    record = [m for m in (matches or []) if hypothesis.id in (m.hypothesis_a, m.hypothesis_b)]
+    if not record:
+        return ""
+    wins = sum(1 for m in record if m.winner == hypothesis.id)
+    losses = sum(1 for m in record if m.winner and m.winner != hypothesis.id)
+    return f"\nTournament match record: won {wins} and lost {losses} of {len(record)} matches.\n"
+
+
 def _review_prompt(
     goal: ResearchGoal,
     hypothesis: Hypothesis,
     review_type: str,
     evidence: list[Any],
     agent_feedback: list[str] | None = None,
+    matches: list[Match] | None = None,
 ) -> str:
     evidence_text = _evidence_prompt_lines(evidence)
     return f"""You are a scientific reflection agent for a coding-agent AI co-scientist.
@@ -2518,7 +2617,7 @@ Hypothesis:
 
 Evidence:
 {evidence_text}
-
+{_match_summary_line(hypothesis, matches)}
 Return only valid JSON with:
 decision, scores, strengths, weaknesses, safety_notes, findings, confidence, requires_revision, evidence_refs.
 {_feedback_block(agent_feedback)}"""
@@ -3636,6 +3735,16 @@ def _contact_targets_for_output(
     return _unique_refs(targets)
 
 
+def _recurring_weakness_terms(prior_reviews: list[Review], hypothesis_id: str) -> set[str]:
+    counts: Counter[str] = Counter()
+    for review in prior_reviews:
+        if review.hypothesis_id != hypothesis_id:
+            continue
+        for weakness in review.weaknesses:
+            counts.update(re.findall(r"[a-z]{5,}", weakness.lower()))
+    return {term for term, count in counts.items() if count >= 2}
+
+
 def _looks_contradictory(text: str) -> bool:
     lowered = text.lower()
     contradiction_markers = (
@@ -3752,11 +3861,32 @@ def _rank_score(hypothesis: Hypothesis) -> int:
     )
 
 
+def _expansion_context_block(
+    existing_hypotheses: list[Hypothesis],
+    research_overview: Any | None,
+) -> str:
+    if not existing_hypotheses and research_overview is None:
+        return ""
+    titles = "; ".join(item.title for item in existing_hypotheses) or "none"
+    overview_summary = ""
+    if research_overview is not None and getattr(research_overview, "summary", ""):
+        overview_summary = f" Overview summary: {research_overview.summary}"
+    limitations = ""
+    if research_overview is not None and getattr(research_overview, "limitations", None):
+        limitations = f" Overview gaps: {'; '.join(research_overview.limitations[:2])}."
+    return (
+        "\n\nResearch expansion context: already-explored hypotheses are: "
+        f"{titles}.{overview_summary}{limitations} "
+        "Target unexplored areas relative to these existing hypotheses.\n"
+    )
+
+
 def _generation_prompt(
     goal: ResearchGoal,
     evidence: list[Any],
     limit: int,
     agent_feedback: list[str] | None = None,
+    expansion_context: str = "",
 ) -> str:
     evidence_lines = []
     for item in evidence[:5]:
@@ -3786,7 +3916,7 @@ Return only valid JSON with this shape:
 }}
 
 Prefer ideas that are measurable with these metrics: {", ".join(goal.metrics)}.
-Do not claim an improvement as proven; describe an experimentable hypothesis.{_feedback_block(agent_feedback)}"""
+Do not claim an improvement as proven; describe an experimentable hypothesis.{expansion_context}{_feedback_block(agent_feedback)}"""
 
 
 def _json_repair_prompt(goal: ResearchGoal, invalid_response: str, limit: int) -> str:

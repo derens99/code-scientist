@@ -10,9 +10,21 @@ from code_scientist.agents import (
     ReflectionAgent,
 )
 from code_scientist.evidence import EvidenceStore
-from code_scientist.models import Evidence, ResearchGoal, Review
+from code_scientist.models import Evidence, Match, ResearchGoal, Review
 from code_scientist.paper import seed_paper_evidence
 from code_scientist.planning import parse_research_plan_with_llm
+
+
+def _make_match(winner: str, loser: str) -> Match:
+    return Match(
+        id=f"match-{winner}-{loser}",
+        hypothesis_a=winner,
+        hypothesis_b=loser,
+        winner=winner,
+        rationale="Pairwise judge preferred the winning hypothesis.",
+        elo_before={winner: 1200.0, loser: 1200.0},
+        elo_after={winner: 1216.0, loser: 1184.0},
+    )
 
 
 def test_generation_creates_structured_hypotheses():
@@ -113,6 +125,25 @@ def test_generation_supports_selectable_deterministic_modes():
     assert grounded_hypotheses[0].origin == "generation:literature_grounded_generation"
     assert grounded_hypotheses[0].evidence_refs == ["ev-lit"]
     assert "Literature-grounded" in grounded_hypotheses[0].rationale
+
+
+def test_research_expansion_targets_unexplored_areas():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    agent = GenerationAgent()
+    baseline = agent.generate_with_mode(goal, [], mode="paper_seeded_idea_generation", limit=6)
+    existing = baseline[:3]
+    expanded = agent.generate_with_mode(
+        goal,
+        [],
+        mode="research_expansion_from_meta_review",
+        limit=3,
+        existing_hypotheses=existing,
+    )
+    existing_claims = {h.claim for h in existing}
+
+    assert expanded
+    assert all(h.claim not in existing_claims for h in expanded)
+    assert all("unexplored" in h.rationale.lower() or "expansion" in h.origin for h in expanded)
 
 
 def test_generation_supports_simulated_debate_mode_with_trace():
@@ -655,6 +686,23 @@ def test_reflection_supports_observation_and_simulation_review_modes():
     assert "ev-simulation" in simulation.evidence_refs
     assert any("simulation evidence" in finding.lower() for finding in simulation.findings)
     assert "missing simulation evidence" not in simulation.weaknesses
+
+
+def test_recurrent_tournament_review_cites_match_record():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    agent = ReflectionAgent()
+    hypothesis = GenerationAgent().generate(goal, [], limit=1)[0]
+    matches = [_make_match(winner=hypothesis.id, loser="hyp-other")] * 2
+
+    review = agent.review_with_type(
+        goal,
+        hypothesis,
+        "recurrent_tournament_review",
+        matches=matches,
+    )
+
+    assert review.review_type == "recurrent_tournament_review"
+    assert any("2" in f and ("won" in f.lower() or "match" in f.lower()) for f in review.findings)
 
 
 def test_safety_review_records_multi_turn_red_team_trace():
