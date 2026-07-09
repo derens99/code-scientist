@@ -139,6 +139,8 @@ def render_capability_study_report(states: list[RunState]) -> str:
         f"- Prospective/external measurements: {coverage.measured_prospective_count}",
         f"- Feedback-loop measurements: {coverage.measured_feedback_loop_count}",
         f"- Safety evaluations: {coverage.safety_evaluation_count}",
+        f"- Elo concordance results: {coverage.elo_concordance_count}",
+        f"- Elo trajectory points: {coverage.elo_trajectory_point_count}",
         f"- Missing requirements: {', '.join(coverage.missing_requirements) or 'none'}",
         f"- Summary: {coverage.summary}",
         "",
@@ -752,6 +754,24 @@ def render_report(state: RunState) -> str:
         lines.append(f"- Max best Elo: {best_point.best_elo:.3f} (match {best_point.match_id})")
         lines.append(f"- First top-avg Elo: {first.top_avg_elo:.3f}")
         lines.append(f"- Last top-avg Elo: {last.top_avg_elo:.3f}")
+        lines.append("")
+    if state.elo_concordance:
+        lines.extend(["## Elo Concordance", ""])
+        for result in state.elo_concordance:
+            lines.append(f"- Benchmark: {result.benchmark_name}")
+            lines.append(f"  - Question: {result.question}")
+            lines.append(f"  - Graded: {result.graded_count}; Ungraded: {result.ungraded_count}")
+            lines.append(f"  - Overall accuracy: {result.overall_accuracy:.3f}")
+            lines.append(
+                f"  - Top-1 verdict: {result.top_hypothesis_id} "
+                f"({'correct' if result.top_hypothesis_correct else 'incorrect'})"
+            )
+            lines.append(f"  - Concordance index: {result.concordance_index:.3f}")
+            for bucket in result.buckets:
+                lines.append(
+                    f"  - Bucket {int(bucket['bucket'])}: elo [{bucket['elo_min']:.3f}, {bucket['elo_max']:.3f}], "
+                    f"count {int(bucket['count'])}, accuracy {bucket['accuracy']:.3f}"
+                )
         lines.append("")
     return "\n".join(lines)
 

@@ -7,6 +7,7 @@ from code_scientist.models import (
     CapabilityEvaluation,
     Evidence,
     EvidenceSafetyFinding,
+    EloConcordanceResult,
     FeedbackLoopEvaluation,
     Match,
     MetaReview,
@@ -52,6 +53,33 @@ def test_render_report_includes_elo_trajectory_section(tmp_path):
     report = render_report(state)
     assert "## Elo Trajectory" in report
     assert f"Points recorded: {len(state.elo_trajectory)}" in report
+
+
+def test_render_report_includes_elo_concordance_section(tmp_path):
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1, max_hypotheses=3, max_matches=1, out_dir=tmp_path / "run",
+    )
+    result = EloConcordanceResult(
+        id="conc-1",
+        benchmark_name="objective-demo",
+        question="Which fix passes the test?",
+        graded_count=2,
+        ungraded_count=1,
+        overall_accuracy=0.5,
+        top_hypothesis_id=state.hypotheses[0].id,
+        top_hypothesis_correct=True,
+        concordance_index=1.0,
+        buckets=[{"bucket": 0.0, "elo_max": 1300.0, "elo_min": 1250.0, "count": 2.0, "accuracy": 1.0}],
+        notes=["graded via answer extraction"],
+    )
+    state = replace(state, elo_concordance=[result])
+
+    report = render_report(state)
+
+    assert "## Elo Concordance" in report
+    assert "objective-demo" in report
+    assert "Concordance index" in report
 
 
 def test_render_report_includes_benchmark_results(tmp_path):

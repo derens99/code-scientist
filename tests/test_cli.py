@@ -3537,3 +3537,32 @@ def test_cli_discover_prints_and_writes_objective_candidates(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "1." in captured.out
     assert "plan critiques" in captured.out
+
+
+def test_cli_elo_concordance_grades_state_and_saves_result(tmp_path):
+    out_dir = tmp_path / "run"
+    from code_scientist.supervisor import run_research_cycle, load_state
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1, max_hypotheses=3, max_matches=1, out_dir=out_dir,
+    )
+    benchmark_path = tmp_path / "objective.json"
+    benchmark_path.write_text(json.dumps({
+        "name": "objective-demo",
+        "question": "Which retry strategy fixes the flaky test?",
+        "answer": "backoff",
+    }), encoding="utf-8")
+    grades_path = tmp_path / "grades.json"
+    grades_path.write_text(json.dumps({state.hypotheses[0].id: True, state.hypotheses[1].id: False}), encoding="utf-8")
+
+    exit_code = main([
+        "elo-concordance", str(out_dir / "state.json"),
+        "--objective-benchmark", str(benchmark_path),
+        "--grades", str(grades_path),
+    ])
+
+    assert exit_code == 0
+    saved = load_state(out_dir / "state.json")
+    assert saved.elo_concordance, "result appended to state"
+    assert saved.elo_concordance[-1].benchmark_name == "objective-demo"
+    assert saved.elo_concordance[-1].graded_count == 2

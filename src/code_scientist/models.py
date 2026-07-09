@@ -576,6 +576,8 @@ class CapabilityStudyCoverage:
     missing_requirements: list[str]
     passed: bool
     summary: str
+    elo_concordance_count: int = 0
+    elo_trajectory_point_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -588,6 +590,8 @@ class CapabilityStudyCoverage:
         copied.setdefault("human_preference_judgment_count", 0)
         copied.setdefault("measured_feedback_loop_count", 0)
         copied.setdefault("missing_requirements", [])
+        copied.setdefault("elo_concordance_count", 0)
+        copied.setdefault("elo_trajectory_point_count", 0)
         return cls(**copied)
 
 

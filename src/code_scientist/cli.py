@@ -14,6 +14,7 @@ from code_scientist.benchmarks import (
     run_benchmark_suite_comparison,
     summarize_benchmark_comparison_study,
 )
+from code_scientist.concordance import compute_elo_concordance, grade_hypotheses, load_objective_benchmark
 from code_scientist.evidence import EvidenceStore
 from code_scientist.evidence import merge_evidence
 from code_scientist.evaluation import (
@@ -243,6 +244,14 @@ def build_parser() -> argparse.ArgumentParser:
     agent_packets_parser.add_argument("--out", required=True)
     agent_packets_parser.add_argument("--limit", type=int, default=3)
 
+    elo_concordance_parser = subparsers.add_parser(
+        "elo-concordance",
+        help="Grade hypotheses against an objective benchmark and record Elo-vs-correctness concordance.",
+    )
+    elo_concordance_parser.add_argument("state_json")
+    elo_concordance_parser.add_argument("--objective-benchmark", required=True)
+    elo_concordance_parser.add_argument("--grades", default="")
+
     discover_parser = subparsers.add_parser(
         "discover",
         help="Mine a repository for candidate research objectives.",
@@ -465,6 +474,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote {output / 'packet-index.json'}")
         for packet in index["packets"]:
             print(f"Wrote {output / packet['path']}")
+        return 0
+    if args.command == "elo-concordance":
+        state_path = Path(args.state_json)
+        state = load_state(state_path)
+        benchmark = load_objective_benchmark(args.objective_benchmark)
+        grades: dict[str, bool] = {}
+        if args.grades:
+            grades = json.loads(Path(args.grades).read_text(encoding="utf-8"))
+        correctness = grade_hypotheses(benchmark, state.hypotheses, grades=grades)
+        result = compute_elo_concordance(benchmark.name, benchmark.question, state.hypotheses, correctness)
+        state = replace(state, elo_concordance=[*state.elo_concordance, result])
+        run_dir = state_path.parent
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "state.json").write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+        (run_dir / "report.md").write_text(render_report(state), encoding="utf-8")
+        print(f"Overall accuracy: {result.overall_accuracy}")
+        print(f"Top hypothesis correct: {result.top_hypothesis_correct}")
+        print(f"Concordance index: {result.concordance_index}")
         return 0
     if args.command == "discover":
         candidates = discover_objectives(args.repo, limit=args.limit)

@@ -1158,6 +1158,8 @@ def audit_capability_study_coverage(states: list[RunState]) -> CapabilityStudyCo
         if evaluation.measurement_status == "measured" and evaluation.measurement_source != "proxy"
     )
     safety_evaluation_count = sum(len(state.safety_evaluations) for state in states)
+    elo_concordance_count = sum(len(state.elo_concordance) for state in states)
+    elo_trajectory_point_count = sum(len(state.elo_trajectory) for state in states)
     human_scored_candidate_count = sum(evaluation.human_score_count for evaluation in evaluations)
     benchmark_scored_candidate_count = sum(evaluation.benchmark_score_count for evaluation in evaluations)
     benchmark_result_count = sum(len(state.benchmark_results) for state in states)
@@ -1198,7 +1200,8 @@ def audit_capability_study_coverage(states: list[RunState]) -> CapabilityStudyCo
         f"{benchmark_result_count}:{human_rubric_judgment_count}:"
         f"{human_preference_judgment_count}:{scaling_point_count}:"
         f"{measured_prospective_count}:{measured_feedback_loop_count}:"
-        f"{safety_evaluation_count}:{missing_requirements}"
+        f"{safety_evaluation_count}:{missing_requirements}:"
+        f"{elo_concordance_count}:{elo_trajectory_point_count}"
     )
     return CapabilityStudyCoverage(
         id=stable_id("coverage", identity),
@@ -1218,6 +1221,8 @@ def audit_capability_study_coverage(states: list[RunState]) -> CapabilityStudyCo
         missing_requirements=missing_requirements,
         passed=passed,
         summary=summary,
+        elo_concordance_count=elo_concordance_count,
+        elo_trajectory_point_count=elo_trajectory_point_count,
     )
 
 

@@ -23,6 +23,8 @@ from code_scientist.evaluation import (
 from code_scientist.models import (
     BenchmarkResult,
     CapabilityEvaluation,
+    EloConcordanceResult,
+    EloTrajectoryPoint,
     FeedbackLoopEvaluation,
     Hypothesis,
     ProspectiveEvaluation,
@@ -818,11 +820,35 @@ def test_capability_study_coverage_audits_paper_evaluation_requirements():
                 measurement_status="measured",
             )
         ],
+        elo_concordance=[
+            EloConcordanceResult(
+                id="conc-1",
+                benchmark_name="objective-demo",
+                question="Which fix passes?",
+                graded_count=2,
+                ungraded_count=0,
+                overall_accuracy=1.0,
+                top_hypothesis_id="hyp-high",
+                top_hypothesis_correct=True,
+                concordance_index=1.0,
+            )
+        ],
+        elo_trajectory=[
+            EloTrajectoryPoint(
+                cycle=1, match_index=0, match_id="match-1",
+                best_elo=1250.0, top_avg_elo=1215.5, active_count=6,
+            )
+        ],
     )
     sparse = RunState(goal=ResearchGoal.from_objective("Improve LLM coding agents with review"))
 
     complete_coverage = audit_capability_study_coverage([complete, sparse])
     sparse_coverage = audit_capability_study_coverage([sparse])
+
+    assert complete_coverage.elo_concordance_count == 1
+    assert complete_coverage.elo_trajectory_point_count == 1
+    assert sparse_coverage.elo_concordance_count == 0
+    assert sparse_coverage.elo_trajectory_point_count == 0
 
     assert complete_coverage.run_count == 2
     assert complete_coverage.unique_goal_count == 2
@@ -844,6 +870,19 @@ def test_capability_study_coverage_audits_paper_evaluation_requirements():
     assert "benchmark scores or benchmark result artifacts" in sparse_coverage.missing_requirements
     assert "multi-goal study" in sparse_coverage.missing_requirements
     assert "external feedback-loop measurement" in sparse_coverage.missing_requirements
+
+    from code_scientist.models import CapabilityStudyCoverage
+
+    round_tripped = CapabilityStudyCoverage.from_dict(complete_coverage.to_dict())
+    assert round_tripped.elo_concordance_count == 1
+    assert round_tripped.elo_trajectory_point_count == 1
+
+    old_dict = complete_coverage.to_dict()
+    old_dict.pop("elo_concordance_count", None)
+    old_dict.pop("elo_trajectory_point_count", None)
+    defaulted = CapabilityStudyCoverage.from_dict(old_dict)
+    assert defaulted.elo_concordance_count == 0
+    assert defaulted.elo_trajectory_point_count == 0
 
 
 def test_capability_study_coverage_requires_external_prospective_measurement():
