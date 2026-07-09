@@ -364,6 +364,114 @@ def test_llm_generation_tool_augmented_mode_uses_tool_observation_turns():
     assert hypotheses[0].generation_trace[-1].startswith("LLM multi-turn generation assessment:")
 
 
+def test_llm_generation_debate_mode_embeds_agent_feedback_in_synthesis_prompt():
+    class FakeLLM:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, prompt, max_tokens):
+            self.calls.append(prompt)
+            lowered = prompt.lower()
+            if "generation turn 1 debate proposal" in lowered:
+                return "Proposal: use debate to expose patch-risk assumptions."
+            if "generation turn 2 debate critique" in lowered:
+                return "Critique: the proposal needs benchmark evidence and source-safety checks."
+            if "generation turn 3 debate synthesis" in lowered:
+                return json.dumps(
+                    {
+                        "hypotheses": [
+                            {
+                                "title": "Debate-traced patch risk review",
+                                "claim": (
+                                    "A debate-traced patch-risk review will reduce regressions "
+                                    "in LLM coding-agent repairs."
+                                ),
+                                "rationale": "The critique turn forces assumptions and benchmark checks before ranking.",
+                                "assumptions": ["Benchmark traces cover representative patch risks."],
+                                "risks": ["extra review latency"],
+                            }
+                        ]
+                    }
+                )
+            raise AssertionError(prompt)
+
+    goal = ResearchGoal.from_objective("Improve LLM coding agents with scientific debate")
+    fake_llm = FakeLLM()
+
+    GenerationAgent(llm_client=fake_llm, llm_max_tokens=333).generate_with_mode(
+        goal,
+        seed_paper_evidence(),
+        mode="simulated_debate",
+        limit=1,
+        agent_feedback=["Cite representative benchmark failure traces."],
+    )
+
+    synthesis_prompts = [call for call in fake_llm.calls if "debate synthesis" in call.lower()]
+    assert synthesis_prompts
+    assert "Meta-review feedback" in synthesis_prompts[0]
+    assert "Cite representative benchmark failure traces." in synthesis_prompts[0]
+
+
+def test_llm_generation_tool_augmented_mode_embeds_agent_feedback_in_synthesis_prompt():
+    class FakeLLM:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, prompt, max_tokens):
+            self.calls.append(prompt)
+            lowered = prompt.lower()
+            if "generation turn 1 tool query plan" in lowered:
+                return "Query plan: inspect repo-search evidence for patch recovery failure modes."
+            if "generation turn 2 tool observation analysis" in lowered:
+                return "Observation analysis: the repo trace supports assumption audits before patching."
+            if "generation turn 3 tool synthesis" in lowered:
+                return json.dumps(
+                    {
+                        "hypotheses": [
+                            {
+                                "title": "Repo-trace assumption audit",
+                                "claim": (
+                                    "A repo-trace assumption audit will reduce regressions in "
+                                    "LLM coding-agent repair loops."
+                                ),
+                                "rationale": "Tool observations identify concrete failure modes before synthesis.",
+                                "assumptions": ["Repo-search traces are representative."],
+                                "risks": ["tool evidence may be stale"],
+                            }
+                        ]
+                    }
+                )
+            raise AssertionError(prompt)
+
+    goal = ResearchGoal.from_objective("Improve LLM coding agents with tool evidence")
+    store = EvidenceStore(
+        [
+            Evidence(
+                id="ev-repo-tool",
+                kind="tool_result_repo_search",
+                source="src/agent.py",
+                content="Repository trace shows failed patch recovery improves after assumption audits.",
+                notes="repo search hit",
+                metadata={"tool": "repo_search", "query": "failed patch recovery"},
+            )
+        ]
+    )
+    fake_llm = FakeLLM()
+
+    GenerationAgent(llm_client=fake_llm, llm_max_tokens=333).generate_with_mode(
+        goal,
+        store,
+        mode="tool_augmented_generation",
+        limit=1,
+        agent_feedback=["Prefer repo-search-grounded candidates."],
+    )
+
+    synthesis_prompts = [call for call in fake_llm.calls if "tool synthesis" in call.lower()]
+    assert synthesis_prompts
+    assert "Meta-review feedback" in synthesis_prompts[0]
+    assert "Prefer repo-search-grounded candidates." in synthesis_prompts[0]
+
+
 def test_llm_plan_parser_creates_custom_research_plan_config():
     class FakeLLM:
         def __init__(self):
@@ -723,6 +831,98 @@ def test_llm_safety_review_uses_multi_turn_red_team_trace():
     assert any("LLM turn 2 data and source-injection red team" in line for line in review.review_trace)
     assert any("LLM turn 3 safety synthesis" in line for line in review.review_trace)
     assert review.review_trace[-1].startswith("LLM multi-turn reflection assessment:")
+
+
+def test_llm_deep_verification_embeds_agent_feedback_in_synthesis_prompt():
+    class FakeLLM:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, prompt, max_tokens):
+            self.calls.append(prompt)
+            lowered = prompt.lower()
+            if "reflection turn 1 claim mechanism" in lowered:
+                return "Mechanism check: the claim depends on benchmark-gated critique before patching."
+            if "reflection turn 2 assumption risk audit" in lowered:
+                return "Risk audit: representative traces and source-safety checks are required."
+            if "reflection turn 3 benchmark validation synthesis" in lowered:
+                return json.dumps(
+                    {
+                        "decision": "accept",
+                        "scores": {"alignment": 5, "plausibility": 4, "novelty": 4, "testability": 5, "safety": 5},
+                        "strengths": ["Clear benchmark path."],
+                        "weaknesses": [],
+                        "safety_notes": ["Human review required."],
+                        "findings": ["Benchmark validation is measured."],
+                        "confidence": 0.72,
+                        "requires_revision": False,
+                        "evidence_refs": [],
+                    }
+                )
+            raise AssertionError(prompt)
+
+    goal = ResearchGoal.from_objective("Improve LLM coding agents with deep verification")
+    hypothesis = GenerationAgent().generate(goal, seed_paper_evidence(), limit=1)[0]
+    fake_llm = FakeLLM()
+
+    ReflectionAgent(llm_client=fake_llm, llm_max_tokens=444).review_with_type(
+        goal,
+        hypothesis,
+        "deep_verification",
+        None,
+        agent_feedback=["Require prospective benchmark validation."],
+    )
+
+    synthesis_prompts = [call for call in fake_llm.calls if "benchmark validation synthesis" in call.lower()]
+    assert synthesis_prompts
+    assert "Meta-review feedback" in synthesis_prompts[0]
+    assert "Require prospective benchmark validation." in synthesis_prompts[0]
+
+
+def test_llm_safety_review_embeds_agent_feedback_in_synthesis_prompt():
+    class FakeLLM:
+        def __init__(self):
+            self.calls = []
+
+        def complete(self, prompt, max_tokens):
+            self.calls.append(prompt)
+            lowered = prompt.lower()
+            if "reflection turn 1 autonomy and deployment red team" in lowered:
+                return "Autonomy check: require human approval before repo mutation."
+            if "reflection turn 2 data and source-injection red team" in lowered:
+                return "Data/source check: retrieved evidence must not override system instructions."
+            if "reflection turn 3 safety synthesis" in lowered:
+                return json.dumps(
+                    {
+                        "decision": "accept",
+                        "scores": {"alignment": 4, "plausibility": 4, "novelty": 4, "testability": 4, "safety": 5},
+                        "strengths": ["Useful safety boundary."],
+                        "weaknesses": [],
+                        "safety_notes": ["Gate all code changes behind human review."],
+                        "findings": ["No unmitigated source-injection risk found."],
+                        "confidence": 0.81,
+                        "requires_revision": False,
+                        "evidence_refs": [],
+                    }
+                )
+            raise AssertionError(prompt)
+
+    goal = ResearchGoal.from_objective("Improve LLM coding agents with safety review")
+    hypothesis = GenerationAgent().generate(goal, seed_paper_evidence(), limit=1)[0]
+    fake_llm = FakeLLM()
+
+    ReflectionAgent(llm_client=fake_llm, llm_max_tokens=444).review_with_type(
+        goal,
+        hypothesis,
+        "safety_review",
+        None,
+        agent_feedback=["Check credential and deployment boundaries explicitly."],
+    )
+
+    synthesis_prompts = [call for call in fake_llm.calls if "safety synthesis" in call.lower()]
+    assert synthesis_prompts
+    assert "Meta-review feedback" in synthesis_prompts[0]
+    assert "Check credential and deployment boundaries explicitly." in synthesis_prompts[0]
 
 
 def test_reflection_can_use_llm_schema_review():

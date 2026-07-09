@@ -239,7 +239,7 @@ class GenerationAgent(_LLMTraceMixin):
         if mode == "tool_augmented_generation":
             store = evidence if isinstance(evidence, EvidenceStore) else EvidenceStore(evidence)
             if self.llm_client:
-                return self._generate_tool_augmented_with_llm(goal, store, limit)
+                return self._generate_tool_augmented_with_llm(goal, store, limit, agent_feedback)
             return _tool_augmented_hypotheses(goal, store, limit)
         if mode == "assumption_decomposition":
             source_evidence = evidence.evidence if isinstance(evidence, EvidenceStore) else evidence
@@ -253,7 +253,7 @@ class GenerationAgent(_LLMTraceMixin):
         if mode in {"simulated_debate", "multi_round_debate", "multi_turn_debate"}:
             source_evidence = evidence.evidence if isinstance(evidence, EvidenceStore) else evidence
             if self.llm_client:
-                return self._generate_debate_with_llm(goal, source_evidence, mode, limit)
+                return self._generate_debate_with_llm(goal, source_evidence, mode, limit, agent_feedback)
             return _simulated_debate_hypotheses(
                 goal,
                 self.generate(goal, source_evidence, limit=limit, agent_feedback=agent_feedback),
@@ -294,6 +294,7 @@ class GenerationAgent(_LLMTraceMixin):
         evidence: list[Any],
         mode: str,
         limit: int,
+        agent_feedback: list[str] | None = None,
     ) -> list[Hypothesis]:
         proposal_text = self.llm_client.complete(
             _llm_debate_proposal_prompt(goal, evidence, mode, limit),
@@ -304,7 +305,9 @@ class GenerationAgent(_LLMTraceMixin):
             max_tokens=self.llm_max_tokens,
         )
         synthesis_text = self.llm_client.complete(
-            _llm_debate_synthesis_prompt(goal, evidence, mode, proposal_text, critique_text, limit),
+            _llm_debate_synthesis_prompt(
+                goal, evidence, mode, proposal_text, critique_text, limit, agent_feedback
+            ),
             max_tokens=self.llm_max_tokens,
         )
         hypotheses = self._parse_llm_hypotheses_with_repair(
@@ -329,6 +332,7 @@ class GenerationAgent(_LLMTraceMixin):
         goal: ResearchGoal,
         evidence_store: EvidenceStore,
         limit: int,
+        agent_feedback: list[str] | None = None,
     ) -> list[Hypothesis]:
         selected = _select_tool_generation_evidence(goal, evidence_store, limit)
         if not selected:
@@ -342,7 +346,7 @@ class GenerationAgent(_LLMTraceMixin):
             max_tokens=self.llm_max_tokens,
         )
         synthesis_text = self.llm_client.complete(
-            _llm_tool_synthesis_prompt(goal, selected, query_plan_text, observation_text, limit),
+            _llm_tool_synthesis_prompt(goal, selected, query_plan_text, observation_text, limit, agent_feedback),
             max_tokens=self.llm_max_tokens,
         )
         hypotheses = self._parse_llm_hypotheses_with_repair(
@@ -525,9 +529,9 @@ class ReflectionAgent(_LLMTraceMixin):
         if self.llm_client:
             try:
                 if review_type == "deep_verification":
-                    return self._deep_verification_with_llm(goal, hypothesis, evidence_store)
+                    return self._deep_verification_with_llm(goal, hypothesis, evidence_store, agent_feedback)
                 if review_type == "safety_review":
-                    return self._safety_review_with_llm(goal, hypothesis, evidence_store)
+                    return self._safety_review_with_llm(goal, hypothesis, evidence_store, agent_feedback)
                 return self._review_with_llm(goal, hypothesis, review_type, evidence_store, agent_feedback)
             except LLMResponseError:
                 pass
@@ -898,6 +902,7 @@ class ReflectionAgent(_LLMTraceMixin):
         goal: ResearchGoal,
         hypothesis: Hypothesis,
         evidence_store: EvidenceStore | None,
+        agent_feedback: list[str] | None = None,
     ) -> Review:
         evidence = evidence_store.search_hypothesis(hypothesis, limit=5) if evidence_store else []
         mechanism_text = self.llm_client.complete(
@@ -915,6 +920,7 @@ class ReflectionAgent(_LLMTraceMixin):
                 evidence,
                 mechanism_text,
                 risk_text,
+                agent_feedback,
             ),
             max_tokens=self.llm_max_tokens,
         )
@@ -936,6 +942,7 @@ class ReflectionAgent(_LLMTraceMixin):
         goal: ResearchGoal,
         hypothesis: Hypothesis,
         evidence_store: EvidenceStore | None,
+        agent_feedback: list[str] | None = None,
     ) -> Review:
         evidence = evidence_store.search_hypothesis(hypothesis, limit=5) if evidence_store else []
         autonomy_text = self.llm_client.complete(
@@ -953,6 +960,7 @@ class ReflectionAgent(_LLMTraceMixin):
                 evidence,
                 autonomy_text,
                 source_text,
+                agent_feedback,
             ),
             max_tokens=self.llm_max_tokens,
         )
@@ -2560,6 +2568,7 @@ def _llm_reflection_benchmark_synthesis_prompt(
     evidence: list[Any],
     mechanism_text: str,
     risk_text: str,
+    agent_feedback: list[str] | None = None,
 ) -> str:
     return f"""Reflection turn 3 benchmark validation synthesis for a coding-agent AI co-scientist worker.
 Objective: {goal.objective}
@@ -2578,7 +2587,7 @@ Turn 2 assumption/risk audit:
 
 Return only valid JSON with:
 decision, scores, strengths, weaknesses, safety_notes, findings, confidence, requires_revision, evidence_refs.
-Focus on benchmark validation and whether revision is required before ranking or external study."""
+Focus on benchmark validation and whether revision is required before ranking or external study.{_feedback_block(agent_feedback)}"""
 
 
 def _llm_reflection_autonomy_safety_prompt(
@@ -2625,6 +2634,7 @@ def _llm_reflection_safety_synthesis_prompt(
     evidence: list[Any],
     autonomy_text: str,
     source_text: str,
+    agent_feedback: list[str] | None = None,
 ) -> str:
     return f"""Reflection turn 3 safety synthesis for a coding-agent AI co-scientist worker.
 Objective: {goal.objective}
@@ -2643,7 +2653,7 @@ Turn 2 data/source-injection red team:
 
 Return only valid JSON with:
 decision, scores, strengths, weaknesses, safety_notes, findings, confidence, requires_revision, evidence_refs.
-Focus on safety gating, source-injection mitigation, and whether revision is required."""
+Focus on safety gating, source-injection mitigation, and whether revision is required.{_feedback_block(agent_feedback)}"""
 
 
 def _hypothesis_prompt_text(hypothesis: Hypothesis) -> str:
@@ -3481,6 +3491,7 @@ def _llm_debate_synthesis_prompt(
     proposal_text: str,
     critique_text: str,
     limit: int,
+    agent_feedback: list[str] | None = None,
 ) -> str:
     return f"""Generation turn 3 debate synthesis for a coding-agent AI co-scientist worker.
 Mode: {mode}
@@ -3508,7 +3519,7 @@ Return only valid JSON with this shape:
   ]
 }}
 
-Include at most {limit} hypotheses. Do not claim improvement as proven."""
+Include at most {limit} hypotheses. Do not claim improvement as proven.{_feedback_block(agent_feedback)}"""
 
 
 def _llm_tool_query_plan_prompt(
@@ -3549,6 +3560,7 @@ def _llm_tool_synthesis_prompt(
     query_plan_text: str,
     observation_text: str,
     limit: int,
+    agent_feedback: list[str] | None = None,
 ) -> str:
     return f"""Generation turn 3 tool synthesis for a coding-agent AI co-scientist worker.
 Objective: {goal.objective}
@@ -3575,7 +3587,7 @@ Return only valid JSON with this shape:
   ]
 }}
 
-Include at most {limit} hypotheses. Do not claim improvement as proven."""
+Include at most {limit} hypotheses. Do not claim improvement as proven.{_feedback_block(agent_feedback)}"""
 
 
 def _evidence_prompt_text(evidence: list[Any], limit: int = 5) -> str:
