@@ -3537,6 +3537,14 @@ def test_feedback_loop_evaluation_measures_weakness_recurrence(tmp_path):
     assert "weakness_recurrence_after" in latest.observed_quality
     assert 0.0 <= latest.baseline_quality["weakness_recurrence_before"] <= 1.0
     assert 0.0 <= latest.observed_quality["weakness_recurrence_after"] <= 1.0
+    assert "weakness_recurrence_before" not in latest.deltas
+    assert "weakness_recurrence" in latest.deltas
+    expected_delta = round(
+        latest.observed_quality["weakness_recurrence_after"]
+        - latest.baseline_quality["weakness_recurrence_before"],
+        3,
+    )
+    assert latest.deltas["weakness_recurrence"] == expected_delta
 
 
 def test_supervisor_generates_publication_grant_and_contact_artifacts(tmp_path):

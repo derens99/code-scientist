@@ -1968,7 +1968,9 @@ def _build_feedback_loop_evaluation(
     deltas = {
         key: round(observed_quality.get(key, 0.0) - value, 3)
         for key, value in baseline_quality.items()
+        if key != "weakness_recurrence_before"
     }
+    deltas["weakness_recurrence"] = round(recurrence_after - recurrence_before, 3)
     adopted_count = len(adopted)
     feedback_count = len(feedback_items)
     adoption_rate = round(adopted_count / feedback_count, 3) if feedback_count else 0.0
