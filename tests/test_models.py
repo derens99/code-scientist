@@ -2,6 +2,7 @@ from code_scientist.models import (
     AgentTrace,
     BenchmarkResult,
     ContextSnapshot,
+    EloTrajectoryPoint,
     Evidence,
     EvidenceSafetyFinding,
     Hypothesis,
@@ -621,6 +622,23 @@ def test_run_state_round_trips_phase_six_evaluations():
     assert restored.prospective_evaluations == [prospective]
     assert restored.scaling_curve == [scaling]
     assert restored.safety_evaluations == [safety]
+
+
+def test_elo_trajectory_point_round_trips():
+    point = EloTrajectoryPoint(
+        cycle=1, match_index=0, match_id="match-1",
+        best_elo=1250.0, top_avg_elo=1215.5, active_count=6,
+    )
+    restored = EloTrajectoryPoint.from_dict(point.to_dict())
+    assert restored == point
+
+
+def test_run_state_defaults_elo_trajectory_for_old_state():
+    state = RunState(goal=ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents"))
+    data = state.to_dict()
+    data.pop("elo_trajectory", None)  # simulate old state.json
+    restored = RunState.from_dict(data)
+    assert restored.elo_trajectory == []
 
 
 def test_prospective_evaluation_loads_old_state_with_proxy_defaults():

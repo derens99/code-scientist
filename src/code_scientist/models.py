@@ -640,6 +640,23 @@ class ScalingCurvePoint:
 
 
 @dataclass(frozen=True)
+class EloTrajectoryPoint:
+    cycle: int
+    match_index: int
+    match_id: str
+    best_elo: float
+    top_avg_elo: float
+    active_count: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EloTrajectoryPoint:
+        return cls(**data)
+
+
+@dataclass(frozen=True)
 class SafetyEvaluationResult:
     id: str
     suite_name: str
@@ -920,6 +937,7 @@ class RunState:
     capability_evaluations: list[CapabilityEvaluation] = field(default_factory=list)
     prospective_evaluations: list[ProspectiveEvaluation] = field(default_factory=list)
     scaling_curve: list[ScalingCurvePoint] = field(default_factory=list)
+    elo_trajectory: list[EloTrajectoryPoint] = field(default_factory=list)
     safety_evaluations: list[SafetyEvaluationResult] = field(default_factory=list)
     feedback_loop_evaluations: list[FeedbackLoopEvaluation] = field(default_factory=list)
     research_output_artifacts: list[ResearchOutputArtifact] = field(default_factory=list)
@@ -947,6 +965,7 @@ class RunState:
             "capability_evaluations": [item.to_dict() for item in self.capability_evaluations],
             "prospective_evaluations": [item.to_dict() for item in self.prospective_evaluations],
             "scaling_curve": [item.to_dict() for item in self.scaling_curve],
+            "elo_trajectory": [item.to_dict() for item in self.elo_trajectory],
             "safety_evaluations": [item.to_dict() for item in self.safety_evaluations],
             "feedback_loop_evaluations": [item.to_dict() for item in self.feedback_loop_evaluations],
             "research_output_artifacts": [item.to_dict() for item in self.research_output_artifacts],
@@ -991,6 +1010,10 @@ class RunState:
             scaling_curve=[
                 ScalingCurvePoint.from_dict(item)
                 for item in data.get("scaling_curve", [])
+            ],
+            elo_trajectory=[
+                EloTrajectoryPoint.from_dict(item)
+                for item in data.get("elo_trajectory", [])
             ],
             safety_evaluations=[
                 SafetyEvaluationResult.from_dict(item)
