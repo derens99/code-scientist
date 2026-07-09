@@ -2,6 +2,7 @@ from code_scientist.models import (
     AgentTrace,
     BenchmarkResult,
     ContextSnapshot,
+    EloConcordanceResult,
     EloTrajectoryPoint,
     Evidence,
     EvidenceSafetyFinding,
@@ -639,6 +640,25 @@ def test_run_state_defaults_elo_trajectory_for_old_state():
     data.pop("elo_trajectory", None)  # simulate old state.json
     restored = RunState.from_dict(data)
     assert restored.elo_trajectory == []
+
+
+def test_elo_concordance_result_round_trips():
+    result = EloConcordanceResult(
+        id="conc-1", benchmark_name="objective-demo", question="Which fix passes the test?",
+        graded_count=4, ungraded_count=1, overall_accuracy=0.75,
+        top_hypothesis_id="hyp-1", top_hypothesis_correct=True,
+        concordance_index=0.833,
+        buckets=[{"bucket": 0.0, "elo_max": 1300.0, "elo_min": 1250.0, "count": 2.0, "accuracy": 1.0}],
+        notes=["graded via answer extraction"],
+    )
+    assert EloConcordanceResult.from_dict(result.to_dict()) == result
+
+
+def test_run_state_defaults_elo_concordance_for_old_state():
+    state = RunState(goal=ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents"))
+    data = state.to_dict()
+    data.pop("elo_concordance", None)
+    assert RunState.from_dict(data).elo_concordance == []
 
 
 def test_prospective_evaluation_loads_old_state_with_proxy_defaults():

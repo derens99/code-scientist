@@ -657,6 +657,31 @@ class EloTrajectoryPoint:
 
 
 @dataclass(frozen=True)
+class EloConcordanceResult:
+    id: str
+    benchmark_name: str
+    question: str
+    graded_count: int
+    ungraded_count: int
+    overall_accuracy: float
+    top_hypothesis_id: str
+    top_hypothesis_correct: bool
+    concordance_index: float
+    buckets: list[dict[str, float]] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EloConcordanceResult:
+        copied = dict(data)
+        copied.setdefault("buckets", [])
+        copied.setdefault("notes", [])
+        return cls(**copied)
+
+
+@dataclass(frozen=True)
 class SafetyEvaluationResult:
     id: str
     suite_name: str
@@ -938,6 +963,7 @@ class RunState:
     prospective_evaluations: list[ProspectiveEvaluation] = field(default_factory=list)
     scaling_curve: list[ScalingCurvePoint] = field(default_factory=list)
     elo_trajectory: list[EloTrajectoryPoint] = field(default_factory=list)
+    elo_concordance: list[EloConcordanceResult] = field(default_factory=list)
     safety_evaluations: list[SafetyEvaluationResult] = field(default_factory=list)
     feedback_loop_evaluations: list[FeedbackLoopEvaluation] = field(default_factory=list)
     research_output_artifacts: list[ResearchOutputArtifact] = field(default_factory=list)
@@ -966,6 +992,7 @@ class RunState:
             "prospective_evaluations": [item.to_dict() for item in self.prospective_evaluations],
             "scaling_curve": [item.to_dict() for item in self.scaling_curve],
             "elo_trajectory": [item.to_dict() for item in self.elo_trajectory],
+            "elo_concordance": [item.to_dict() for item in self.elo_concordance],
             "safety_evaluations": [item.to_dict() for item in self.safety_evaluations],
             "feedback_loop_evaluations": [item.to_dict() for item in self.feedback_loop_evaluations],
             "research_output_artifacts": [item.to_dict() for item in self.research_output_artifacts],
@@ -1014,6 +1041,10 @@ class RunState:
             elo_trajectory=[
                 EloTrajectoryPoint.from_dict(item)
                 for item in data.get("elo_trajectory", [])
+            ],
+            elo_concordance=[
+                EloConcordanceResult.from_dict(item)
+                for item in data.get("elo_concordance", [])
             ],
             safety_evaluations=[
                 SafetyEvaluationResult.from_dict(item)
