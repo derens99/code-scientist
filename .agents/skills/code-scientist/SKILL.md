@@ -17,16 +17,24 @@ Treat `$ARGUMENTS` or the user's current request as the research objective unles
 
 If the user supplies no objective, or asks to "find something to research", use discovery mode (Workflow step 2) to mine the repository for candidate objectives before running the engine.
 
-Use conservative defaults when the user does not specify run options:
+## Run Levels
 
-- Run directory: `runs/<safe-objective-slug>`.
-- Cycles: `1`.
-- Max hypotheses: `6`.
-- Max matches: `2`.
-- Packet limit: `3`.
-- Provider: deterministic unless the user explicitly requests Anthropic.
+Pick the run level from the user's intent before choosing flags:
 
-Always use `uv` for Python commands.
+**Research-grade (default when the user wants real research, new ideas, or discoveries).** The deterministic provider assembles hypotheses from fixed blueprints — it can never produce a novel discovery. Legitimate new hypotheses require the LLM provider plus grounded evidence:
+
+- Confirm `ANTHROPIC_API_KEY` is available (environment or `.env`; the run command reads `--env-file .env` by default). If it is missing, say so and ask the user for it — do not silently fall back to deterministic and present the output as research.
+- Run with `--provider anthropic`.
+- Budgets: `--cycles 3 --max-hypotheses 10 --max-matches 8` (scale up if the user asks for depth; multiple cycles are required for the meta-review feedback loop to influence later generations).
+- Ground the run in real evidence — pass at least one of:
+  - `--repo-search-path <path>` pointing at the code the objective concerns,
+  - `--web-search-query "<objective keywords>"` (1-3 focused queries),
+  - `--evidence-path <notes.md>` for local findings, or `--literature-search-query` for paper-style sourcing.
+- Packet limit: `3`-`5`.
+
+**Smoke (only for wiring checks, demos, or when the user explicitly asks for a dry run).** Deterministic provider with `--cycles 1 --max-hypotheses 6 --max-matches 2` and packet limit `3`. Label the output as a deterministic dry run, never as research findings.
+
+Run directory: `runs/<safe-objective-slug>`. Always use `uv` for Python commands.
 
 ## Workflow
 
@@ -73,7 +81,8 @@ Do not edit source files. Keep the answer concise and grounded in the packet.
 ## Guardrails
 
 - Keep `state.json` and `report.md` as the authoritative Code Scientist artifacts.
-- Do not mark generated hypotheses as validated unless benchmark, human-review, or prospective-validation artifacts prove it.
+- Never present deterministic-provider hypotheses as new discoveries; they are blueprint-derived scaffolding.
+- Do not mark generated hypotheses as validated unless benchmark, human-review, or prospective-validation artifacts prove it. A research-grade run produces *candidate* hypotheses; validation is a separate benchmark or implementation step.
 - Do not let packet-review subagents modify source files unless the user separately asks for implementation.
 - If implementing a selected hypothesis afterward, start a normal TDD implementation workflow instead of treating the research packet as proof.
 - Preserve unrelated dirty worktree changes.
