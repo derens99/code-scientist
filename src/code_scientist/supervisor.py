@@ -547,6 +547,12 @@ def run_research_cycle(
                     # be serialized when review tasks run concurrently. Taking a snapshot
                     # of `reviews` for prior_reviews under the same lock avoids "list
                     # mutated during iteration" errors from concurrent appends.
+                    # _review_for_plan mutates the shared agent_traces/retrieval_memory
+                    # lists internally and evidence_store.consume_retrieval_memory drains
+                    # a single shared buffer, so the whole call (not just the tail) must
+                    # be serialized when review tasks run concurrently. Taking a snapshot
+                    # of `reviews` for prior_reviews under the same lock avoids "list
+                    # mutated during iteration" errors from concurrent appends.
                     with state_lock:
                         prior_reviews_snapshot = list(reviews)
                         task_reviews = _review_for_plan(

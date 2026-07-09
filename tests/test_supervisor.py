@@ -1,5 +1,6 @@
 import json
 import threading
+import time
 from collections import Counter
 from dataclasses import replace
 
@@ -2190,6 +2191,49 @@ def test_review_stage_runs_with_bounded_concurrency(tmp_path):
     task_ids = [task.id for task in state.task_queue]
     assert len(task_ids) == len(set(task_ids)), "no duplicated task records"
     assert state.reviews, "reviews still produced"
+
+
+def test_review_stage_state_lock_serializes_concurrent_review_execution(tmp_path, monkeypatch):
+    counter_lock = threading.Lock()
+    current = 0
+    max_observed = 0
+    original_review_for_plan = supervisor_module._review_for_plan
+
+    def instrumented_review_for_plan(*args, **kwargs):
+        nonlocal current, max_observed
+        with counter_lock:
+            current += 1
+            max_observed = max(max_observed, current)
+        try:
+            time.sleep(0.05)
+            return original_review_for_plan(*args, **kwargs)
+        finally:
+            with counter_lock:
+                current -= 1
+
+    monkeypatch.setattr(supervisor_module, "_review_for_plan", instrumented_review_for_plan)
+
+    state = supervisor_module.run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=4,
+        max_matches=2,
+        out_dir=tmp_path / "run",
+        review_concurrency=3,
+    )
+
+    review_tasks = [task for task in state.task_queue if task.kind.startswith("review")]
+    assert len(review_tasks) >= 3, "need >=3 review tasks to engage the ThreadPoolExecutor branch"
+
+    # state_lock in make_execute_review's closure must serialize entry into
+    # _review_for_plan: overlapping the 50ms sleep window should never show
+    # more than one concurrent entry, regardless of review_concurrency > 1.
+    assert max_observed == 1
+
+    result_ids = [ref for task in review_tasks for ref in task.result_refs]
+    assert len(result_ids) == len(set(result_ids)), "no duplicate review ids across review tasks"
+    assert set(result_ids) <= {review.id for review in state.reviews}
+    assert len(state.reviews) >= len(review_tasks)
 
 
 def test_supervisor_routes_tool_augmented_generation_through_evidence_store(tmp_path):
