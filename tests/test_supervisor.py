@@ -6,6 +6,7 @@ from dataclasses import replace
 import code_scientist.supervisor as supervisor_module
 from code_scientist.agents import ProximityAgent, RankingAgent
 from code_scientist.models import (
+    AgentTrace,
     CapabilityEvaluation,
     ContextSnapshot,
     Evidence,
@@ -3545,6 +3546,70 @@ def test_feedback_loop_evaluation_measures_weakness_recurrence(tmp_path):
         3,
     )
     assert latest.deltas["weakness_recurrence"] == expected_delta
+
+
+def test_weakness_recurrence_rate_pinned_to_controlled_term_hits():
+    meta = MetaReview(
+        id="meta-controlled",
+        common_weaknesses=["reproducibility concerns are unresolved"],
+        safety_concerns=[],
+        missing_evidence=[],
+        promising_directions=[],
+        prompt_feedback=[],
+        agent_feedback={},
+    )
+    terms = supervisor_module._weakness_terms(meta)
+    assert "reproducibility" in terms
+    assert "unresolved" in terms
+
+    def _review(review_id: str, weakness_text: str) -> Review:
+        return Review(
+            id=review_id,
+            hypothesis_id="hyp-controlled",
+            decision="accept",
+            scores={"alignment": 4},
+            strengths=[],
+            weaknesses=[weakness_text],
+            safety_notes=[],
+        )
+
+    prior_reviews = [
+        _review("rev-prior-1", "reproducibility concerns remain"),
+        _review("rev-prior-2", "reproducibility issues persist"),
+        _review("rev-prior-3", "clear and well scoped"),
+        _review("rev-prior-4", "no major issues found"),
+    ]
+    current_reviews = [
+        _review("rev-current-1", "clear and well scoped"),
+        _review("rev-current-2", "no major issues found"),
+    ]
+    agent_traces = [
+        AgentTrace(
+            id="trace-prior",
+            cycle=1,
+            agent="reflection",
+            action="initial_review",
+            output_refs=[review.id for review in prior_reviews],
+        ),
+        AgentTrace(
+            id="trace-current",
+            cycle=2,
+            agent="reflection",
+            action="initial_review",
+            output_refs=[review.id for review in current_reviews],
+        ),
+    ]
+    all_reviews = prior_reviews + current_reviews
+
+    resolved_prior = supervisor_module._reviews_for_cycle(1, all_reviews, agent_traces)
+    resolved_current = supervisor_module._reviews_for_cycle(2, all_reviews, agent_traces)
+    assert [review.id for review in resolved_prior] == [review.id for review in prior_reviews]
+    assert [review.id for review in resolved_current] == [review.id for review in current_reviews]
+
+    before = supervisor_module._weakness_recurrence_rate(terms, resolved_prior)
+    after = supervisor_module._weakness_recurrence_rate(terms, resolved_current)
+    assert before == 0.5
+    assert after == 0.0
 
 
 def test_supervisor_generates_publication_grant_and_contact_artifacts(tmp_path):

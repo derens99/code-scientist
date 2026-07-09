@@ -1942,7 +1942,7 @@ def _build_feedback_loop_evaluation(
     feedback_items = _feedback_items(source_meta)
     if not source_meta or not feedback_items:
         return None
-    _artifact_text, artifact_refs = _feedback_artifact_text_and_refs(
+    artifact_refs = _feedback_artifact_refs(
         cycle=cycle,
         hypotheses=hypotheses,
         reviews=reviews,
@@ -2010,7 +2010,7 @@ def _feedback_items(meta: MetaReview | None) -> list[tuple[str, str]]:
     return items
 
 
-def _feedback_artifact_text_and_refs(
+def _feedback_artifact_refs(
     cycle: int,
     hypotheses: list[Hypothesis],
     reviews: list[Review],
@@ -2018,7 +2018,7 @@ def _feedback_artifact_text_and_refs(
     proximity_edges: list[ProximityEdge],
     research_overview: ResearchOverview | None,
     agent_traces: list[AgentTrace],
-) -> tuple[str, list[str]]:
+) -> list[str]:
     chunks: list[tuple[str, str]] = []
     for trace in agent_traces:
         if trace.cycle == cycle:
@@ -2068,11 +2068,10 @@ def _feedback_artifact_text_and_refs(
                 ),
             )
         )
-    artifact_text = "\n".join(text for _ref, text in chunks if text)
     artifact_refs = _unique_refs([ref for ref, text in chunks if text and "meta-review feedback" in text.lower()])
     if not artifact_refs:
         artifact_refs = _unique_refs([ref for ref, text in chunks if text])[:8]
-    return artifact_text, artifact_refs[:16]
+    return artifact_refs[:16]
 
 
 def _feedback_quality_metrics(hypotheses: list[Hypothesis], reviews: list[Review]) -> dict[str, float]:
