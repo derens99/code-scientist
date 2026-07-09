@@ -10,6 +10,7 @@ from code_scientist.models import (
     AgentTrace,
     CapabilityEvaluation,
     ContextSnapshot,
+    EloConcordanceResult,
     Evidence,
     Hypothesis,
     MetaReview,
@@ -3832,6 +3833,48 @@ def test_safety_rejected_hypotheses_are_quarantined_from_tournament(tmp_path):
     assert all("hyp-unsafe-1" not in h.parent_ids for h in resumed.hypotheses)
     overview = resumed.research_overview
     assert overview is None or "hyp-unsafe-1" not in overview.top_hypothesis_ids
+
+
+def test_supervisor_resume_preserves_elo_concordance(tmp_path):
+    out_dir = tmp_path / "run"
+    first = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=3,
+        max_matches=2,
+        out_dir=out_dir,
+    )
+    state_path = out_dir / "state.json"
+    data = json.loads(state_path.read_text())
+    concordance = EloConcordanceResult(
+        id="concordance-1",
+        benchmark_name="humaneval",
+        question="Does elo rank correlate with correctness?",
+        graded_count=10,
+        ungraded_count=0,
+        overall_accuracy=0.8,
+        top_hypothesis_id=first.hypotheses[0].id if first.hypotheses else "hyp-1",
+        top_hypothesis_correct=True,
+        concordance_index=0.75,
+        buckets=[{"bucket": 1.0, "accuracy": 0.9}],
+        notes=["synthetic regression fixture"],
+    )
+    data["elo_concordance"] = [concordance.to_dict()]
+    state_path.write_text(json.dumps(data))
+
+    resumed = run_research_cycle(
+        objective=first.goal.objective,
+        cycles=1,
+        max_hypotheses=4,
+        max_matches=3,
+        out_dir=out_dir,
+        resume=True,
+    )
+
+    assert any(item.id == "concordance-1" for item in resumed.elo_concordance)
+
+    reread = json.loads(state_path.read_text())
+    assert any(item["id"] == "concordance-1" for item in reread["elo_concordance"])
 
 
 def _safety_review(hypothesis_id: str, *, review_type: str, safety_score: int) -> Review:

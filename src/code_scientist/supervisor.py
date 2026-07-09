@@ -30,6 +30,7 @@ from code_scientist.models import (
     ContextSnapshot,
     Evidence,
     EvidenceSafetyFinding,
+    EloConcordanceResult,
     EloTrajectoryPoint,
     FeedbackLoopEvaluation,
     Hypothesis,
@@ -318,6 +319,7 @@ def run_research_cycle(
     reviews = [*reviews, *ingestion_safety_reviews]
     matches: list[Match] = list(state.matches)
     elo_trajectory: list[EloTrajectoryPoint] = list(state.elo_trajectory)
+    elo_concordance: list[EloConcordanceResult] = list(state.elo_concordance)
     proximity_edges: list[ProximityEdge] = list(state.proximity_edges)
     capability_evaluations = list(state.capability_evaluations)
     prospective_evaluations = list(state.prospective_evaluations)
@@ -349,6 +351,7 @@ def run_research_cycle(
             reviews=reviews,
             matches=matches,
             elo_trajectory=elo_trajectory,
+            elo_concordance=elo_concordance,
             proximity_edges=proximity_edges,
             benchmark_results=benchmarks,
             capability_evaluations=capability_evaluations,
@@ -1161,6 +1164,7 @@ def run_research_cycle(
         reviews=reviews,
         matches=matches,
         elo_trajectory=elo_trajectory,
+        elo_concordance=elo_concordance,
         proximity_edges=proximity_edges,
         benchmark_results=benchmarks,
         capability_evaluations=capability_evaluations,
