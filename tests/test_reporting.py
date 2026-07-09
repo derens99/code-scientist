@@ -44,6 +44,16 @@ def test_render_report_includes_leaderboard_and_limitations(tmp_path):
     assert "Recommended Next Experiments" in report
 
 
+def test_render_report_includes_elo_trajectory_section(tmp_path):
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=2, max_hypotheses=6, max_matches=4, out_dir=tmp_path / "run",
+    )
+    report = render_report(state)
+    assert "## Elo Trajectory" in report
+    assert f"Points recorded: {len(state.elo_trajectory)}" in report
+
+
 def test_render_report_includes_benchmark_results(tmp_path):
     state = run_research_cycle(
         objective="Find testable ideas to improve LLM coding agents",

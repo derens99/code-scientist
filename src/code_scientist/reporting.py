@@ -741,6 +741,18 @@ def render_report(state: RunState) -> str:
             "",
         ]
     )
+    if state.elo_trajectory:
+        lines.extend(["## Elo Trajectory", ""])
+        lines.append(f"- Points recorded: {len(state.elo_trajectory)}")
+        first = state.elo_trajectory[0]
+        last = state.elo_trajectory[-1]
+        best_point = max(state.elo_trajectory, key=lambda point: point.best_elo)
+        lines.append(f"- First best Elo: {first.best_elo:.3f} (match {first.match_id})")
+        lines.append(f"- Last best Elo: {last.best_elo:.3f} (match {last.match_id})")
+        lines.append(f"- Max best Elo: {best_point.best_elo:.3f} (match {best_point.match_id})")
+        lines.append(f"- First top-avg Elo: {first.top_avg_elo:.3f}")
+        lines.append(f"- Last top-avg Elo: {last.top_avg_elo:.3f}")
+        lines.append("")
     return "\n".join(lines)
 
 

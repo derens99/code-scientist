@@ -29,6 +29,7 @@ from code_scientist.models import (
     ContextSnapshot,
     Evidence,
     EvidenceSafetyFinding,
+    EloTrajectoryPoint,
     FeedbackLoopEvaluation,
     Hypothesis,
     Match,
@@ -315,6 +316,7 @@ def run_research_cycle(
     )
     reviews = [*reviews, *ingestion_safety_reviews]
     matches: list[Match] = list(state.matches)
+    elo_trajectory: list[EloTrajectoryPoint] = list(state.elo_trajectory)
     proximity_edges: list[ProximityEdge] = list(state.proximity_edges)
     capability_evaluations = list(state.capability_evaluations)
     prospective_evaluations = list(state.prospective_evaluations)
@@ -345,6 +347,7 @@ def run_research_cycle(
             hypotheses=sorted(hypotheses, key=lambda item: item.elo, reverse=True),
             reviews=reviews,
             matches=matches,
+            elo_trajectory=elo_trajectory,
             proximity_edges=proximity_edges,
             benchmark_results=benchmarks,
             capability_evaluations=capability_evaluations,
@@ -763,6 +766,19 @@ def run_research_cycle(
                     )
                     hypotheses = _replace_hypotheses(hypotheses, ranked_pair)
                     matches.append(match)
+                    active = _active_hypotheses(hypotheses)
+                    ranked_elos = sorted((item.elo for item in active), reverse=True)
+                    top_slice = ranked_elos[: min(10, len(ranked_elos))]
+                    elo_trajectory.append(
+                        EloTrajectoryPoint(
+                            cycle=cycle,
+                            match_index=len(matches) - 1,
+                            match_id=match.id,
+                            best_elo=round(ranked_elos[0], 3) if ranked_elos else 0.0,
+                            top_avg_elo=round(sum(top_slice) / len(top_slice), 3) if top_slice else 0.0,
+                            active_count=len(active),
+                        )
+                    )
                     cycle_match_ids.append(match.id)
                     cycle_match_evidence_refs.extend(match.evidence_refs)
                 task_retrievals = evidence_store.consume_retrieval_memory(
@@ -1149,6 +1165,7 @@ def run_research_cycle(
         hypotheses=final_hypotheses,
         reviews=reviews,
         matches=matches,
+        elo_trajectory=elo_trajectory,
         proximity_edges=proximity_edges,
         benchmark_results=benchmarks,
         capability_evaluations=capability_evaluations,

@@ -2671,6 +2671,21 @@ def test_supervisor_records_embedding_proximity_and_debate_matches(tmp_path):
     assert any(trace.agent == "ranking" and trace.evidence_refs for trace in state.agent_traces)
 
 
+def test_run_records_elo_trajectory_per_match(tmp_path):
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=2, max_hypotheses=6, max_matches=4, out_dir=tmp_path / "run",
+    )
+    assert state.matches, "expected matches"
+    assert len(state.elo_trajectory) == len(state.matches)
+    indices = [point.match_index for point in state.elo_trajectory]
+    assert indices == list(range(len(state.elo_trajectory))), "global monotonic match_index"
+    for point, match in zip(state.elo_trajectory, state.matches):
+        assert point.match_id == match.id
+        assert point.best_elo >= point.top_avg_elo > 0
+        assert point.active_count > 0
+
+
 def test_supervisor_records_embedding_proximity_controls_for_grounded_runs(tmp_path):
     evidence = tmp_path / "embedding-proximity.md"
     evidence.write_text(
