@@ -61,6 +61,25 @@ class _LLMTraceMixin:
         return interactions
 
 
+def _feedback_block(agent_feedback: list[str] | None) -> str:
+    """Render prior-cycle meta-review feedback as a prompt block.
+
+    Feedback conditions the *next* prompt an agent sees instead of mutating
+    already-finished artifacts after the fact.
+    """
+    if not agent_feedback:
+        return ""
+    lines = "\n".join(f"- {item}" for item in agent_feedback)
+    return f"\n\nMeta-review feedback from prior cycles (address these):\n{lines}\n"
+
+
+def _matched_feedback_terms(text: str, agent_feedback: list[str] | None) -> list[str]:
+    if not agent_feedback:
+        return []
+    lowered = text.lower()
+    return [term for term in agent_feedback if len(term) > 4 and term.lower() in lowered]
+
+
 class GenerationAgent(_LLMTraceMixin):
     def __init__(
         self,
@@ -72,9 +91,15 @@ class GenerationAgent(_LLMTraceMixin):
         self.llm_max_tokens = llm_max_tokens
         self.llm_origin = llm_origin
 
-    def generate(self, goal: ResearchGoal, evidence: list[Any], limit: int = 6) -> list[Hypothesis]:
+    def generate(
+        self,
+        goal: ResearchGoal,
+        evidence: list[Any],
+        limit: int = 6,
+        agent_feedback: list[str] | None = None,
+    ) -> list[Hypothesis]:
         if self.llm_client:
-            return self._generate_with_llm(goal, evidence, limit)
+            return self._generate_with_llm(goal, evidence, limit, agent_feedback)
 
         evidence_refs = [getattr(item, "id", "") for item in evidence][:3]
         blueprints = [
@@ -121,6 +146,15 @@ class GenerationAgent(_LLMTraceMixin):
                 ["feedback overfitting", "generic critiques"],
             ),
         ]
+        if agent_feedback:
+            filtered_blueprints = [
+                blueprint
+                for blueprint in blueprints
+                if not _matched_feedback_terms(blueprint[1], agent_feedback)
+            ]
+            if filtered_blueprints:
+                blueprints = filtered_blueprints
+
         hypotheses: list[Hypothesis] = []
         for title, claim, rationale, assumptions, risks in blueprints[:limit]:
             identity = f"{goal.id}:{title}:{claim}"
@@ -194,10 +228,11 @@ class GenerationAgent(_LLMTraceMixin):
         evidence: list[Any] | EvidenceStore,
         mode: str,
         limit: int = 6,
+        agent_feedback: list[str] | None = None,
     ) -> list[Hypothesis]:
         if mode == "paper_seeded_idea_generation":
             source_evidence = evidence.evidence if isinstance(evidence, EvidenceStore) else evidence
-            return self.generate(goal, source_evidence, limit=limit)
+            return self.generate(goal, source_evidence, limit=limit, agent_feedback=agent_feedback)
         if mode == "literature_grounded_generation":
             store = evidence if isinstance(evidence, EvidenceStore) else EvidenceStore(evidence)
             return _grounded_mode_hypotheses(goal, store, limit)
@@ -213,7 +248,7 @@ class GenerationAgent(_LLMTraceMixin):
             source_evidence = evidence.evidence if isinstance(evidence, EvidenceStore) else evidence
             return [
                 replace(item, origin="generation:research_expansion_from_meta_review")
-                for item in self.generate(goal, source_evidence, limit=limit)
+                for item in self.generate(goal, source_evidence, limit=limit, agent_feedback=agent_feedback)
             ]
         if mode in {"simulated_debate", "multi_round_debate", "multi_turn_debate"}:
             source_evidence = evidence.evidence if isinstance(evidence, EvidenceStore) else evidence
@@ -221,17 +256,28 @@ class GenerationAgent(_LLMTraceMixin):
                 return self._generate_debate_with_llm(goal, source_evidence, mode, limit)
             return _simulated_debate_hypotheses(
                 goal,
-                self.generate(goal, source_evidence, limit=limit),
+                self.generate(goal, source_evidence, limit=limit, agent_feedback=agent_feedback),
                 mode,
             )
         return [
             replace(item, origin=f"generation:{mode}")
-            for item in self.generate(goal, evidence.evidence if isinstance(evidence, EvidenceStore) else evidence, limit=limit)
+            for item in self.generate(
+                goal,
+                evidence.evidence if isinstance(evidence, EvidenceStore) else evidence,
+                limit=limit,
+                agent_feedback=agent_feedback,
+            )
         ]
 
-    def _generate_with_llm(self, goal: ResearchGoal, evidence: list[Any], limit: int) -> list[Hypothesis]:
+    def _generate_with_llm(
+        self,
+        goal: ResearchGoal,
+        evidence: list[Any],
+        limit: int,
+        agent_feedback: list[str] | None = None,
+    ) -> list[Hypothesis]:
         response_text = self.llm_client.complete(
-            _generation_prompt(goal, evidence, limit),
+            _generation_prompt(goal, evidence, limit, agent_feedback),
             max_tokens=self.llm_max_tokens,
         )
         return self._parse_llm_hypotheses_with_repair(
@@ -346,6 +392,24 @@ class GenerationAgent(_LLMTraceMixin):
             )
 
 
+def _apply_deterministic_review_feedback(
+    review: Review,
+    hypothesis: Hypothesis,
+    agent_feedback: list[str] | None,
+) -> Review:
+    """Ground deterministic reviews in the hypothesis text, not a blanket annotation."""
+    hypothesis_text = " ".join([hypothesis.title, hypothesis.claim, hypothesis.rationale])
+    matched_terms = _matched_feedback_terms(hypothesis_text, agent_feedback)
+    if not matched_terms:
+        return review
+    findings = list(review.findings)
+    for term in matched_terms:
+        note = f"Prior meta-review flagged: {term}"
+        if note not in findings:
+            findings.append(note)
+    return replace(review, findings=findings)
+
+
 class ReflectionAgent(_LLMTraceMixin):
     def __init__(
         self,
@@ -456,6 +520,7 @@ class ReflectionAgent(_LLMTraceMixin):
         hypothesis: Hypothesis,
         review_type: str,
         evidence_store: EvidenceStore | None = None,
+        agent_feedback: list[str] | None = None,
     ) -> Review:
         if self.llm_client:
             try:
@@ -463,36 +528,38 @@ class ReflectionAgent(_LLMTraceMixin):
                     return self._deep_verification_with_llm(goal, hypothesis, evidence_store)
                 if review_type == "safety_review":
                     return self._safety_review_with_llm(goal, hypothesis, evidence_store)
-                return self._review_with_llm(goal, hypothesis, review_type, evidence_store)
+                return self._review_with_llm(goal, hypothesis, review_type, evidence_store, agent_feedback)
             except LLMResponseError:
                 pass
         if review_type == "initial_review":
-            return self.review(goal, hypothesis)
-        if review_type == "full_review":
-            return self.full_review(goal, hypothesis, evidence_store)
-        if review_type == "safety_review":
-            return self._safety_exploration_review(goal, hypothesis, evidence_store)
-        if review_type == "recurrent_tournament_review":
+            result = self.review(goal, hypothesis)
+        elif review_type == "full_review":
+            result = self.full_review(goal, hypothesis, evidence_store)
+        elif review_type == "safety_review":
+            result = self._safety_exploration_review(goal, hypothesis, evidence_store)
+        elif review_type == "recurrent_tournament_review":
             base = self.review(goal, hypothesis)
-            return replace(
+            result = replace(
                 base,
                 id=stable_id("rev", f"{goal.id}:{hypothesis.id}:{review_type}:{base.decision}"),
                 review_type=review_type,
             )
-        if review_type == "novelty_review":
-            return self._novelty_review(goal, hypothesis, evidence_store)
-        if review_type == "deep_verification":
-            return self._deep_verification_review(goal, hypothesis, evidence_store)
-        if review_type == "observation_review":
-            return self._observation_review(goal, hypothesis, evidence_store)
-        if review_type == "simulation_review":
-            return self._simulation_review(goal, hypothesis, evidence_store)
-        base = self.review(goal, hypothesis)
-        return replace(
-            base,
-            id=stable_id("rev", f"{goal.id}:{hypothesis.id}:{review_type}:{base.decision}"),
-            review_type=review_type,
-        )
+        elif review_type == "novelty_review":
+            result = self._novelty_review(goal, hypothesis, evidence_store)
+        elif review_type == "deep_verification":
+            result = self._deep_verification_review(goal, hypothesis, evidence_store)
+        elif review_type == "observation_review":
+            result = self._observation_review(goal, hypothesis, evidence_store)
+        elif review_type == "simulation_review":
+            result = self._simulation_review(goal, hypothesis, evidence_store)
+        else:
+            base = self.review(goal, hypothesis)
+            result = replace(
+                base,
+                id=stable_id("rev", f"{goal.id}:{hypothesis.id}:{review_type}:{base.decision}"),
+                review_type=review_type,
+            )
+        return _apply_deterministic_review_feedback(result, hypothesis, agent_feedback)
 
     def _novelty_review(
         self,
@@ -810,10 +877,11 @@ class ReflectionAgent(_LLMTraceMixin):
         hypothesis: Hypothesis,
         review_type: str,
         evidence_store: EvidenceStore | None,
+        agent_feedback: list[str] | None = None,
     ) -> Review:
         evidence = evidence_store.search_hypothesis(hypothesis, limit=5) if evidence_store else []
         response_text = self.llm_client.complete(
-            _review_prompt(goal, hypothesis, review_type, evidence),
+            _review_prompt(goal, hypothesis, review_type, evidence, agent_feedback),
             max_tokens=self.llm_max_tokens,
         )
         return self._parse_llm_review(
@@ -993,10 +1061,13 @@ class ProximityAgent(_LLMTraceMixin):
         hypotheses: list[Hypothesis],
         reviews: list[Review] | None = None,
         evidence_store: EvidenceStore | None = None,
+        agent_feedback: list[str] | None = None,
     ) -> list[ProximityEdge]:
         if self.llm_client:
             try:
-                return self._compute_goal_aware_with_llm(goal, hypotheses, reviews or [], evidence_store)
+                return self._compute_goal_aware_with_llm(
+                    goal, hypotheses, reviews or [], evidence_store, agent_feedback
+                )
             except LLMResponseError:
                 pass
         if evidence_store is not None and evidence_store.evidence:
@@ -1170,6 +1241,7 @@ class ProximityAgent(_LLMTraceMixin):
         hypotheses: list[Hypothesis],
         reviews: list[Review],
         evidence_store: EvidenceStore | None,
+        agent_feedback: list[str] | None = None,
     ) -> list[ProximityEdge]:
         neighborhood_text = self.llm_client.complete(
             _llm_proximity_neighborhood_prompt(goal, hypotheses, reviews, evidence_store),
@@ -1187,6 +1259,7 @@ class ProximityAgent(_LLMTraceMixin):
                 evidence_store,
                 neighborhood_text,
                 overlap_text,
+                agent_feedback,
             ),
             max_tokens=self.llm_max_tokens,
         )
@@ -1305,10 +1378,11 @@ class RankingAgent(_LLMTraceMixin):
         second: Hypothesis,
         reviews: list[Review] | None = None,
         evidence_store: EvidenceStore | None = None,
+        agent_feedback: list[str] | None = None,
     ) -> tuple[list[Hypothesis], Match]:
         if self.llm_client:
             try:
-                return self._compare_debate_with_llm(goal, first, second, reviews or [])
+                return self._compare_debate_with_llm(goal, first, second, reviews or [], agent_feedback)
             except LLMResponseError:
                 pass
         first_reviews = [review for review in reviews or [] if review.hypothesis_id == first.id]
@@ -1397,6 +1471,7 @@ class RankingAgent(_LLMTraceMixin):
         reviews: list[Review] | None = None,
         rounds: int = 2,
         evidence_store: EvidenceStore | None = None,
+        agent_feedback: list[str] | None = None,
     ) -> tuple[list[Hypothesis], Match]:
         round_count = max(2, rounds)
         if self.llm_client:
@@ -1407,6 +1482,7 @@ class RankingAgent(_LLMTraceMixin):
                     second,
                     reviews or [],
                     round_count,
+                    agent_feedback,
                 )
             except LLMResponseError:
                 pass
@@ -1512,9 +1588,10 @@ class RankingAgent(_LLMTraceMixin):
         first: Hypothesis,
         second: Hypothesis,
         reviews: list[Review],
+        agent_feedback: list[str] | None = None,
     ) -> tuple[list[Hypothesis], Match]:
         response_text = self.llm_client.complete(
-            _ranking_prompt(goal, first, second, reviews),
+            _ranking_prompt(goal, first, second, reviews, agent_feedback),
             max_tokens=self.llm_max_tokens,
         )
         data = _json_object(response_text, "debate ranking")
@@ -1578,6 +1655,7 @@ class RankingAgent(_LLMTraceMixin):
         second: Hypothesis,
         reviews: list[Review],
         rounds: int,
+        agent_feedback: list[str] | None = None,
     ) -> tuple[list[Hypothesis], Match]:
         transcript: list[str] = []
         for round_index in range(1, rounds + 1):
@@ -1594,7 +1672,7 @@ class RankingAgent(_LLMTraceMixin):
             )
 
         response_text = self.llm_client.complete(
-            _multi_round_debate_judge_prompt(goal, first, second, reviews, transcript, rounds),
+            _multi_round_debate_judge_prompt(goal, first, second, reviews, transcript, rounds, agent_feedback),
             max_tokens=self.llm_max_tokens,
         )
         data = _json_object(response_text, "multi-round debate final judge")
@@ -2415,6 +2493,7 @@ def _review_prompt(
     hypothesis: Hypothesis,
     review_type: str,
     evidence: list[Any],
+    agent_feedback: list[str] | None = None,
 ) -> str:
     evidence_text = _evidence_prompt_lines(evidence)
     return f"""You are a scientific reflection agent for a coding-agent AI co-scientist.
@@ -2434,7 +2513,7 @@ Evidence:
 
 Return only valid JSON with:
 decision, scores, strengths, weaknesses, safety_notes, findings, confidence, requires_revision, evidence_refs.
-"""
+{_feedback_block(agent_feedback)}"""
 
 
 def _llm_reflection_mechanism_prompt(
@@ -2585,6 +2664,7 @@ def _ranking_prompt(
     first: Hypothesis,
     second: Hypothesis,
     reviews: list[Review],
+    agent_feedback: list[str] | None = None,
 ) -> str:
     review_lines = "\n".join(
         f"- {review.id} for {review.hypothesis_id}: {review.decision}; "
@@ -2609,7 +2689,7 @@ Reviews:
 
 Return only valid JSON with:
 winner ("first", "second", or "tie"), rationale, judge_trace, uncertainty, debate_transcript, outcome.
-"""
+{_feedback_block(agent_feedback)}"""
 
 
 def _multi_round_debate_round_prompt(
@@ -2659,6 +2739,7 @@ def _multi_round_debate_judge_prompt(
     reviews: list[Review],
     transcript: list[str],
     rounds: int,
+    agent_feedback: list[str] | None = None,
 ) -> str:
     review_lines = "\n".join(
         f"- {review.id} for {review.hypothesis_id}: {review.decision}; "
@@ -2688,7 +2769,7 @@ Debate transcript:
 
 Return only valid JSON with:
 winner ("first", "second", or "tie"), rationale, judge_trace, uncertainty, debate_transcript, outcome.
-"""
+{_feedback_block(agent_feedback)}"""
 
 
 def _proximity_prompt(
@@ -2781,6 +2862,7 @@ def _llm_proximity_synthesis_prompt(
     evidence_store: EvidenceStore | None,
     neighborhood_text: str,
     overlap_text: str,
+    agent_feedback: list[str] | None = None,
 ) -> str:
     return f"""Proximity turn 3 clustering synthesis for a coding-agent AI co-scientist worker.
 Objective: {goal.objective}
@@ -2804,7 +2886,7 @@ Return only valid JSON with an edges array. Each edge needs:
 source, target, similarity, reason, cluster_id, evidence_refs, review_refs.
 Prefer also including deduplication_action and diversity_action when the pair
 should be merged, contrasted, deprioritized as redundant, or preserved for diversity.
-Only use source and target ids from the hypothesis list."""
+Only use source and target ids from the hypothesis list.{_feedback_block(agent_feedback)}"""
 
 
 def _proximity_hypothesis_lines(hypotheses: list[Hypothesis]) -> str:
@@ -3658,7 +3740,12 @@ def _rank_score(hypothesis: Hypothesis) -> int:
     )
 
 
-def _generation_prompt(goal: ResearchGoal, evidence: list[Any], limit: int) -> str:
+def _generation_prompt(
+    goal: ResearchGoal,
+    evidence: list[Any],
+    limit: int,
+    agent_feedback: list[str] | None = None,
+) -> str:
     evidence_lines = []
     for item in evidence[:5]:
         evidence_lines.append(
@@ -3687,7 +3774,7 @@ Return only valid JSON with this shape:
 }}
 
 Prefer ideas that are measurable with these metrics: {", ".join(goal.metrics)}.
-Do not claim an improvement as proven; describe an experimentable hypothesis."""
+Do not claim an improvement as proven; describe an experimentable hypothesis.{_feedback_block(agent_feedback)}"""
 
 
 def _json_repair_prompt(goal: ResearchGoal, invalid_response: str, limit: int) -> str:

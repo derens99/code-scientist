@@ -634,8 +634,9 @@ def run_research_cycle(
 
             def execute_proximity(_task: Task) -> list[str]:
                 nonlocal hypotheses, proximity_edges
-                proximity_edges = proximity.compute_goal_aware(goal, hypotheses, reviews, evidence_store)
-                proximity_edges = _apply_proximity_feedback(proximity_edges, proximity_feedback)
+                proximity_edges = proximity.compute_goal_aware(
+                    goal, hypotheses, reviews, evidence_store, agent_feedback=proximity_feedback
+                )
                 hypotheses = _apply_proximity_deduplication(hypotheses, proximity_edges)
                 task_retrievals = evidence_store.consume_retrieval_memory(
                     cycle=cycle,
@@ -713,6 +714,7 @@ def run_research_cycle(
                             reviews=pair_reviews,
                             rounds=2,
                             evidence_store=evidence_store if use_grounded_review else None,
+                            agent_feedback=ranking_feedback,
                         )
                         if use_multi_round
                         else ranking.compare_debate(
@@ -721,6 +723,7 @@ def run_research_cycle(
                             second,
                             reviews=pair_reviews,
                             evidence_store=evidence_store if use_grounded_review else None,
+                            agent_feedback=ranking_feedback,
                         )
                     )
                     if use_multi_round:
@@ -732,7 +735,6 @@ def run_research_cycle(
                         match,
                         judge_trace=f"{match.judge_trace}; {tier_note}" if match.judge_trace else tier_note,
                     )
-                    match = _apply_match_feedback(match, ranking_feedback)
                     hypotheses = _replace_hypotheses(hypotheses, ranked_pair)
                     matches.append(match)
                     cycle_match_ids.append(match.id)
@@ -873,8 +875,9 @@ def run_research_cycle(
                         [item.with_status("accepted") for item in children if item.id in accepted_child_ids],
                     )
                     reviews.extend(child_reviews)
-                    proximity_edges = proximity.compute_goal_aware(goal, hypotheses, reviews, evidence_store)
-                    proximity_edges = _apply_proximity_feedback(proximity_edges, proximity_feedback)
+                    proximity_edges = proximity.compute_goal_aware(
+                        goal, hypotheses, reviews, evidence_store, agent_feedback=proximity_feedback
+                    )
                     hypotheses = _apply_proximity_deduplication(hypotheses, proximity_edges)
                     return [item.id for item in children]
 
@@ -957,7 +960,6 @@ def run_research_cycle(
                 research_overview = meta_review.build_overview(
                     goal, _active_hypotheses(hypotheses), metas, cycle=cycle
                 )
-                research_overview = _apply_overview_feedback(research_overview, overview_feedback)
                 task_retrievals = evidence_store.consume_retrieval_memory(
                     cycle=cycle,
                     agent="overview",
@@ -1750,7 +1752,9 @@ def _generate_for_plan(
             if use_grounded or mode in {"literature_grounded_generation", "tool_augmented_generation"}
             else evidence
         )
-        mode_items = generation.generate_with_mode(goal, source, mode=mode, limit=mode_limit)
+        mode_items = generation.generate_with_mode(
+            goal, source, mode=mode, limit=mode_limit, agent_feedback=agent_feedback
+        )
         mode_retrievals = evidence_store.consume_retrieval_memory(
             cycle=cycle,
             agent="generation",
@@ -1759,7 +1763,6 @@ def _generate_for_plan(
         )
         if retrieval_memory is not None:
             retrieval_memory.extend(mode_retrievals)
-        mode_items = _apply_generation_feedback(goal, mode_items, mode, agent_feedback or [])
         unique_mode_items = [item for item in mode_items if item.id not in existing_ids]
         for item in unique_mode_items:
             existing_ids.add(item.id)
@@ -1795,29 +1798,6 @@ def _generate_for_plan(
     return generated[:limit]
 
 
-def _apply_generation_feedback(
-    goal: ResearchGoal,
-    hypotheses: list[Hypothesis],
-    mode: str,
-    agent_feedback: list[str],
-) -> list[Hypothesis]:
-    if not agent_feedback:
-        return hypotheses
-    feedback_text = "; ".join(agent_feedback)
-    return [
-        replace(
-            item,
-            id=stable_id("hyp", f"{goal.id}:{mode}:agent-feedback:{item.id}:{feedback_text}"),
-            rationale=f"{item.rationale} Meta-review feedback for generation: {feedback_text}.",
-            assumptions=_unique_refs([
-                *item.assumptions,
-                "Generation incorporated targeted meta-review feedback.",
-            ]),
-        )
-        for item in hypotheses
-    ]
-
-
 def _review_for_plan(
     reflection: ReflectionAgent,
     goal: ResearchGoal,
@@ -1834,12 +1814,18 @@ def _review_for_plan(
 ) -> list[Review]:
     reviews: list[Review] = []
     for review_type in _active_review_types(plan, use_grounded):
+        review_feedback = (
+            _unique_refs([*(agent_feedback or []), *(safety_feedback or [])])
+            if review_type == "safety_review"
+            else agent_feedback or []
+        )
         mode_reviews = [
             reflection.review_with_type(
                 goal,
                 item,
                 review_type,
                 evidence_store if use_grounded else None,
+                agent_feedback=review_feedback,
             )
             for item in hypotheses
         ]
@@ -1851,9 +1837,6 @@ def _review_for_plan(
         )
         if retrieval_memory is not None:
             retrieval_memory.extend(mode_retrievals)
-        mode_reviews = _apply_review_feedback(mode_reviews, agent_feedback or [], "reflection")
-        if review_type == "safety_review":
-            mode_reviews = _apply_review_feedback(mode_reviews, safety_feedback or [], "safety")
         reviews.extend(mode_reviews)
         notes = f"Ran {review_type} for {len(mode_reviews)} hypotheses."
         if agent_feedback:
@@ -1883,62 +1866,6 @@ def _review_for_plan(
             )
         )
     return reviews
-
-
-def _apply_review_feedback(reviews: list[Review], agent_feedback: list[str], agent: str) -> list[Review]:
-    if not agent_feedback:
-        return reviews
-    feedback_text = "; ".join(agent_feedback)
-    return [
-        replace(
-            review,
-            findings=_unique_refs([
-                *review.findings,
-                f"Meta-review feedback for {agent}: {feedback_text}.",
-            ]),
-        )
-        for review in reviews
-    ]
-
-
-def _apply_match_feedback(match: Match, agent_feedback: list[str]) -> Match:
-    if not agent_feedback:
-        return match
-    feedback_text = "; ".join(agent_feedback)
-    feedback_note = f"Meta-review feedback for ranking: {feedback_text}."
-    judge_trace = f"{match.judge_trace} {feedback_note}".strip()
-    return replace(
-        match,
-        judge_trace=judge_trace,
-        debate_transcript=_unique_refs([*match.debate_transcript, feedback_note]),
-    )
-
-
-def _apply_proximity_feedback(edges: list[ProximityEdge], agent_feedback: list[str]) -> list[ProximityEdge]:
-    if not agent_feedback:
-        return edges
-    feedback_text = "; ".join(agent_feedback)
-    feedback_note = f"Meta-review feedback for proximity: {feedback_text}."
-    return [
-        replace(
-            edge,
-            reason=f"{edge.reason} {feedback_note}".strip(),
-        )
-        for edge in edges
-    ]
-
-
-def _apply_overview_feedback(overview: ResearchOverview, agent_feedback: list[str]) -> ResearchOverview:
-    if not agent_feedback:
-        return overview
-    feedback_text = "; ".join(agent_feedback)
-    feedback_note = f"Meta-review feedback for overview: {feedback_text}."
-    return replace(
-        overview,
-        summary=f"{overview.summary} {feedback_note}",
-        next_experiments=_unique_refs([*overview.next_experiments, feedback_note]),
-        limitations=_unique_refs([*overview.limitations, feedback_note]),
-    )
 
 
 def _build_feedback_loop_evaluation(

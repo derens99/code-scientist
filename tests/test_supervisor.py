@@ -1407,6 +1407,179 @@ def test_supervisor_anthropic_provider_drives_plan_and_all_agent_roles(tmp_path)
     )
 
 
+def test_meta_review_feedback_reaches_agent_prompts_not_artifacts(tmp_path):
+    class RecordingFakeClient:
+        def __init__(self):
+            self.prompts: list[str] = []
+
+        def complete(self, prompt, max_tokens):
+            self.prompts.append(prompt)
+            lowered = prompt.lower()
+            if "configuring a coding-agent ai co-scientist research plan" in lowered:
+                return json.dumps(
+                    {
+                        "proposal_preferences": ["Prefer repo-grounded hypotheses."],
+                        "evaluation_criteria": ["alignment", "benchmark_delta"],
+                        "generation_methods": ["paper_seeded_idea_generation"],
+                        "review_types": ["deep_verification"],
+                        "evolution_strategies": ["combination"],
+                        "scheduler_weights": {"generation": 1.1, "reflection": 1.3, "ranking": 1.2},
+                        "constraints": ["Keep code changes human-reviewed."],
+                        "output_formats": ["research_overview"],
+                        "allowed_sources": ["local_corpus"],
+                        "allowed_tools": ["repo_search"],
+                        "termination_criteria": ["max_cycles"],
+                    }
+                )
+            if "safety critic" in lowered:
+                return json.dumps({"allowed": True, "reason": "Within bounds.", "flags": []})
+            if "generate" in lowered and "testable hypotheses" in lowered:
+                return json.dumps(
+                    {
+                        "hypotheses": [
+                            {
+                                "title": f"Repo-aware idea search {len(self.prompts)}",
+                                "claim": (
+                                    "Using repository traces to seed idea search will improve "
+                                    "LLM coding-agent eval pass rate."
+                                ),
+                                "rationale": "Repo traces make ideas more concrete and testable.",
+                                "assumptions": ["Trace data is available."],
+                                "risks": ["overfitting to one repository"],
+                            }
+                        ]
+                    }
+                )
+            if "reflection turn 1 claim mechanism" in lowered:
+                return "Mechanism check: repository traces make hypotheses measurable."
+            if "reflection turn 2 assumption risk audit" in lowered:
+                return "Risk audit: still needs prospective validation."
+            if "reflection turn 3 benchmark validation synthesis" in lowered:
+                return json.dumps(
+                    {
+                        "decision": "accept",
+                        "scores": {"alignment": 5, "plausibility": 4, "novelty": 4, "testability": 5, "safety": 5},
+                        "strengths": ["Concrete benchmark path."],
+                        "weaknesses": ["Needs prospective validation."],
+                        "safety_notes": ["Human review required."],
+                        "findings": ["LLM review accepted with validation caveat."],
+                        "confidence": 0.78,
+                        "requires_revision": False,
+                        "evidence_refs": [],
+                    }
+                )
+            if "proximity turn 1 semantic neighborhood mapping" in lowered:
+                return "Neighborhood map: candidates cluster around benchmark grounding."
+            if "proximity turn 2 evidence and review overlap" in lowered:
+                return "Overlap analysis: shared validation caveats."
+            if "proximity turn 3 clustering synthesis" in lowered:
+                hypothesis_ids = []
+                for token in prompt.replace(":", " ").replace(",", " ").split():
+                    if token.startswith("hyp-") and token not in hypothesis_ids:
+                        hypothesis_ids.append(token)
+                if len(hypothesis_ids) < 2:
+                    return json.dumps({"edges": []})
+                return json.dumps(
+                    {
+                        "edges": [
+                            {
+                                "source": hypothesis_ids[0],
+                                "target": hypothesis_ids[1],
+                                "similarity": 0.4,
+                                "reason": "Loosely related candidates.",
+                                "cluster_id": "cluster-1",
+                                "evidence_refs": [],
+                                "review_refs": [],
+                            }
+                        ]
+                    }
+                )
+            if "multi-round debate round" in lowered:
+                return json.dumps({"debate_transcript": ["Round argument noted."]})
+            if "multi-round debate final judge" in lowered:
+                return json.dumps(
+                    {
+                        "winner": "first",
+                        "rationale": "First candidate is more directly measurable.",
+                        "judge_trace": "llm judge compared evidence and reviews.",
+                        "uncertainty": 0.31,
+                        "debate_transcript": ["Judge: first wins."],
+                        "outcome": "win",
+                    }
+                )
+            if "pairwise debate judge" in lowered:
+                return json.dumps(
+                    {
+                        "winner": "first",
+                        "rationale": "First candidate is more directly measurable.",
+                        "judge_trace": "llm judge compared evidence and reviews.",
+                        "uncertainty": 0.31,
+                        "debate_transcript": ["Judge: first wins."],
+                        "outcome": "win",
+                    }
+                )
+            if "evolution agent" in lowered:
+                return json.dumps({"hypotheses": []})
+            if "meta-review agent" in lowered:
+                return json.dumps(
+                    {
+                        "common_weaknesses": ["needs prospective validation"],
+                        "safety_concerns": [],
+                        "missing_evidence": ["implemented benchmark deltas"],
+                        "promising_directions": ["benchmark-gated critic loops"],
+                        "prompt_feedback": ["Require implementation refs."],
+                        "agent_feedback": {"generation": ["repository traces"]},
+                        "evidence_refs": [],
+                    }
+                )
+            if "research overview" in lowered:
+                return json.dumps(
+                    {
+                        "summary": "LLM overview selected benchmark-gated critic loops.",
+                        "top_hypothesis_ids": [],
+                        "promising_directions": ["benchmark-gated critic loops"],
+                        "next_experiments": ["Run a repair benchmark."],
+                        "limitations": ["Needs human validation."],
+                    }
+                )
+            raise AssertionError(f"Unexpected prompt: {prompt[:120]}")
+
+        def prompts_for(self, agent: str) -> list[str]:
+            prefixes = {
+                "generation": "You are a coding-agent research scientist.",
+            }
+            prefix = prefixes[agent]
+            return [prompt for prompt in self.prompts if prompt.startswith(prefix)]
+
+    out_dir = tmp_path / "run"
+    recorder = RecordingFakeClient()
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=2,
+        max_hypotheses=4,
+        max_matches=2,
+        out_dir=out_dir,
+        llm_client=recorder,
+        provider="anthropic",
+    )
+
+    feedback_terms = [
+        text for meta in state.meta_reviews for text in meta.agent_feedback.get("generation", [])
+    ]
+    assert feedback_terms, "expected generation-scoped meta-review feedback after cycle 1"
+
+    cycle2_generation_prompts = [p for p in recorder.prompts_for("generation") if "Meta-review feedback" in p]
+    assert cycle2_generation_prompts, "cycle-2 generation prompt must embed meta-review feedback"
+
+    assert all(
+        "Meta-review feedback for generation" not in h.rationale for h in state.hypotheses
+    ), "artifacts must not be post-hoc annotated with feedback strings"
+    assert all(
+        not any(f.startswith("Meta-review feedback for") for f in r.findings)
+        for r in state.reviews
+    )
+
+
 def test_supervisor_filters_hypotheses_contradicted_by_evidence_before_tournament(tmp_path):
     evidence = tmp_path / "local-evidence.md"
     evidence.write_text(
@@ -2463,7 +2636,7 @@ def test_supervisor_records_embedding_proximity_controls_for_grounded_runs(tmp_p
 
 
 def test_supervisor_applies_proximity_deduplication_workflow(tmp_path, monkeypatch):
-    def fake_compute_goal_aware(self, goal, hypotheses, reviews=None, evidence_store=None):
+    def fake_compute_goal_aware(self, goal, hypotheses, reviews=None, evidence_store=None, agent_feedback=None):
         return [
             ProximityEdge(
                 source=hypotheses[0].id,
@@ -2505,16 +2678,25 @@ def test_supervisor_passes_evidence_store_to_ranking_debate(tmp_path, monkeypatc
     original_compare = RankingAgent.compare_debate
     original_compare_multi = RankingAgent.compare_multi_round_debate
 
-    def spy_compare(self, goal, first, second, reviews=None, evidence_store=None):
+    def spy_compare(self, goal, first, second, reviews=None, evidence_store=None, agent_feedback=None):
         captured_stores.append(evidence_store)
         if evidence_store is None:
-            return original_compare(self, goal, first, second, reviews=reviews)
-        return original_compare(self, goal, first, second, reviews=reviews, evidence_store=evidence_store)
+            return original_compare(self, goal, first, second, reviews=reviews, agent_feedback=agent_feedback)
+        return original_compare(
+            self, goal, first, second, reviews=reviews, evidence_store=evidence_store, agent_feedback=agent_feedback
+        )
 
-    def spy_compare_multi(self, goal, first, second, reviews=None, rounds=2, evidence_store=None):
+    def spy_compare_multi(self, goal, first, second, reviews=None, rounds=2, evidence_store=None, agent_feedback=None):
         captured_stores.append(evidence_store)
         return original_compare_multi(
-            self, goal, first, second, reviews=reviews, rounds=rounds, evidence_store=evidence_store
+            self,
+            goal,
+            first,
+            second,
+            reviews=reviews,
+            rounds=rounds,
+            evidence_store=evidence_store,
+            agent_feedback=agent_feedback,
         )
 
     monkeypatch.setattr(RankingAgent, "compare_debate", spy_compare)
@@ -2977,7 +3159,9 @@ def test_supervisor_reuses_agent_specific_meta_feedback_for_next_generation(tmp_
     new_hypotheses = [item for item in resumed.hypotheses if item.id not in {hyp.id for hyp in first.hypotheses}]
     assert generation_traces
     assert any("Use repository failure traces" in trace.notes for trace in generation_traces)
-    assert any("Use repository failure traces" in item.rationale for item in new_hypotheses)
+    assert not any(
+        "Meta-review feedback for generation" in item.rationale for item in new_hypotheses
+    ), "feedback must condition prompts, not post-hoc rewrite hypothesis artifacts"
 
 
 def test_supervisor_reuses_agent_specific_meta_feedback_for_next_reflection(tmp_path):
@@ -3024,11 +3208,9 @@ def test_supervisor_reuses_agent_specific_meta_feedback_for_next_reflection(tmp_
     new_reviews = [review for review in resumed.reviews if review.id not in {item.id for item in first.reviews}]
     assert reflection_traces
     assert any("Require retrieved citations" in trace.notes for trace in reflection_traces)
-    assert any(
-        "Require retrieved citations" in finding
-        for review in new_reviews
-        for finding in review.findings
-    )
+    assert not any(
+        finding.startswith("Meta-review feedback for") for review in new_reviews for finding in review.findings
+    ), "feedback must condition prompts, not blanket-annotate review findings"
 
 
 def test_supervisor_reuses_agent_specific_meta_feedback_for_next_ranking(tmp_path):
@@ -3075,7 +3257,9 @@ def test_supervisor_reuses_agent_specific_meta_feedback_for_next_ranking(tmp_pat
     new_matches = [match for match in resumed.matches if match.id not in {item.id for item in first.matches}]
     assert ranking_traces
     assert any("Use uncertainty abstention" in trace.notes for trace in ranking_traces)
-    assert any("Use uncertainty abstention" in match.judge_trace for match in new_matches)
+    assert not any(
+        "Meta-review feedback for ranking" in match.judge_trace for match in new_matches
+    ), "feedback must condition the judge prompt, not post-hoc rewrite the match judge_trace"
 
 
 def test_supervisor_reuses_agent_specific_meta_feedback_for_next_evolution(tmp_path):
@@ -3162,7 +3346,9 @@ def test_supervisor_reuses_agent_specific_meta_feedback_for_next_proximity(tmp_p
     ]
     assert proximity_traces
     assert any("Cluster by benchmark failure mode" in trace.notes for trace in proximity_traces)
-    assert any("Cluster by benchmark failure mode" in edge.reason for edge in resumed.proximity_edges)
+    assert not any(
+        "Meta-review feedback for proximity" in edge.reason for edge in resumed.proximity_edges
+    ), "feedback must condition the proximity prompt, not post-hoc rewrite edge reasons"
 
 
 def test_supervisor_reuses_agent_specific_meta_feedback_for_next_overview(tmp_path):
@@ -3209,15 +3395,15 @@ def test_supervisor_reuses_agent_specific_meta_feedback_for_next_overview(tmp_pa
     assert resumed.research_overview is not None
     assert overview_traces
     assert any("Use grant-style concise next steps" in trace.notes for trace in overview_traces)
-    assert any(
-        "Use grant-style concise next steps" in item
+    assert "Use grant-style concise next steps" in render_report(resumed)
+    assert not any(
+        "Meta-review feedback for overview" in item
         for item in [
             resumed.research_overview.summary,
             *resumed.research_overview.next_experiments,
             *resumed.research_overview.limitations,
         ]
-    )
-    assert "Use grant-style concise next steps" in render_report(resumed)
+    ), "feedback must not be blanket-annotated onto the research overview artifact"
 
 
 def test_supervisor_reuses_agent_specific_meta_feedback_for_next_safety_review(tmp_path):
@@ -3276,11 +3462,11 @@ def test_supervisor_reuses_agent_specific_meta_feedback_for_next_safety_review(t
     ]
     assert safety_traces
     assert any("Check credential and deployment boundaries" in trace.notes for trace in safety_traces)
-    assert any(
-        "Check credential and deployment boundaries" in finding
+    assert not any(
+        finding.startswith("Meta-review feedback for")
         for review in new_safety_reviews
         for finding in review.findings
-    )
+    ), "feedback must condition prompts, not blanket-annotate safety review findings"
 
 
 def test_supervisor_records_feedback_loop_evaluation_for_reused_meta_feedback(tmp_path):
