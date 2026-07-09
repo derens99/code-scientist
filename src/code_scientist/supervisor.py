@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from collections import Counter
 from collections.abc import Callable
@@ -186,6 +187,7 @@ def run_research_cycle(
     resume: bool = False,
     run_status: str = "completed",
     control_path: str | Path | None = None,
+    review_concurrency: int = 1,
 ) -> RunState:
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -331,6 +333,7 @@ def run_research_cycle(
     start_cycle = (context_snapshots[-1].cycle + 1) if context_snapshots else 1
     control_file = Path(control_path) if control_path else None
     deferred_run_status = run_status
+    state_lock = threading.Lock()
 
     def current_state(status: str, queue: list[Task]) -> RunState:
         return RunState(
@@ -422,7 +425,7 @@ def run_research_cycle(
                 task_handlers[task.id] = execute
                 return task
 
-            def run_ready_cycle_tasks(eligible_task_ids: set[str]) -> None:
+            def run_ready_cycle_tasks(eligible_task_ids: set[str], max_concurrency: int = 1) -> None:
                 nonlocal task_queue
 
                 def execute_scheduled_task(task: Task) -> list[str] | None:
@@ -472,6 +475,7 @@ def run_research_cycle(
                     raise_on_failed=True,
                     eligible_task_ids=selected_task_ids,
                     defer_when=defer_reason_from_control,
+                    max_concurrency=max_concurrency,
                 )
                 for task_id in eligible_task_ids:
                     current_task = next((existing for existing in task_queue if existing.id == task_id), None)
@@ -537,27 +541,35 @@ def run_research_cycle(
             def make_execute_review(target: Hypothesis) -> Callable[[Task], list[str]]:
                 def execute_review(_task: Task) -> list[str]:
                     nonlocal hypotheses, reviewed
-                    task_reviews = _review_for_plan(
-                        reflection=reflection,
-                        goal=goal,
-                        plan=plan,
-                        hypotheses=[target],
-                        evidence_store=evidence_store,
-                        use_grounded=use_grounded_review,
-                        cycle=cycle,
-                        agent_traces=agent_traces,
-                        agent_feedback=reflection_feedback,
-                        safety_feedback=safety_feedback,
-                        task_id=_task.id,
-                        retrieval_memory=retrieval_memory,
-                        matches=matches,
-                        prior_reviews=reviews,
-                    )
-                    reviewed.extend(task_reviews)
-                    accepted_ids = _accepted_hypothesis_ids([target], task_reviews)
-                    accepted = [target.with_status("accepted")] if target.id in accepted_ids else []
-                    hypotheses = _merge_hypotheses(hypotheses, accepted)
-                    reviews.extend(task_reviews)
+                    # _review_for_plan mutates the shared agent_traces/retrieval_memory
+                    # lists internally and evidence_store.consume_retrieval_memory drains
+                    # a single shared buffer, so the whole call (not just the tail) must
+                    # be serialized when review tasks run concurrently. Taking a snapshot
+                    # of `reviews` for prior_reviews under the same lock avoids "list
+                    # mutated during iteration" errors from concurrent appends.
+                    with state_lock:
+                        prior_reviews_snapshot = list(reviews)
+                        task_reviews = _review_for_plan(
+                            reflection=reflection,
+                            goal=goal,
+                            plan=plan,
+                            hypotheses=[target],
+                            evidence_store=evidence_store,
+                            use_grounded=use_grounded_review,
+                            cycle=cycle,
+                            agent_traces=agent_traces,
+                            agent_feedback=reflection_feedback,
+                            safety_feedback=safety_feedback,
+                            task_id=_task.id,
+                            retrieval_memory=retrieval_memory,
+                            matches=matches,
+                            prior_reviews=prior_reviews_snapshot,
+                        )
+                        reviewed.extend(task_reviews)
+                        accepted_ids = _accepted_hypothesis_ids([target], task_reviews)
+                        accepted = [target.with_status("accepted")] if target.id in accepted_ids else []
+                        hypotheses = _merge_hypotheses(hypotheses, accepted)
+                        reviews.extend(task_reviews)
                     return [item.id for item in task_reviews]
 
                 return execute_review
@@ -602,7 +614,10 @@ def run_research_cycle(
                 for item in generated
             ]
             if review_tasks:
-                run_ready_cycle_tasks({task.id for task in review_tasks})
+                run_ready_cycle_tasks(
+                    {task.id for task in review_tasks},
+                    max_concurrency=max(1, min(review_concurrency, len(review_tasks))),
+                )
 
             def execute_empty_review(_task: Task) -> list[str]:
                 nonlocal hypotheses, reviewed

@@ -2175,6 +2175,23 @@ def test_supervisor_uses_plan_selected_generation_and_review_modes(tmp_path):
     assert any(trace.action == "literature_grounded_generation" for trace in state.agent_traces)
 
 
+def test_review_stage_runs_with_bounded_concurrency(tmp_path):
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=4,
+        max_matches=2,
+        out_dir=tmp_path / "run",
+        review_concurrency=2,
+    )
+
+    review_tasks = [task for task in state.task_queue if task.kind.startswith("review")]
+    assert review_tasks and all(task.status == "completed" for task in review_tasks)
+    task_ids = [task.id for task in state.task_queue]
+    assert len(task_ids) == len(set(task_ids)), "no duplicated task records"
+    assert state.reviews, "reviews still produced"
+
+
 def test_supervisor_routes_tool_augmented_generation_through_evidence_store(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()

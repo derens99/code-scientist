@@ -124,6 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--prospective-eval-fixture", action="append", default=[])
     run_parser.add_argument("--feedback-loop-eval-fixture", action="append", default=[])
     run_parser.add_argument("--feedback-loop-review-fixture", action="append", default=[])
+    run_parser.add_argument("--review-concurrency", type=int, default=1)
     run_parser.add_argument("--continuous", action="store_true")
     run_parser.add_argument("--interval-seconds", type=float, default=60)
     run_parser.add_argument("--max-wall-minutes", type=float)
@@ -402,6 +403,7 @@ def main(argv: list[str] | None = None) -> int:
                 literature_search_queries=args.literature_search_query,
                 literature_full_text=args.literature_full_text,
                 capability_evaluation_paths=args.capability_eval_fixture,
+                review_concurrency=args.review_concurrency,
             )
         state = _append_benchmark_suite_results(state, args.benchmark_suite)
         state = _append_capability_review_evaluations(state, args.capability_review_fixture)
