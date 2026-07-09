@@ -27,6 +27,19 @@ def _make_match(winner: str, loser: str) -> Match:
     )
 
 
+def _make_tie_match(hypothesis_a: str, hypothesis_b: str) -> Match:
+    return Match(
+        id=f"match-tie-{hypothesis_a}-{hypothesis_b}",
+        hypothesis_a=hypothesis_a,
+        hypothesis_b=hypothesis_b,
+        winner="tie",
+        rationale="Pairwise judge found the hypotheses equally strong.",
+        elo_before={hypothesis_a: 1200.0, hypothesis_b: 1200.0},
+        elo_after={hypothesis_a: 1200.0, hypothesis_b: 1200.0},
+        outcome="tie",
+    )
+
+
 def test_generation_creates_structured_hypotheses():
     goal = ResearchGoal.from_objective("Improve LLM coding agents")
     hypotheses = GenerationAgent().generate(goal, seed_paper_evidence(), limit=3)
@@ -144,6 +157,41 @@ def test_research_expansion_targets_unexplored_areas():
     assert expanded
     assert all(h.claim not in existing_claims for h in expanded)
     assert all("unexplored" in h.rationale.lower() or "expansion" in h.origin for h in expanded)
+
+
+def test_research_expansion_excludes_candidates_sharing_meaningful_vocabulary():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    agent = GenerationAgent()
+    baseline = agent.generate(goal, [], limit=6)
+    target = next(item for item in baseline if item.title == "Tool-use budget scheduler")
+
+    overlapping_known = replace(
+        target,
+        title="Resource allocation study",
+        claim=(
+            "A resource scheduler that allocates uncertainty budgets across parallel calls "
+            "for expected information gains in production deployments."
+        ),
+    )
+
+    expanded_with_overlap = agent.generate_with_mode(
+        goal,
+        [],
+        mode="research_expansion_from_meta_review",
+        limit=6,
+        existing_hypotheses=[overlapping_known],
+    )
+    expanded_without_known = agent.generate_with_mode(
+        goal,
+        [],
+        mode="research_expansion_from_meta_review",
+        limit=6,
+        existing_hypotheses=[],
+    )
+
+    assert target.title not in {item.title for item in expanded_with_overlap}
+    assert target.claim not in {item.claim for item in expanded_with_overlap}
+    assert {item.claim for item in expanded_without_known} == {item.claim for item in baseline}
 
 
 def test_generation_supports_simulated_debate_mode_with_trace():
@@ -503,6 +551,52 @@ def test_llm_generation_tool_augmented_mode_embeds_agent_feedback_in_synthesis_p
     assert "Prefer repo-search-grounded candidates." in synthesis_prompts[0]
 
 
+def test_llm_research_expansion_drops_duplicate_claim_from_existing_hypotheses():
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    duplicate_claim = "Mining failed coding-agent traces into repair tasks will improve future pass rate."
+    existing = [
+        replace(
+            GenerationAgent().generate(goal, [], limit=1)[0],
+            title="Trace-mined repair tasks",
+            claim=duplicate_claim,
+        )
+    ]
+
+    class FakeLLM:
+        def complete(self, prompt, max_tokens):
+            return json.dumps(
+                {
+                    "hypotheses": [
+                        {
+                            "title": "Trace-mined repair tasks",
+                            "claim": duplicate_claim,
+                            "rationale": "Observed failures are strong seeds for regression-focused research.",
+                            "assumptions": ["Failure traces are available."],
+                            "risks": ["private data leakage"],
+                        },
+                        {
+                            "title": "Novel unexplored idea",
+                            "claim": "A genuinely new claim not shared with any existing hypothesis.",
+                            "rationale": "Targets a gap the panel has not yet covered.",
+                            "assumptions": ["The gap is real."],
+                            "risks": ["speculative"],
+                        },
+                    ]
+                }
+            )
+
+    hypotheses = GenerationAgent(llm_client=FakeLLM(), llm_max_tokens=333).generate_with_mode(
+        goal,
+        [],
+        mode="research_expansion_from_meta_review",
+        limit=2,
+        existing_hypotheses=existing,
+    )
+
+    assert len(hypotheses) == 1
+    assert hypotheses[0].claim == "A genuinely new claim not shared with any existing hypothesis."
+
+
 def test_llm_plan_parser_creates_custom_research_plan_config():
     class FakeLLM:
         def __init__(self):
@@ -703,6 +797,68 @@ def test_recurrent_tournament_review_cites_match_record():
 
     assert review.review_type == "recurrent_tournament_review"
     assert any("2" in f and ("won" in f.lower() or "match" in f.lower()) for f in review.findings)
+
+
+def test_recurrent_tournament_review_does_not_count_ties_as_losses():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    agent = ReflectionAgent()
+    hypothesis = GenerationAgent().generate(goal, [], limit=1)[0]
+    matches = [_make_tie_match(hypothesis.id, "hyp-other")] * 2
+
+    review = agent.review_with_type(
+        goal,
+        hypothesis,
+        "recurrent_tournament_review",
+        matches=matches,
+    )
+
+    record_finding = next(f for f in review.findings if "won" in f.lower() and "match" in f.lower())
+    assert "won 0" in record_finding.lower()
+    assert "lost 0" in record_finding.lower()
+
+
+def test_recurrent_tournament_review_surfaces_recurring_weakness_terms_without_stopwords():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    agent = ReflectionAgent()
+    hypothesis = GenerationAgent().generate(goal, [], limit=1)[0]
+    prior_reviews = [
+        Review(
+            id="rev-prior-1",
+            hypothesis_id=hypothesis.id,
+            decision="revise",
+            scores={},
+            strengths=[],
+            weaknesses=["The coding agent hypothesis should minimize latency spikes"],
+            safety_notes=[],
+        ),
+        Review(
+            id="rev-prior-2",
+            hypothesis_id=hypothesis.id,
+            decision="revise",
+            scores={},
+            strengths=[],
+            weaknesses=["Every coding agent hypothesis should also minimize latency spikes again"],
+            safety_notes=[],
+        ),
+    ]
+
+    review = agent.review_with_type(
+        goal,
+        hypothesis,
+        "recurrent_tournament_review",
+        prior_reviews=prior_reviews,
+    )
+
+    recurring_finding = next(
+        (f for f in review.findings if "recurring weaknesses" in f.lower()),
+        None,
+    )
+    assert recurring_finding is not None
+    assert "latency" in recurring_finding.lower()
+    assert "should" not in recurring_finding.lower()
+    assert "coding" not in recurring_finding.lower()
+    assert "agent" not in recurring_finding.lower()
+    assert "hypothesis" not in recurring_finding.lower()
 
 
 def test_safety_review_records_multi_turn_red_team_trace():

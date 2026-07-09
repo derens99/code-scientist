@@ -257,7 +257,7 @@ class GenerationAgent(_LLMTraceMixin):
             known_tokens = {
                 token
                 for item in known
-                for token in re.findall(r"[a-z]{5,}", f"{item.title} {item.claim}".lower())
+                for token in _meaningful_terms(f"{item.title} {item.claim}")
             }
             overview_note = ""
             if research_overview is not None and getattr(research_overview, "limitations", None):
@@ -270,7 +270,7 @@ class GenerationAgent(_LLMTraceMixin):
                 item
                 for item in candidates
                 if item.claim not in known_claims
-                and len(known_tokens & set(re.findall(r"[a-z]{5,}", item.claim.lower()))) <= 2
+                and len(known_tokens & _meaningful_terms(item.claim)) <= 2
             ] or [item for item in candidates if item.claim not in known_claims]
             return [
                 replace(
@@ -329,6 +329,8 @@ class GenerationAgent(_LLMTraceMixin):
             limit=limit,
             origin=self.llm_origin,
         )
+        known_claims = {item.claim for item in existing_hypotheses}
+        deduped = [item for item in hypotheses if item.claim not in known_claims]
         return [
             replace(
                 item,
@@ -339,7 +341,7 @@ class GenerationAgent(_LLMTraceMixin):
                     f"{len(existing_hypotheses)} existing hypotheses."
                 ),
             )
-            for item in hypotheses
+            for item in deduped
         ]
 
     def _generate_with_llm(
@@ -622,11 +624,12 @@ class ReflectionAgent(_LLMTraceMixin):
             base = self.review(goal, hypothesis)
             record = [m for m in (matches or []) if hypothesis.id in (m.hypothesis_a, m.hypothesis_b)]
             wins = sum(1 for m in record if m.winner == hypothesis.id)
-            losses = sum(1 for m in record if m.winner and m.winner != hypothesis.id)
+            losses = sum(1 for m in record if m.winner not in ("", "tie", hypothesis.id))
+            ties = sum(1 for m in record if m.winner == "tie")
             recurring = _recurring_weakness_terms(prior_reviews or [], hypothesis.id)
             findings = [
                 *base.findings,
-                f"Tournament record: won {wins} and lost {losses} of {len(record)} matches.",
+                f"Tournament record: won {wins}, lost {losses}, and tied {ties} of {len(record)} matches.",
             ]
             if recurring:
                 findings.append(f"Recurring weaknesses across prior reviews: {', '.join(sorted(recurring)[:3])}.")
@@ -2590,8 +2593,12 @@ def _match_summary_line(hypothesis: Hypothesis, matches: list[Match] | None) -> 
     if not record:
         return ""
     wins = sum(1 for m in record if m.winner == hypothesis.id)
-    losses = sum(1 for m in record if m.winner and m.winner != hypothesis.id)
-    return f"\nTournament match record: won {wins} and lost {losses} of {len(record)} matches.\n"
+    losses = sum(1 for m in record if m.winner not in ("", "tie", hypothesis.id))
+    ties = sum(1 for m in record if m.winner == "tie")
+    return (
+        f"\nTournament match record: won {wins}, lost {losses}, and tied {ties} "
+        f"of {len(record)} matches.\n"
+    )
 
 
 def _review_prompt(
@@ -3735,13 +3742,17 @@ def _contact_targets_for_output(
     return _unique_refs(targets)
 
 
+def _meaningful_terms(text: str) -> set[str]:
+    return {term for term in re.findall(r"[a-z]{5,}", text.lower()) if term not in _STOPWORDS}
+
+
 def _recurring_weakness_terms(prior_reviews: list[Review], hypothesis_id: str) -> set[str]:
     counts: Counter[str] = Counter()
     for review in prior_reviews:
         if review.hypothesis_id != hypothesis_id:
             continue
         for weakness in review.weaknesses:
-            counts.update(re.findall(r"[a-z]{5,}", weakness.lower()))
+            counts.update(_meaningful_terms(weakness))
     return {term for term, count in counts.items() if count >= 2}
 
 
