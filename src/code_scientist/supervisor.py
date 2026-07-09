@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import threading
@@ -544,36 +545,30 @@ def run_research_cycle(
             def make_execute_review(target: Hypothesis) -> Callable[[Task], list[str]]:
                 def execute_review(_task: Task) -> list[str]:
                     nonlocal hypotheses, reviewed
-                    # _review_for_plan mutates the shared agent_traces/retrieval_memory
-                    # lists internally and evidence_store.consume_retrieval_memory drains
-                    # a single shared buffer, so the whole call (not just the tail) must
-                    # be serialized when review tasks run concurrently. Taking a snapshot
-                    # of `reviews` for prior_reviews under the same lock avoids "list
-                    # mutated during iteration" errors from concurrent appends.
-                    # _review_for_plan mutates the shared agent_traces/retrieval_memory
-                    # lists internally and evidence_store.consume_retrieval_memory drains
-                    # a single shared buffer, so the whole call (not just the tail) must
-                    # be serialized when review tasks run concurrently. Taking a snapshot
-                    # of `reviews` for prior_reviews under the same lock avoids "list
-                    # mutated during iteration" errors from concurrent appends.
+                    # Only the snapshot read of `reviews` (for prior_reviews) and the
+                    # shared-list mutations below need the lock; the LLM call and
+                    # evidence-store drain inside _review_for_plan run on thread-local
+                    # buffers (see Task 7) and can overlap across review tasks.
                     with state_lock:
                         prior_reviews_snapshot = list(reviews)
-                        task_reviews = _review_for_plan(
-                            reflection=reflection,
-                            goal=goal,
-                            plan=plan,
-                            hypotheses=[target],
-                            evidence_store=evidence_store,
-                            use_grounded=use_grounded_review,
-                            cycle=cycle,
-                            agent_traces=agent_traces,
-                            agent_feedback=reflection_feedback,
-                            safety_feedback=safety_feedback,
-                            task_id=_task.id,
-                            retrieval_memory=retrieval_memory,
-                            matches=matches,
-                            prior_reviews=prior_reviews_snapshot,
-                        )
+                    task_reviews = _review_for_plan(
+                        reflection=reflection,
+                        goal=goal,
+                        plan=plan,
+                        hypotheses=[target],
+                        evidence_store=evidence_store,
+                        use_grounded=use_grounded_review,
+                        cycle=cycle,
+                        agent_traces=agent_traces,
+                        agent_feedback=reflection_feedback,
+                        safety_feedback=safety_feedback,
+                        task_id=_task.id,
+                        retrieval_memory=retrieval_memory,
+                        matches=matches,
+                        prior_reviews=prior_reviews_snapshot,
+                        state_lock=state_lock,
+                    )
+                    with state_lock:
                         reviewed.extend(task_reviews)
                         accepted_ids = _accepted_hypothesis_ids([target], task_reviews)
                         accepted = [target.with_status("accepted")] if target.id in accepted_ids else []
@@ -1867,7 +1862,10 @@ def _review_for_plan(
     retrieval_memory: list[RetrievalMemoryRecord] | None = None,
     matches: list[Match] | None = None,
     prior_reviews: list[Review] | None = None,
+    *,
+    state_lock: threading.Lock | None = None,
 ) -> list[Review]:
+    lock_context = state_lock if state_lock is not None else contextlib.nullcontext()
     reviews: list[Review] = []
     for review_type in _active_review_types(plan, use_grounded):
         review_feedback = (
@@ -1894,35 +1892,36 @@ def _review_for_plan(
             reason=f"{review_type} evidence retrieval",
         )
         if retrieval_memory is not None:
-            retrieval_memory.extend(mode_retrievals)
+            with lock_context:
+                retrieval_memory.extend(mode_retrievals)
         reviews.extend(mode_reviews)
         notes = f"Ran {review_type} for {len(mode_reviews)} hypotheses."
         if agent_feedback:
             notes += f" Agent feedback: {'; '.join(agent_feedback)}."
         if review_type == "safety_review" and safety_feedback:
             notes += f" Safety feedback: {'; '.join(safety_feedback)}."
-        agent_traces.append(
-            _build_agent_trace(
-                cycle=cycle,
-                agent="reflection",
-                action=review_type,
-                input_refs=[item.id for item in hypotheses],
-                output_refs=[item.id for item in mode_reviews],
-                notes=notes,
-                evidence_refs=sorted({ref for review in mode_reviews for ref in review.evidence_refs}),
-                task_id=task_id,
-                llm_interactions=reflection.consume_llm_interactions(),
-                scratchpad=_trace_scratchpad(
-                    [
-                        f"review_type={review_type}",
-                        f"hypothesis_count={len(hypotheses)}",
-                        f"review_count={len(mode_reviews)}",
-                    ],
-                    mode_retrievals,
-                ),
-                tool_calls=_tool_calls_from_retrievals(mode_retrievals),
-            )
+        trace = _build_agent_trace(
+            cycle=cycle,
+            agent="reflection",
+            action=review_type,
+            input_refs=[item.id for item in hypotheses],
+            output_refs=[item.id for item in mode_reviews],
+            notes=notes,
+            evidence_refs=sorted({ref for review in mode_reviews for ref in review.evidence_refs}),
+            task_id=task_id,
+            llm_interactions=reflection.consume_llm_interactions(),
+            scratchpad=_trace_scratchpad(
+                [
+                    f"review_type={review_type}",
+                    f"hypothesis_count={len(hypotheses)}",
+                    f"review_count={len(mode_reviews)}",
+                ],
+                mode_retrievals,
+            ),
+            tool_calls=_tool_calls_from_retrievals(mode_retrievals),
         )
+        with lock_context:
+            agent_traces.append(trace)
     return reviews
 
 

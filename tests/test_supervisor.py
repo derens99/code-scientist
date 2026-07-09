@@ -2193,7 +2193,7 @@ def test_review_stage_runs_with_bounded_concurrency(tmp_path):
     assert state.reviews, "reviews still produced"
 
 
-def test_review_stage_state_lock_serializes_concurrent_review_execution(tmp_path, monkeypatch):
+def test_review_stage_overlaps_concurrent_review_work(tmp_path, monkeypatch):
     counter_lock = threading.Lock()
     current = 0
     max_observed = 0
@@ -2225,15 +2225,41 @@ def test_review_stage_state_lock_serializes_concurrent_review_execution(tmp_path
     review_tasks = [task for task in state.task_queue if task.kind.startswith("review")]
     assert len(review_tasks) >= 3, "need >=3 review tasks to engage the ThreadPoolExecutor branch"
 
-    # state_lock in make_execute_review's closure must serialize entry into
-    # _review_for_plan: overlapping the 50ms sleep window should never show
-    # more than one concurrent entry, regardless of review_concurrency > 1.
-    assert max_observed == 1
+    # Narrowing state_lock to shared mutations only (not the whole
+    # _review_for_plan call) must let review work genuinely overlap once
+    # review_concurrency > 1.
+    assert max_observed >= 2, "review work must overlap once the lock is narrowed"
 
     result_ids = [ref for task in review_tasks for ref in task.result_refs]
     assert len(result_ids) == len(set(result_ids)), "no duplicate review ids across review tasks"
     assert set(result_ids) <= {review.id for review in state.reviews}
     assert len(state.reviews) >= len(review_tasks)
+    assert review_tasks and all(task.status == "completed" for task in review_tasks)
+
+
+def test_review_stage_concurrent_retrieval_memory_has_valid_task_attribution(tmp_path):
+    evidence = tmp_path / "review-evidence.md"
+    evidence.write_text(
+        "Benchmark-gated critic loop and failure recovery traces were compared; "
+        "candidate_metrics pass_rate=0.68 baseline_metrics pass_rate=0.52.",
+        encoding="utf-8",
+    )
+
+    state = supervisor_module.run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=4,
+        max_matches=2,
+        out_dir=tmp_path / "run",
+        review_concurrency=3,
+        evidence_paths=[evidence],
+    )
+
+    task_ids = {task.id for task in state.task_queue}
+    assert state.retrieval_memory, "expected retrieval memory records with grounded review"
+    for record in state.retrieval_memory:
+        assert record.task_id, "retrieval memory record missing task_id"
+        assert record.task_id in task_ids, "retrieval memory record task_id must reference a real task"
 
 
 def test_supervisor_routes_tool_augmented_generation_through_evidence_store(tmp_path):
