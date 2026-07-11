@@ -12,6 +12,7 @@ from code_scientist.evidence import EvidenceStore
 from code_scientist.elo import update_elo
 from code_scientist.llm import LLMResponseError
 from code_scientist.models import (
+    AssumptionCheck,
     Evidence,
     Hypothesis,
     Match,
@@ -25,6 +26,7 @@ from code_scientist.models import (
     stable_id,
 )
 from code_scientist.safety import SafetyPolicy, review_evidence_safety, review_hypothesis_safety
+from code_scientist.tools import AgentRetrievalRequest
 
 
 class _TraceableLLMClient:
@@ -83,6 +85,25 @@ def _feedback_block(agent_feedback: list[str] | None) -> str:
     return f"\n\nMeta-review feedback from prior cycles (address these):\n{lines}\n"
 
 
+def _goal_guidance_block(goal: ResearchGoal) -> str:
+    sections = [
+        ("Preferences", goal.preferences),
+        ("Constraints", goal.constraints),
+        ("Metrics", goal.metrics),
+        ("Safety notes", goal.safety_notes),
+        ("Allowed sources", goal.allowed_sources),
+        ("Allowed tools", goal.allowed_tools),
+        ("Output formats", goal.output_formats),
+        ("Termination criteria", goal.termination_criteria),
+    ]
+    rendered = [
+        f"{label}: {'; '.join(str(item) for item in values if str(item).strip())}"
+        for label, values in sections
+        if any(str(item).strip() for item in values)
+    ]
+    return "\n".join(rendered)
+
+
 def _matched_feedback_terms(text: str, agent_feedback: list[str] | None) -> list[str]:
     if not agent_feedback:
         return []
@@ -100,6 +121,27 @@ class GenerationAgent(_LLMTraceMixin):
         self._init_llm_trace(llm_client)
         self.llm_max_tokens = llm_max_tokens
         self.llm_origin = llm_origin
+
+    def plan_retrieval_queries(
+        self,
+        goal: ResearchGoal,
+        available_tools: list[str],
+        *,
+        iteration: int = 0,
+        observations: list[Evidence] | None = None,
+        agent_feedback: list[str] | None = None,
+    ) -> list[AgentRetrievalRequest]:
+        return _plan_agent_retrieval(
+            llm_client=self.llm_client,
+            llm_max_tokens=self.llm_max_tokens,
+            agent="generation",
+            goal=goal,
+            available_tools=available_tools,
+            subject=goal.objective,
+            iteration=iteration,
+            observations=observations or [],
+            agent_feedback=agent_feedback,
+        )
 
     def generate(
         self,
@@ -509,6 +551,37 @@ class ReflectionAgent(_LLMTraceMixin):
         self.llm_max_tokens = llm_max_tokens
         self.safety_policies = safety_policies or []
 
+    def plan_retrieval_queries(
+        self,
+        goal: ResearchGoal,
+        hypothesis: Hypothesis,
+        review_types: list[str],
+        available_tools: list[str],
+        *,
+        iteration: int = 0,
+        observations: list[Evidence] | None = None,
+        agent_feedback: list[str] | None = None,
+    ) -> list[AgentRetrievalRequest]:
+        subject = "\n".join(
+            [
+                f"Hypothesis: {hypothesis.title}",
+                f"Claim: {hypothesis.claim}",
+                f"Assumptions: {'; '.join(hypothesis.assumptions)}",
+                f"Review purposes: {', '.join(review_types)}",
+            ]
+        )
+        return _plan_agent_retrieval(
+            llm_client=self.llm_client,
+            llm_max_tokens=self.llm_max_tokens,
+            agent="reflection",
+            goal=goal,
+            available_tools=available_tools,
+            subject=subject,
+            iteration=iteration,
+            observations=observations or [],
+            agent_feedback=agent_feedback,
+        )
+
     def review(self, goal: ResearchGoal, hypothesis: Hypothesis) -> Review:
         safety = review_hypothesis_safety(hypothesis, safety_policies=self.safety_policies)
         has_test = bool(hypothesis.test_plan.experiment and hypothesis.test_plan.metrics)
@@ -858,6 +931,31 @@ class ReflectionAgent(_LLMTraceMixin):
 
         evidence = list(evidence_by_id.values())
         evidence_refs = _unique_refs([item.id for item in evidence])
+        assumption_checks = _verify_explicit_assumptions(hypothesis, evidence_store)
+        for index, check in enumerate(assumption_checks, start=1):
+            review_trace.append(
+                f"Assumption check {index} (depth {check.depth}; "
+                f"{'fundamental' if check.fundamental else 'repairable'}): {check.assumption}"
+            )
+            review_trace.append(
+                f"Assumption check {index} verdict: {check.verdict}; "
+                f"evidence: {', '.join(check.evidence_refs) or 'none'}; {check.reasoning}"
+            )
+            for evidence_ref in check.evidence_refs:
+                evidence_by_id.setdefault(
+                    evidence_ref,
+                    next(
+                        (
+                            item
+                            for item in (evidence_store.evidence if evidence_store else [])
+                            if item.id == evidence_ref
+                        ),
+                        None,
+                    ),
+                )
+        evidence_by_id = {key: value for key, value in evidence_by_id.items() if value is not None}
+        evidence = list(evidence_by_id.values())
+        evidence_refs = _unique_refs([item.id for item in evidence])
         findings: list[str] = []
         weaknesses = list(initial.weaknesses)
         scores = dict(initial.scores)
@@ -866,6 +964,11 @@ class ReflectionAgent(_LLMTraceMixin):
         has_assumption_evidence = bool(evidence_by_turn[1])
         for item in evidence:
             findings.append(f"Verification evidence {item.id} from {item.source}: {item.content}")
+        for check in assumption_checks:
+            findings.append(
+                f"Assumption `{check.assumption}` was {check.verdict}; "
+                f"fundamental={check.fundamental}; {check.reasoning}"
+            )
         if not has_mechanism_evidence:
             findings.append("No mechanism evidence found for deep verification.")
             if "missing mechanism evidence for deep verification" not in weaknesses:
@@ -879,24 +982,52 @@ class ReflectionAgent(_LLMTraceMixin):
             if "missing benchmark evidence for deep verification" not in weaknesses:
                 weaknesses.append("missing benchmark evidence for deep verification")
             scores["plausibility"] = min(scores.get("plausibility", 4), 3)
+        fundamental_failures = [
+            check
+            for check in assumption_checks
+            if check.verdict == "contradicted" and check.fundamental
+        ]
+        repairable_failures = [
+            check
+            for check in assumption_checks
+            if check.verdict == "contradicted" and not check.fundamental
+        ]
+        if fundamental_failures:
+            weaknesses.append("fundamental assumption contradicted during deep verification")
+            scores["plausibility"] = 1
+        elif repairable_failures:
+            weaknesses.append("non-fundamental assumption requires repair")
+            scores["plausibility"] = min(scores.get("plausibility", 4), 3)
+        decision = initial.decision if has_benchmark else "revise"
+        requires_revision = initial.requires_revision or not has_benchmark
+        if fundamental_failures:
+            decision = "reject"
+            requires_revision = True
+        elif repairable_failures:
+            decision = "revise"
+            requires_revision = True
         review_trace.append(
             "Assessment: "
             f"mechanism evidence {'found' if has_mechanism_evidence else 'missing'}; "
             f"assumption evidence {'found' if has_assumption_evidence else 'missing'}; "
             f"benchmark evidence {'found' if has_benchmark else 'missing'}; "
-            f"revision required: {initial.requires_revision or not has_benchmark}."
+            f"assumptions checked={len(assumption_checks)}; "
+            f"fundamental failures={len(fundamental_failures)}; "
+            f"repairable failures={len(repairable_failures)}; "
+            f"revision required: {requires_revision}."
         )
         return _grounded_review_from_initial(
             initial,
             findings=findings,
             evidence_refs=evidence_refs,
             confidence=0.75 if has_benchmark else 0.45,
-            requires_revision=initial.requires_revision or not has_benchmark,
-            decision=initial.decision if has_benchmark else "revise",
+            requires_revision=requires_revision,
+            decision=decision,
             weaknesses=weaknesses,
             scores=scores,
             review_type="deep_verification",
             review_trace=review_trace,
+            assumption_checks=assumption_checks,
         )
 
     def _observation_review(
@@ -909,10 +1040,17 @@ class ReflectionAgent(_LLMTraceMixin):
         query = " ".join([hypothesis.title, hypothesis.claim, "runtime observation failure trace repository logs"])
         evidence = _review_evidence_matching(evidence_store, query, _looks_like_observation_evidence)
         evidence_refs = [item.id for item in evidence]
+        comparisons = [
+            _compare_observation_to_hypothesis(hypothesis, item, index)
+            for index, item in enumerate(evidence, start=1)
+        ]
         findings = [
             f"Observation evidence {item.id} from {item.source}: {item.content}"
             for item in evidence
-        ]
+        ] + [comparison[1] for comparison in comparisons]
+        review_trace = [f"Observation query: {query}"]
+        for verdict, explanation, trace_lines in comparisons:
+            review_trace.extend(trace_lines)
         weaknesses = list(initial.weaknesses)
         scores = dict(initial.scores)
         requires_revision = initial.requires_revision
@@ -925,6 +1063,17 @@ class ReflectionAgent(_LLMTraceMixin):
             requires_revision = True
             decision = "revise"
             scores["plausibility"] = min(scores.get("plausibility", 4), 3)
+        elif any(verdict == "contradicts" for verdict, _, _ in comparisons):
+            weaknesses.append("observed behavior contradicts the predicted mechanism")
+            requires_revision = True
+            decision = "revise"
+            scores["plausibility"] = min(scores.get("plausibility", 4), 2)
+        review_trace.append(
+            "Observation assessment: "
+            f"supports={sum(verdict == 'supports' for verdict, _, _ in comparisons)}; "
+            f"contradicts={sum(verdict == 'contradicts' for verdict, _, _ in comparisons)}; "
+            f"inconclusive={sum(verdict == 'inconclusive' for verdict, _, _ in comparisons)}."
+        )
         return _grounded_review_from_initial(
             initial,
             findings=findings,
@@ -935,6 +1084,7 @@ class ReflectionAgent(_LLMTraceMixin):
             weaknesses=weaknesses,
             scores=scores,
             review_type="observation_review",
+            review_trace=review_trace,
         )
 
     def _simulation_review(
@@ -947,10 +1097,29 @@ class ReflectionAgent(_LLMTraceMixin):
         query = " ".join([hypothesis.title, hypothesis.claim, "simulation benchmark pass_rate regression_count"])
         evidence = _review_evidence_matching(evidence_store, query, _looks_like_simulation_evidence)
         evidence_refs = [item.id for item in evidence]
+        comparisons = [
+            _compare_observation_to_hypothesis(hypothesis, item, index, simulation=True)
+            for index, item in enumerate(evidence, start=1)
+        ]
         findings = [
             f"Simulation evidence {item.id} from {item.source}: {item.content}"
             for item in evidence
+        ] + [comparison[1] for comparison in comparisons]
+        review_trace = [
+            f"Simulation step 1 - mechanism: {hypothesis.claim}",
+            f"Simulation step 2 - intervention: {hypothesis.test_plan.experiment}",
+            (
+                "Simulation step 3 - expected measurements: "
+                f"{', '.join(hypothesis.test_plan.metrics) or 'unspecified metrics'}; "
+                f"success when {hypothesis.test_plan.success_condition}"
+            ),
         ]
+        for _verdict, _explanation, trace_lines in comparisons:
+            review_trace.extend(trace_lines)
+        review_trace.append(
+            "Simulation step 4 - failure conditions: "
+            f"{'; '.join(hypothesis.risks) or 'no explicit risks supplied'}"
+        )
         weaknesses = list(initial.weaknesses)
         scores = dict(initial.scores)
         requires_revision = initial.requires_revision
@@ -963,6 +1132,17 @@ class ReflectionAgent(_LLMTraceMixin):
             requires_revision = True
             decision = "revise"
             scores["plausibility"] = min(scores.get("plausibility", 4), 3)
+        elif any(verdict == "contradicts" for verdict, _, _ in comparisons):
+            weaknesses.append("simulated outcome contradicts the expected success condition")
+            requires_revision = True
+            decision = "revise"
+            scores["plausibility"] = min(scores.get("plausibility", 4), 2)
+        review_trace.append(
+            "Simulation step 5 - assessment: "
+            f"supports={sum(verdict == 'supports' for verdict, _, _ in comparisons)}; "
+            f"contradicts={sum(verdict == 'contradicts' for verdict, _, _ in comparisons)}; "
+            f"inconclusive={sum(verdict == 'inconclusive' for verdict, _, _ in comparisons)}."
+        )
         return _grounded_review_from_initial(
             initial,
             findings=findings,
@@ -973,6 +1153,7 @@ class ReflectionAgent(_LLMTraceMixin):
             weaknesses=weaknesses,
             scores=scores,
             review_type="simulation_review",
+            review_trace=review_trace,
         )
 
     def _review_with_llm(
@@ -1014,6 +1195,11 @@ class ReflectionAgent(_LLMTraceMixin):
             _llm_reflection_risk_prompt(goal, hypothesis, evidence, mechanism_text),
             max_tokens=self.llm_max_tokens,
         )
+        assumption_checks = _assumption_checks_from_llm_payload(
+            risk_text,
+            hypothesis=hypothesis,
+            default_evidence_refs=[item.id for item in evidence],
+        )
         synthesis_text = self.llm_client.complete(
             _llm_reflection_benchmark_synthesis_prompt(
                 goal,
@@ -1036,6 +1222,7 @@ class ReflectionAgent(_LLMTraceMixin):
                 f"LLM turn 2 assumption risk audit: {_truncate(risk_text, 220)}",
                 f"LLM turn 3 benchmark validation synthesis: {_truncate(synthesis_text, 220)}",
             ],
+            assumption_checks=assumption_checks,
         )
 
     def _safety_review_with_llm(
@@ -1086,6 +1273,7 @@ class ReflectionAgent(_LLMTraceMixin):
         response_text: str,
         evidence: list[Any],
         turn_trace: list[str],
+        assumption_checks: list[AssumptionCheck] | None = None,
     ) -> Review:
         data = _json_object(response_text, f"{review_type} review")
         decision = _clean_string(data.get("decision"), "revise")
@@ -1093,6 +1281,58 @@ class ReflectionAgent(_LLMTraceMixin):
         if not scores:
             scores = {"alignment": 3, "plausibility": 3, "novelty": 3, "testability": 3, "safety": 3}
         requires_revision = bool(data.get("requires_revision", decision != "accept"))
+        parsed_assumption_checks = _assumption_checks_from_data(
+            data.get("assumption_checks"),
+            hypothesis=hypothesis,
+            default_evidence_refs=[item.id for item in evidence],
+        )
+        assumption_checks = _merge_assumption_checks(
+            list(assumption_checks or []),
+            parsed_assumption_checks,
+        )
+        fundamental_failures = [
+            check
+            for check in assumption_checks
+            if check.verdict == "contradicted" and check.fundamental
+        ]
+        repairable_failures = [
+            check
+            for check in assumption_checks
+            if check.verdict == "contradicted" and not check.fundamental
+        ]
+        if fundamental_failures:
+            decision = "reject"
+            requires_revision = True
+            scores["plausibility"] = 1
+        elif repairable_failures:
+            decision = "revise"
+            requires_revision = True
+            scores["plausibility"] = min(scores.get("plausibility", 3), 3)
+        weaknesses = _string_list(
+            data.get("weaknesses"),
+            ["needs measured benchmark evidence before claiming improvement"],
+        )
+        findings = _string_list(data.get("findings"), [])
+        if fundamental_failures:
+            weaknesses = _unique_refs(
+                [*weaknesses, "fundamental assumption contradicted during deep verification"]
+            )
+            findings = [
+                *findings,
+                *[
+                    f"Fundamental assumption `{check.assumption}` was contradicted: {check.reasoning}"
+                    for check in fundamental_failures
+                ],
+            ]
+        elif repairable_failures:
+            weaknesses = _unique_refs([*weaknesses, "non-fundamental assumption requires repair"])
+            findings = [
+                *findings,
+                *[
+                    f"Repairable assumption `{check.assumption}` was contradicted: {check.reasoning}"
+                    for check in repairable_failures
+                ],
+            ]
         evidence_refs = _string_list(data.get("evidence_refs"), [item.id for item in evidence])
         review_trace = _string_list(data.get("review_trace"), [])
         if turn_trace:
@@ -1111,14 +1351,15 @@ class ReflectionAgent(_LLMTraceMixin):
             decision=decision,
             scores=scores,
             strengths=_string_list(data.get("strengths"), ["LLM reviewer produced a structured assessment."]),
-            weaknesses=_string_list(data.get("weaknesses"), ["needs measured benchmark evidence before claiming improvement"]),
+            weaknesses=weaknesses,
             safety_notes=_string_list(data.get("safety_notes"), ["Human review required before code changes."]),
             review_type=f"llm_{review_type}",
             evidence_refs=evidence_refs,
-            findings=_string_list(data.get("findings"), []),
+            findings=findings,
             review_trace=review_trace,
             confidence=_bounded_float(data.get("confidence"), 0.5),
             requires_revision=requires_revision,
+            assumption_checks=assumption_checks,
         )
 
 
@@ -1571,6 +1812,70 @@ class RankingAgent(_LLMTraceMixin):
             outcome=outcome,
         )
         return ranked, match
+
+    def compare_position_stable(
+        self,
+        goal: ResearchGoal,
+        first: Hypothesis,
+        second: Hypothesis,
+        reviews: list[Review] | None = None,
+        evidence_store: EvidenceStore | None = None,
+        agent_feedback: list[str] | None = None,
+        *,
+        multi_round: bool = False,
+        rounds: int = 2,
+    ) -> tuple[list[Hypothesis], Match]:
+        """Judge A/B and B/A; abstain when presentation order changes the winner."""
+        compare = self.compare_multi_round_debate if multi_round else self.compare_debate
+        kwargs: dict[str, Any] = {
+            "reviews": reviews,
+            "evidence_store": evidence_store,
+            "agent_feedback": agent_feedback,
+        }
+        if multi_round:
+            kwargs["rounds"] = rounds
+        forward_ranked, forward = compare(goal, first, second, **kwargs)
+        _reverse_ranked, reverse = compare(goal, second, first, **kwargs)
+        stable = forward.winner == reverse.winner
+        stability_trace = (
+            f"order_swap forward={forward.winner} reverse={reverse.winner}; "
+            f"position_stable={str(stable).lower()}"
+        )
+        transcript = [
+            *forward.debate_transcript,
+            "Order-swapped replay:",
+            *reverse.debate_transcript,
+            f"Stability judge: {stability_trace}.",
+        ]
+        evidence_refs = _unique_refs([*forward.evidence_refs, *reverse.evidence_refs])
+        review_refs = _unique_refs([*forward.review_refs, *reverse.review_refs])
+        if stable:
+            return forward_ranked, replace(
+                forward,
+                id=stable_id("match", f"{forward.id}:position_stable"),
+                judge_trace=f"{forward.judge_trace}; {stability_trace}",
+                debate_transcript=transcript,
+                evidence_refs=evidence_refs,
+                review_refs=review_refs,
+            )
+
+        ranked = sorted([first, second], key=lambda item: (-item.elo, item.id))
+        return ranked, replace(
+            forward,
+            id=stable_id("match", f"{goal.id}:{first.id}:{second.id}:position_disagreement"),
+            winner="tie",
+            rationale=(
+                "Order-swapped judges disagreed, so the ranking agent abstained and preserved "
+                "both Elo ratings."
+            ),
+            elo_after={first.id: first.elo, second.id: second.elo},
+            judge_trace=f"{forward.judge_trace}; {stability_trace}; abstain=position_disagreement",
+            uncertainty=1.0,
+            evidence_refs=evidence_refs,
+            review_refs=review_refs,
+            debate_transcript=transcript,
+            outcome="tie",
+        )
 
     def compare_multi_round_debate(
         self,
@@ -2515,6 +2820,153 @@ def _tokens(text: str) -> list[str]:
     return [token.strip(".,:;()[]{}").lower() for token in text.split() if len(token.strip(".,:;()[]{}")) > 2]
 
 
+def _plan_agent_retrieval(
+    *,
+    llm_client: Any | None,
+    llm_max_tokens: int,
+    agent: str,
+    goal: ResearchGoal,
+    available_tools: list[str],
+    subject: str,
+    iteration: int,
+    observations: list[Evidence],
+    agent_feedback: list[str] | None,
+) -> list[AgentRetrievalRequest]:
+    allowed_search = [
+        tool
+        for tool in ("literature_search", "web_search", "repo_search")
+        if tool in set(available_tools)
+    ]
+    eligible_source_refs: dict[str, list[str]] = {
+        "web_document_fetch": [
+            item.id
+            for item in observations
+            if item.kind == "web_search_result" and "web_document_fetch" in available_tools
+        ],
+        "literature_full_text_fetch": [
+            item.id
+            for item in observations
+            if item.kind == "literature_search_result"
+            and item.metadata.get("full_text_url")
+            and "literature_full_text_fetch" in available_tools
+        ],
+    }
+    eligible_source_refs = {
+        tool: refs for tool, refs in eligible_source_refs.items() if refs
+    }
+    allowed = [*allowed_search, *eligible_source_refs]
+    if not allowed:
+        return []
+    observation_lines = [
+        f"- {item.id} from {item.source}: {_truncate(item.content, 240)}"
+        for item in observations[:5]
+    ]
+    if llm_client is not None:
+        prompt = f"""Agent-driven retrieval planning for the {agent} worker.
+Research objective: {goal.objective}
+{_goal_guidance_block(goal)}
+Iteration: {iteration + 1}
+Allowed tools: {', '.join(allowed)}
+
+Current subject:
+{_truncate(subject, 2400)}
+
+Safe observations from earlier retrieval iterations:
+{chr(10).join(observation_lines) or '- none yet'}
+
+Eligible reference-bound fetches:
+{chr(10).join(f'- {tool}: {", ".join(refs)}' for tool, refs in eligible_source_refs.items()) or '- none yet'}
+
+Return only valid JSON with a `requests` array. A search request must contain an allowed search
+tool, a focused `query`, and a rationale. A fetch request must contain an allowed fetch tool,
+one exact eligible `source_ref`, and a rationale; omit the query. Return at most one request so
+the next iteration can observe its result before refining the search. Never propose a URL,
+filesystem path, shell command, crawl setting, or full-text setting.
+{_feedback_block(agent_feedback)}"""
+        try:
+            data = _json_object(llm_client.complete(prompt, max_tokens=llm_max_tokens), "retrieval plan")
+            parsed = _retrieval_requests_from_data(
+                data.get("requests"),
+                allowed,
+                eligible_source_refs=eligible_source_refs,
+            )
+            if parsed:
+                return parsed[:1]
+        except LLMResponseError:
+            pass
+
+    if iteration > 0 and eligible_source_refs:
+        tool = next(iter(eligible_source_refs))
+        source_ref = eligible_source_refs[tool][0]
+        return [
+            AgentRetrievalRequest(
+                tool=tool,
+                query="",
+                rationale="Inspect the full content of a safe result observed in the prior iteration.",
+                source_ref=source_ref,
+            )
+        ]
+    if not allowed_search:
+        return []
+    tool = allowed_search[iteration % len(allowed_search)]
+    observation_terms = ""
+    if observations:
+        observation_terms = " ".join(sorted(_meaningful_terms(observations[-1].content))[:6])
+    if agent == "reflection":
+        suffix = (
+            "contradictory evidence prior art benchmark failure"
+            if iteration == 0
+            else f"replication limitations counterevidence {observation_terms}"
+        )
+        rationale = "Independently verify novelty, assumptions, and failure modes before ranking."
+    else:
+        suffix = (
+            "prior work benchmark limitations open problems"
+            if iteration == 0
+            else f"unexplored directions contradictory findings {observation_terms}"
+        )
+        rationale = "Ground proposal generation in prior evidence and unresolved limitations."
+    query = " ".join([goal.objective, _truncate(subject, 220), suffix])
+    return [AgentRetrievalRequest(tool=tool, query=query, rationale=rationale)]
+
+
+def _retrieval_requests_from_data(
+    value: Any,
+    allowed_tools: list[str],
+    *,
+    eligible_source_refs: dict[str, list[str]] | None = None,
+) -> list[AgentRetrievalRequest]:
+    if not isinstance(value, list):
+        return []
+    requests: list[AgentRetrievalRequest] = []
+    for raw in value:
+        if not isinstance(raw, dict):
+            continue
+        tool = _clean_string(raw.get("tool"), "")
+        query = _clean_string(raw.get("query"), "")
+        source_ref = _clean_string(raw.get("source_ref"), "")
+        rationale = _clean_string(raw.get("rationale"), "Agent requested governed evidence retrieval.")
+        if tool not in allowed_tools:
+            continue
+        if tool in {"web_document_fetch", "literature_full_text_fetch"}:
+            eligible_refs = set((eligible_source_refs or {}).get(tool, []))
+            if not source_ref or source_ref not in eligible_refs:
+                continue
+            requests.append(
+                AgentRetrievalRequest(
+                    tool=tool,
+                    query="",
+                    rationale=rationale,
+                    source_ref=source_ref,
+                )
+            )
+            continue
+        if not query:
+            continue
+        requests.append(AgentRetrievalRequest(tool=tool, query=query, rationale=rationale))
+    return requests
+
+
 def _json_object(response_text: str, context: str) -> dict[str, Any]:
     try:
         data = json.loads(response_text)
@@ -2622,6 +3074,7 @@ def _review_prompt(
     return f"""You are a scientific reflection agent for a coding-agent AI co-scientist.
 Review type: {review_type}
 Objective: {goal.objective}
+{_goal_guidance_block(goal)}
 
 Hypothesis:
 - id: {hypothesis.id}
@@ -2634,9 +3087,24 @@ Hypothesis:
 Evidence:
 {evidence_text}
 {_match_summary_line(hypothesis, matches)}
+{_review_mode_instruction(review_type)}
 Return only valid JSON with:
 decision, scores, strengths, weaknesses, safety_notes, findings, confidence, requires_revision, evidence_refs.
 {_feedback_block(agent_feedback)}"""
+
+
+def _review_mode_instruction(review_type: str) -> str:
+    if review_type == "observation_review":
+        return (
+            "Compare every observation separately with the hypothesis prediction. For each one, "
+            "state supports, contradicts, or inconclusive and explain the causal mismatch."
+        )
+    if review_type == "simulation_review":
+        return (
+            "Reason step by step through mechanism, intervention, expected measurements, each "
+            "simulated outcome, and explicit failure conditions before deciding."
+        )
+    return ""
 
 
 def _llm_reflection_mechanism_prompt(
@@ -2646,6 +3114,7 @@ def _llm_reflection_mechanism_prompt(
 ) -> str:
     return f"""Reflection turn 1 claim mechanism for a coding-agent AI co-scientist worker.
 Objective: {goal.objective}
+{_goal_guidance_block(goal)}
 
 Hypothesis:
 {_hypothesis_prompt_text(hypothesis)}
@@ -2664,6 +3133,7 @@ def _llm_reflection_risk_prompt(
 ) -> str:
     return f"""Reflection turn 2 assumption risk audit for a coding-agent AI co-scientist worker.
 Objective: {goal.objective}
+{_goal_guidance_block(goal)}
 
 Hypothesis:
 {_hypothesis_prompt_text(hypothesis)}
@@ -2674,7 +3144,11 @@ Evidence:
 Turn 1 mechanism analysis:
 {_truncate(mechanism_text, 2200)}
 
-Audit assumptions, risks, source quality, and missing validation. Do not finalize JSON yet."""
+Decompose every explicit assumption into independently testable sub-assumptions. Evaluate each
+against the evidence, distinguish fundamental failures from repairable details, and return only
+valid JSON with an `assumption_checks` array. Every item must contain: assumption,
+parent_assumption, depth, verdict (supported, contradicted, or uncertain), fundamental,
+invalidates_hypothesis, evidence_refs, and reasoning. Do not write the final review yet."""
 
 
 def _llm_reflection_benchmark_synthesis_prompt(
@@ -2687,6 +3161,7 @@ def _llm_reflection_benchmark_synthesis_prompt(
 ) -> str:
     return f"""Reflection turn 3 benchmark validation synthesis for a coding-agent AI co-scientist worker.
 Objective: {goal.objective}
+{_goal_guidance_block(goal)}
 
 Hypothesis:
 {_hypothesis_prompt_text(hypothesis)}
@@ -2701,8 +3176,11 @@ Turn 2 assumption/risk audit:
 {_truncate(risk_text, 1800)}
 
 Return only valid JSON with:
-decision, scores, strengths, weaknesses, safety_notes, findings, confidence, requires_revision, evidence_refs.
-Focus on benchmark validation and whether revision is required before ranking or external study.{_feedback_block(agent_feedback)}"""
+decision, scores, strengths, weaknesses, safety_notes, findings, confidence, requires_revision,
+evidence_refs, assumption_checks.
+Preserve the assumption checks from turn 2. A contradicted fundamental assumption must reject
+the hypothesis; a contradicted non-fundamental assumption must require revision. Focus on
+benchmark validation and whether revision is required before ranking or external study.{_feedback_block(agent_feedback)}"""
 
 
 def _llm_reflection_autonomy_safety_prompt(
@@ -2712,6 +3190,7 @@ def _llm_reflection_autonomy_safety_prompt(
 ) -> str:
     return f"""Reflection turn 1 autonomy and deployment red team for a coding-agent AI co-scientist worker.
 Objective: {goal.objective}
+{_goal_guidance_block(goal)}
 
 Hypothesis:
 {_hypothesis_prompt_text(hypothesis)}
@@ -2730,6 +3209,7 @@ def _llm_reflection_source_safety_prompt(
 ) -> str:
     return f"""Reflection turn 2 data and source-injection red team for a coding-agent AI co-scientist worker.
 Objective: {goal.objective}
+{_goal_guidance_block(goal)}
 
 Hypothesis:
 {_hypothesis_prompt_text(hypothesis)}
@@ -2753,6 +3233,7 @@ def _llm_reflection_safety_synthesis_prompt(
 ) -> str:
     return f"""Reflection turn 3 safety synthesis for a coding-agent AI co-scientist worker.
 Objective: {goal.objective}
+{_goal_guidance_block(goal)}
 
 Hypothesis:
 {_hypothesis_prompt_text(hypothesis)}
@@ -2798,6 +3279,7 @@ def _ranking_prompt(
     ) or "- No reviews available."
     return f"""You are a pairwise debate judge for a coding-agent AI co-scientist.
 Objective: {goal.objective}
+{_goal_guidance_block(goal)}
 
 First candidate:
 - id: {first.id}
@@ -2835,6 +3317,7 @@ def _multi_round_debate_round_prompt(
     round_role = "opening argument" if round_index == 1 else "rebuttal and refinement"
     return f"""You are running multi-round debate round {round_index} of {rounds} for a coding-agent AI co-scientist.
 Objective: {goal.objective}
+{_goal_guidance_block(goal)}
 Round role: {round_role}
 
 First candidate:
@@ -2874,6 +3357,7 @@ def _multi_round_debate_judge_prompt(
     transcript_text = "\n".join(f"- {line}" for line in transcript) or "- No debate transcript available."
     return f"""You are the multi-round debate final judge for a coding-agent AI co-scientist.
 Objective: {goal.objective}
+{_goal_guidance_block(goal)}
 Completed rounds: {rounds}
 
 First candidate:
@@ -2917,6 +3401,7 @@ def _proximity_prompt(
     return f"""You are a goal-aware proximity agent for a coding-agent AI co-scientist.
 Group related hypotheses for clustering, deduplication, and follow-up scheduling.
 Objective: {goal.objective}
+{_goal_guidance_block(goal)}
 
 Hypotheses:
 {hypothesis_lines}
@@ -3060,6 +3545,7 @@ def _evolution_prompt(
     return f"""You are an evolution agent for a coding-agent AI co-scientist.
 Create up to {limit} evolved hypotheses.
 Objective: {goal.objective}
+{_goal_guidance_block(goal)}
 
 Parents:
 {parent_lines}
@@ -3093,6 +3579,7 @@ def _meta_review_prompt(
     ) or "- No matches."
     return f"""You are a meta-review agent for a coding-agent AI co-scientist.
 Objective: {goal.objective}
+{_goal_guidance_block(goal)}
 
 Recent reviews:
 {review_lines}
@@ -3129,6 +3616,7 @@ def _overview_prompt(
     )
     return f"""Create a research overview for the coding-agent AI co-scientist.
 Objective: {goal.objective}
+{_goal_guidance_block(goal)}
 Cycle: {cycle}
 
 Leaders:
@@ -3782,6 +4270,162 @@ def _looks_contradictory(text: str) -> bool:
     return any(marker in lowered for marker in contradiction_markers)
 
 
+def _verify_explicit_assumptions(
+    hypothesis: Hypothesis,
+    evidence_store: EvidenceStore | None,
+) -> list[AssumptionCheck]:
+    """Deterministic fallback for the paper's assumption-level verification pass.
+
+    The provider-backed worker can emit a deeper parent/child tree. The fallback is
+    intentionally conservative: it independently checks only assumptions explicitly
+    stated by the hypothesis and leaves unsupported ones uncertain.
+    """
+    checks: list[AssumptionCheck] = []
+    for index, assumption in enumerate(hypothesis.assumptions):
+        query = " ".join([hypothesis.title, hypothesis.claim, assumption, "evidence contradiction validation"])
+        retrieved = evidence_store.retrieve(query, limit=5).evidence if evidence_store else []
+        assumption_terms = _meaningful_terms(assumption)
+        relevant = [
+            item
+            for item in retrieved
+            if len(assumption_terms & _meaningful_terms(" ".join([item.content, item.notes]))) >= 2
+        ]
+        contradictions = [item for item in relevant if _looks_contradictory(item.content)]
+        if contradictions:
+            verdict = "contradicted"
+            selected = contradictions
+            reasoning = "Retrieved evidence directly reports failure or contradiction of this assumption."
+        elif relevant:
+            verdict = "supported"
+            selected = relevant
+            reasoning = "Retrieved evidence contains relevant support and no explicit contradiction marker."
+        else:
+            verdict = "uncertain"
+            selected = []
+            reasoning = "No sufficiently relevant evidence was retrieved for an independent verdict."
+        fundamental = _is_fundamental_assumption(assumption)
+        invalidates = verdict == "contradicted" and fundamental
+        checks.append(
+            AssumptionCheck(
+                id=stable_id("assumption-check", f"{hypothesis.id}:{index}:{assumption}:{verdict}"),
+                assumption=assumption,
+                parent_assumption="",
+                depth=0,
+                verdict=verdict,
+                fundamental=fundamental,
+                invalidates_hypothesis=invalidates,
+                evidence_refs=[item.id for item in selected],
+                reasoning=reasoning,
+            )
+        )
+    return checks
+
+
+def _is_fundamental_assumption(assumption: str) -> bool:
+    lowered = assumption.lower()
+    repairable_markers = (
+        "optional",
+        "secondary",
+        "implementation detail",
+        "nice to have",
+        "optimization",
+        "optimisation",
+    )
+    return not any(marker in lowered for marker in repairable_markers)
+
+
+def _assumption_checks_from_llm_payload(
+    response_text: str,
+    hypothesis: Hypothesis,
+    default_evidence_refs: list[str],
+) -> list[AssumptionCheck]:
+    try:
+        data = json.loads(response_text)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(data, dict):
+        return []
+    return _assumption_checks_from_data(
+        data.get("assumption_checks"),
+        hypothesis=hypothesis,
+        default_evidence_refs=default_evidence_refs,
+    )
+
+
+def _assumption_checks_from_data(
+    value: Any,
+    hypothesis: Hypothesis,
+    default_evidence_refs: list[str],
+) -> list[AssumptionCheck]:
+    if not isinstance(value, list):
+        return []
+    checks: list[AssumptionCheck] = []
+    for index, raw in enumerate(value):
+        if not isinstance(raw, dict):
+            continue
+        assumption = _clean_string(raw.get("assumption"), "")
+        if not assumption:
+            continue
+        verdict = _clean_string(raw.get("verdict"), "uncertain").lower()
+        if verdict not in {"supported", "contradicted", "uncertain"}:
+            verdict = "uncertain"
+        parent_assumption = _clean_string(raw.get("parent_assumption"), "")
+        try:
+            depth = max(int(raw.get("depth", 1 if parent_assumption else 0)), 0)
+        except (TypeError, ValueError):
+            depth = 1 if parent_assumption else 0
+        fundamental = _bool_value(raw.get("fundamental"), _is_fundamental_assumption(assumption))
+        invalidates = verdict == "contradicted" and fundamental
+        checks.append(
+            AssumptionCheck(
+                id=stable_id("assumption-check", f"{hypothesis.id}:llm:{index}:{assumption}:{verdict}"),
+                assumption=assumption,
+                parent_assumption=parent_assumption,
+                depth=depth,
+                verdict=verdict,
+                fundamental=fundamental,
+                invalidates_hypothesis=invalidates,
+                evidence_refs=_string_list(raw.get("evidence_refs"), default_evidence_refs),
+                reasoning=_clean_string(
+                    raw.get("reasoning"),
+                    "The provider returned no assumption-level reasoning.",
+                ),
+            )
+        )
+    return checks
+
+
+def _merge_assumption_checks(
+    earlier: list[AssumptionCheck],
+    later: list[AssumptionCheck],
+) -> list[AssumptionCheck]:
+    """Merge turn-level checks without letting synthesis silently erase a failure."""
+    merged: dict[tuple[str, str, int], AssumptionCheck] = {
+        (item.assumption, item.parent_assumption, item.depth): item for item in earlier
+    }
+    for item in later:
+        key = (item.assumption, item.parent_assumption, item.depth)
+        previous = merged.get(key)
+        if previous and previous.verdict == "contradicted" and item.verdict != "contradicted":
+            continue
+        merged[key] = item
+    return list(merged.values())
+
+
+def _bool_value(value: Any, fallback: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "1"}:
+            return True
+        if normalized in {"false", "no", "0"}:
+            return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return fallback
+
+
 def _looks_like_prior_art(text: str) -> bool:
     lowered = text.lower()
     markers = ("known baseline", "common prior art", "prior art", "already known", "well-known", "standard")
@@ -3820,6 +4464,61 @@ def _looks_like_simulation_evidence(item: Evidence) -> bool:
     return any(marker in lowered for marker in markers)
 
 
+def _compare_observation_to_hypothesis(
+    hypothesis: Hypothesis,
+    item: Evidence,
+    index: int,
+    *,
+    simulation: bool = False,
+) -> tuple[str, str, list[str]]:
+    text = " ".join([item.content, item.notes]).lower()
+    contradiction_markers = (
+        "did not improve",
+        "no improvement",
+        "candidate failed",
+        "hypothesis failed",
+        "experiment failed",
+        "test failed",
+        "failed to",
+        "regression_count increased",
+        "more regressions",
+        "worse",
+        "pass_rate decreased",
+        "pass rate decreased",
+        "contradict",
+    )
+    support_markers = (
+        "improved",
+        "increase",
+        "higher",
+        "passed",
+        "success",
+        "caught",
+        "catch",
+        "reduced",
+    )
+    if any(marker in text for marker in contradiction_markers):
+        verdict = "contradicts"
+        reason = "the measured or observed outcome contains an explicit failure/regression signal"
+    elif any(marker in text for marker in support_markers):
+        verdict = "supports"
+        reason = "the outcome contains a positive mechanism or metric signal"
+    else:
+        verdict = "inconclusive"
+        reason = "the record lacks an explicit directional result tied to the success condition"
+    label = "Simulation outcome" if simulation else "Observation"
+    explanation = (
+        f"{label} {index} ({item.id}) {verdict} the hypothesis: {reason}."
+    )
+    trace_prefix = "Simulation step 3" if simulation else f"Observation {index}"
+    trace_lines = [
+        f"{trace_prefix} - prediction: {hypothesis.claim}",
+        f"{trace_prefix} - observed: {_truncate(item.content, 240)}",
+        f"{trace_prefix} - comparison: {verdict}; {reason}.",
+    ]
+    return verdict, explanation, trace_lines
+
+
 def _review_evidence_matching(
     evidence_store: EvidenceStore | None,
     query: str,
@@ -3847,6 +4546,7 @@ def _grounded_review_from_initial(
     review_type: str = "full_review",
     review_trace: list[str] | None = None,
     safety_notes: list[str] | None = None,
+    assumption_checks: list[AssumptionCheck] | None = None,
 ) -> Review:
     return Review(
         id=stable_id("rev", f"{initial.id}:{review_type}:{','.join(evidence_refs)}:{decision}"),
@@ -3862,6 +4562,7 @@ def _grounded_review_from_initial(
         review_trace=review_trace or [],
         confidence=confidence,
         requires_revision=requires_revision,
+        assumption_checks=assumption_checks or [],
     )
 
 
@@ -3918,6 +4619,7 @@ def _generation_prompt(
     return f"""You are a coding-agent research scientist.
 Generate {limit} testable hypotheses for this objective:
 {goal.objective}
+{_goal_guidance_block(goal)}
 
 Evidence:
 {evidence_text}

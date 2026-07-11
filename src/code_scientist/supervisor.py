@@ -3,6 +3,8 @@ from __future__ import annotations
 import contextlib
 import json
 import re
+import subprocess
+import sys
 import threading
 import time
 from collections import Counter
@@ -21,10 +23,22 @@ from code_scientist.agents import (
     RankingAgent,
     ReflectionAgent,
 )
-from code_scientist.evaluation import load_capability_evaluation_fixtures
+from code_scientist.coordination import SQLiteTaskCoordinator, atomic_write_json
+from code_scientist.evaluation import (
+    load_capability_evaluation_fixtures,
+    run_agent_validation_manifest,
+)
 from code_scientist.evidence import EvidenceStore, merge_evidence, read_document_text
-from code_scientist.llm import DEFAULT_ANTHROPIC_MODEL, AnthropicHaikuClient, LLMResponseError
+from code_scientist.llm import (
+    DEFAULT_ANTHROPIC_MODEL,
+    LLMResponseError,
+    create_llm_client,
+    is_llm_provider,
+    llm_origin_for_provider,
+    resolve_provider_model,
+)
 from code_scientist.models import (
+    AgentToolCall,
     AgentTrace,
     BenchmarkResult,
     ContextSnapshot,
@@ -33,6 +47,7 @@ from code_scientist.models import (
     EloConcordanceResult,
     EloTrajectoryPoint,
     FeedbackLoopEvaluation,
+    GoalRevision,
     Hypothesis,
     Match,
     MetaReview,
@@ -45,6 +60,7 @@ from code_scientist.models import (
     Review,
     RunState,
     Task,
+    ToolBudgetState,
     UserFeedback,
     stable_id,
 )
@@ -59,12 +75,18 @@ from code_scientist.safety import (
     review_hypothesis_safety,
     screen_evidence_sources,
 )
+from code_scientist.task_execution import review_packet_digest
 from code_scientist.tools import (
+    AgentRetrievalRequest,
+    AgentRetrievalSession,
+    ToolSearchResult,
+    build_agent_retrieval_executors,
     collect_literature_search_evidence,
     collect_local_repo_search_evidence,
     collect_web_evidence,
     collect_web_search_evidence,
 )
+from code_scientist.vision import interpret_pdf_visual_evidence
 
 
 _INACTIVE_STATUSES = {"merged_duplicate", "quarantined"}
@@ -191,30 +213,97 @@ def run_research_cycle(
     run_status: str = "completed",
     control_path: str | Path | None = None,
     review_concurrency: int = 1,
+    review_processes: int = 0,
+    provider_call_budget: int = 100,
+    pdf_vision: bool = False,
+    pdf_vision_max_regions: int = 10,
+    pdf_vision_call_budget: int = 10,
+    agent_retrieval: bool = False,
+    tool_budget: int = 0,
+    agent_validation_manifest_paths: list[str | Path] | None = None,
+    disabled_agent_kinds: list[str] | None = None,
+    agent_retrieval_iterations: int = 2,
+    agent_fetch_domains: list[str] | None = None,
 ) -> RunState:
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
+    disabled_agents = {value.strip().lower() for value in (disabled_agent_kinds or []) if value.strip()}
+    retrieval_iteration_limit = min(max(int(agent_retrieval_iterations), 1), 10)
     state_path = out_path / "state.json"
     existing_state = load_state(state_path) if resume and state_path.exists() else None
-    goal = (
-        existing_state.goal
-        if existing_state
-        else ResearchGoal.from_objective_with_briefs(objective, _read_goal_briefs(goal_brief_paths or []))
-    )
+    if existing_state is not None:
+        existing_state = _reconcile_coordinator_results(out_path, existing_state)
+    if provider == "host-agent" and int(review_processes) > 0:
+        raise ValueError(
+            "The host-agent provider runs reviews in-process; "
+            "worker processes cannot reach the session answering the bridge."
+        )
     model_client = _build_model_client(
         provider=provider,
         model=model,
         env_file=env_file,
         llm_client=llm_client,
+        bridge_dir=out_path / "llm-bridge",
     )
     safety_policies = load_safety_policies(safety_policy_paths or [])
+    if existing_state is not None:
+        existing_state = _apply_pending_goal_commands(
+            out_path,
+            existing_state,
+            safety_policies=safety_policies,
+        )
+    goal = (
+        existing_state.goal
+        if existing_state
+        else ResearchGoal.from_objective_with_briefs(objective, _read_goal_briefs(goal_brief_paths or []))
+    )
     plan = (
         existing_state.plan or plan_config or _plan_for_goal(goal, provider, model_client, max_tokens)
         if existing_state
         else plan_config or _plan_for_goal(goal, provider, model_client, max_tokens)
     )
-    safety_llm_client = model_client if provider == "anthropic" else None
+    safety_llm_client = model_client if is_llm_provider(provider) else None
     safety_fail_closed = any(policy.fail_closed for policy in safety_policies)
+    restored_tool_budget_limit = (
+        existing_state.tool_budget.limit
+        if existing_state is not None and existing_state.tool_budget is not None
+        else 0
+    )
+    retrieval_budget_enabled = agent_retrieval and max(tool_budget, restored_tool_budget_limit) > 0
+    configured_agent_validation_manifests = [
+        Path(path) for path in (agent_validation_manifest_paths or []) if str(path).strip()
+    ]
+    agent_validation_enabled = (
+        retrieval_budget_enabled
+        and bool(configured_agent_validation_manifests)
+        and _plan_allows_source_request(
+            plan,
+            ("benchmark_validation", "empirical_validation", "local_validation"),
+            ("empirical_validation", "benchmark_evaluation", "validation_manifest"),
+        )
+    )
+    agent_validation_manifests = (
+        configured_agent_validation_manifests if agent_validation_enabled else []
+    )
+    agent_repo_enabled = retrieval_budget_enabled and bool(repo_search_paths) and _plan_allows_source_request(
+        plan,
+        ("repo_search", "local_repo_search", "repository", "local_repository", "local"),
+        ("repo_search", "local_repo_search", "repository_search"),
+    )
+    agent_web_enabled = retrieval_budget_enabled and bool(web_search_queries) and _plan_allows_source_request(
+        plan,
+        ("web_search", "web_search_result", "web", "search"),
+        ("web_search",),
+    )
+    agent_literature_enabled = (
+        retrieval_budget_enabled
+        and bool(literature_search_queries)
+        and _plan_allows_source_request(
+            plan,
+            ("literature", "literature_search", "openalex", "publication", "full_text"),
+            ("literature_search", "openalex_literature_search", "openalex"),
+        )
+    )
     safety = (
         existing_state.safety
         or review_goal_safety_with_model(
@@ -239,13 +328,13 @@ def run_research_cycle(
         plan=plan,
         evidence_paths=evidence_paths or [],
         evidence_index_paths=evidence_index_paths or [],
-        repo_search_paths=repo_search_paths or [],
+        repo_search_paths=[] if agent_repo_enabled else repo_search_paths or [],
         web_evidence_urls=web_evidence_urls or [],
         web_crawl_depth=web_crawl_depth,
-        web_search_queries=web_search_queries or [],
+        web_search_queries=[] if agent_web_enabled else web_search_queries or [],
         web_search_fetch=web_search_fetch,
         web_search_crawl_depth=web_search_crawl_depth,
-        literature_search_queries=literature_search_queries or [],
+        literature_search_queries=[] if agent_literature_enabled else literature_search_queries or [],
         literature_full_text=literature_full_text,
         safety_policies=safety_policies,
     )
@@ -260,6 +349,43 @@ def run_research_cycle(
         safety_policies=safety_policies,
         fail_closed=safety_fail_closed,
     )
+    if pdf_vision:
+        if provider != "anthropic" or model_client is None:
+            raise ValueError("PDF vision requires the explicitly selected Anthropic provider")
+        if pdf_vision_call_budget <= 0:
+            raise ValueError("PDF vision requires a positive vision call budget")
+        vision_coordinator = SQLiteTaskCoordinator(out_path / "coordination.sqlite3")
+        vision_coordinator.configure_budget("vision_calls", pdf_vision_call_budget)
+        interpreted_parent_ids = {
+            item.metadata.get("parent_evidence_id", "")
+            for item in evidence
+            if item.kind == "pdf_visual_claim"
+        }
+        vision_source_evidence = [
+            item
+            for item in evidence
+            if item.id not in interpreted_parent_ids
+        ]
+        visual_claims = interpret_pdf_visual_evidence(
+            vision_source_evidence,
+            run_dir=out_path,
+            client=model_client,
+            model=model or DEFAULT_ANTHROPIC_MODEL,
+            max_regions=min(max(int(pdf_vision_max_regions), 0), 100),
+            max_tokens=max_tokens,
+            coordinator=vision_coordinator,
+        )
+        evidence, vision_safety_findings = screen_evidence_sources(
+            merge_evidence(evidence, visual_claims),
+            llm_client=safety_llm_client,
+            max_tokens=max_tokens,
+            safety_policies=safety_policies,
+            fail_closed=safety_fail_closed,
+        )
+        evidence_safety_findings = _merge_evidence_safety_findings(
+            evidence_safety_findings,
+            vision_safety_findings,
+        )
     evidence_safety_findings = _merge_evidence_safety_findings(
         existing_state.evidence_safety_findings if existing_state else [],
         governance_findings,
@@ -297,7 +423,7 @@ def run_research_cycle(
         env_file=env_file,
         llm_client=model_client,
     )
-    agent_llm_client = model_client if provider == "anthropic" else None
+    agent_llm_client = model_client if is_llm_provider(provider) else None
     reflection = ReflectionAgent(
         llm_client=agent_llm_client,
         llm_max_tokens=max_tokens,
@@ -308,6 +434,41 @@ def run_research_cycle(
     evolution = EvolutionAgent(llm_client=agent_llm_client, llm_max_tokens=max_tokens)
     meta_review = MetaReviewAgent(llm_client=agent_llm_client, llm_max_tokens=max_tokens)
     evidence_store = EvidenceStore(state.evidence)
+    agent_tool_calls: list[AgentToolCall] = list(state.agent_tool_calls)
+    restored_budget = state.tool_budget
+    budget_limit = max(int(tool_budget), 0)
+    if budget_limit == 0 and restored_budget is not None:
+        budget_limit = restored_budget.limit
+    budget_used = restored_budget.used if restored_budget is not None else 0
+    retrieval_executors = {}
+    if agent_retrieval and budget_limit > 0:
+        retrieval_executors = build_agent_retrieval_executors(
+            evidence_store=evidence_store,
+            repo_roots=list(repo_search_paths or []) if agent_repo_enabled else [],
+            enable_web_search=agent_web_enabled,
+            enable_literature_search=agent_literature_enabled,
+            fetch_allowed_domains=agent_fetch_domains,
+            safety_policies=safety_policies,
+        )
+    retrieval_session = (
+        AgentRetrievalSession(
+            evidence_store=evidence_store,
+            budget_limit=budget_limit,
+            budget_used=budget_used,
+            executors=retrieval_executors,
+            safety_policies=safety_policies,
+            seen_requests=[
+                (call.tool, call.source_ref or call.query)
+                for call in agent_tool_calls
+                if call.status not in {"tool_unavailable", "invalid_query", "budget_exhausted"}
+            ],
+        )
+        if agent_retrieval
+        and budget_limit > 0
+        and (retrieval_executors or agent_validation_manifests)
+        else None
+    )
+    use_grounded_review = use_grounded_review or retrieval_session is not None
 
     hypotheses: list[Hypothesis] = list(state.hypotheses)
     reviews: list[Review] = list(state.reviews)
@@ -331,6 +492,7 @@ def run_research_cycle(
     context_snapshots: list[ContextSnapshot] = list(state.context_snapshots)
     research_overview = state.research_overview
     user_feedback = list(state.user_feedback)
+    goal_revisions = list(state.goal_revisions)
     agent_traces = list(state.agent_traces)
     retrieval_memory = list(state.retrieval_memory)
     task_queue = prepare_task_queue_for_resume(list(state.task_queue)) if resume else list(state.task_queue)
@@ -340,12 +502,73 @@ def run_research_cycle(
     deferred_run_status = run_status
     state_lock = threading.Lock()
 
+    def run_agent_retrieval(
+        *,
+        cycle: int,
+        task_id: str,
+        agent: str,
+        input_refs: list[str],
+        planner: Callable[[int, list[Evidence]], list[Any]],
+        max_iterations: int | None = None,
+        executor_overrides: dict[str, Callable[[str], ToolSearchResult]] | None = None,
+        trace_action: str = "agent_driven_iterative_retrieval",
+    ) -> list[Evidence]:
+        if retrieval_session is None:
+            return []
+        observations: list[Evidence] = []
+        calls: list[AgentToolCall] = []
+        iteration_limit = retrieval_iteration_limit if max_iterations is None else max_iterations
+        for iteration in range(max(iteration_limit, 0)):
+            requests = planner(iteration, list(observations))
+            if not requests:
+                break
+            new_evidence, iteration_calls = retrieval_session.execute(
+                requests,
+                cycle=cycle,
+                agent=agent,
+                task_id=task_id,
+                executor_overrides=executor_overrides,
+            )
+            calls.extend(iteration_calls)
+            observations.extend(new_evidence)
+            if not new_evidence:
+                break
+        if calls:
+            with state_lock:
+                agent_tool_calls.extend(calls)
+                evidence[:] = evidence_store.snapshot()
+                budget = retrieval_session.budget_state()
+                agent_traces.append(
+                    _build_agent_trace(
+                        cycle=cycle,
+                        agent=agent,
+                        action=trace_action,
+                        input_refs=input_refs,
+                        output_refs=[item.id for item in observations],
+                        notes=(
+                            f"Executed {len(calls)} governed agent tool decisions across "
+                            f"{len({call.tool for call in calls})} tools; "
+                            f"budget {budget.used}/{budget.limit}."
+                        ),
+                        evidence_refs=[item.id for item in observations],
+                        task_id=task_id,
+                        scratchpad=[
+                            f"{call.tool}: {call.status}; "
+                            f"request={call.source_ref or call.query}; "
+                            f"new_refs={len(call.evidence_refs)}; remaining={call.budget_after}"
+                            for call in calls
+                        ],
+                        tool_calls=[call.to_dict() for call in calls],
+                    )
+                )
+        return observations
+
     def current_state(status: str, queue: list[Task]) -> RunState:
         return RunState(
             goal=goal,
             run_status=status,
             plan=plan,
-            evidence=evidence,
+            evidence=evidence_store.snapshot(),
             evidence_safety_findings=evidence_safety_findings,
             hypotheses=sorted(hypotheses, key=lambda item: item.elo, reverse=True),
             reviews=reviews,
@@ -365,8 +588,16 @@ def run_research_cycle(
             safety=safety,
             research_overview=research_overview,
             user_feedback=user_feedback,
+            goal_revisions=goal_revisions,
             agent_traces=agent_traces,
             retrieval_memory=retrieval_memory,
+            tool_budget=(
+                retrieval_session.budget_state()
+                if retrieval_session is not None
+                else restored_budget
+                or (ToolBudgetState(limit=budget_limit, used=budget_used) if budget_limit else None)
+            ),
+            agent_tool_calls=agent_tool_calls,
             task_queue=queue,
         )
 
@@ -393,9 +624,19 @@ def run_research_cycle(
                 kind: str,
                 payload: dict[str, Any],
                 execute: Callable[[Task], list[str] | None],
+                *,
+                depends_on: list[str] | None = None,
+                resource_class: str = "default",
             ) -> Task:
                 nonlocal task_queue
-                task = create_task(cycle=cycle, plan=plan, kind=kind, payload=payload)
+                task = create_task(
+                    cycle=cycle,
+                    plan=plan,
+                    kind=kind,
+                    payload=payload,
+                    depends_on=depends_on,
+                    resource_class=resource_class,
+                )
                 task = replace(
                     task,
                     priority=score_task_priority(
@@ -426,13 +667,19 @@ def run_research_cycle(
                             task_queue[existing_task_index],
                             priority=task.priority,
                             payload=task.payload,
+                            depends_on=task.depends_on,
+                            resource_class=task.resource_class,
                         ),
                         *task_queue[existing_task_index + 1 :],
                     ]
                 task_handlers[task.id] = execute
                 return task
 
-            def run_ready_cycle_tasks(eligible_task_ids: set[str], max_concurrency: int = 1) -> None:
+            def run_ready_cycle_tasks(
+                eligible_task_ids: set[str],
+                max_concurrency: int = 1,
+                resource_limits: dict[str, int] | None = None,
+            ) -> None:
                 nonlocal task_queue
 
                 def execute_scheduled_task(task: Task) -> list[str] | None:
@@ -441,49 +688,54 @@ def run_research_cycle(
                         raise RuntimeError(f"No scheduler handler registered for task: {task.id}")
                     return handler(task)
 
-                scheduler_pool = select_scheduler_task_pool(
-                    task_queue,
-                    plan=plan,
-                    hypotheses=hypotheses,
-                    reviews=reviews,
-                    proximity_edges=proximity_edges,
-                    user_feedback=user_feedback,
-                    current_cycle=cycle,
-                    context_snapshots=context_snapshots,
-                    max_pool_size=len(eligible_task_ids),
-                    candidate_task_ids=eligible_task_ids,
-                )
-                selected_task_ids = {task.id for task in scheduler_pool}
-                scheduler_selection_by_id = {task.id: task for task in scheduler_pool}
-                rescored_queue = rescore_task_queue(
-                    task_queue,
-                    plan=plan,
-                    hypotheses=hypotheses,
-                    reviews=reviews,
-                    proximity_edges=proximity_edges,
-                    user_feedback=user_feedback,
-                    current_cycle=cycle,
-                    context_snapshots=context_snapshots,
-                )
-                task_queue = [
-                    replace(
-                        task,
-                        priority=scheduler_selection_by_id[task.id].priority,
-                        worker_state=scheduler_selection_by_id[task.id].worker_state,
+                while True:
+                    scheduler_pool = select_scheduler_task_pool(
+                        task_queue,
+                        plan=plan,
+                        hypotheses=hypotheses,
+                        reviews=reviews,
+                        proximity_edges=proximity_edges,
+                        user_feedback=user_feedback,
+                        current_cycle=cycle,
+                        context_snapshots=context_snapshots,
+                        max_pool_size=max(max_concurrency, 1),
+                        candidate_task_ids=eligible_task_ids,
+                        resource_limits=resource_limits,
                     )
-                    if task.id in scheduler_selection_by_id
-                    else task
-                    for task in rescored_queue
-                ]
-                task_queue = run_task_worker(
-                    task_queue,
-                    execute=execute_scheduled_task,
-                    persist=persist_current_task_state,
-                    raise_on_failed=True,
-                    eligible_task_ids=selected_task_ids,
-                    defer_when=defer_reason_from_control,
-                    max_concurrency=max_concurrency,
-                )
+                    if not scheduler_pool:
+                        break
+                    selected_task_ids = {task.id for task in scheduler_pool}
+                    scheduler_selection_by_id = {task.id: task for task in scheduler_pool}
+                    rescored_queue = rescore_task_queue(
+                        task_queue,
+                        plan=plan,
+                        hypotheses=hypotheses,
+                        reviews=reviews,
+                        proximity_edges=proximity_edges,
+                        user_feedback=user_feedback,
+                        current_cycle=cycle,
+                        context_snapshots=context_snapshots,
+                    )
+                    task_queue = [
+                        replace(
+                            task,
+                            priority=scheduler_selection_by_id[task.id].priority,
+                            worker_state=scheduler_selection_by_id[task.id].worker_state,
+                        )
+                        if task.id in scheduler_selection_by_id
+                        else task
+                        for task in rescored_queue
+                    ]
+                    task_queue = run_task_worker(
+                        task_queue,
+                        execute=execute_scheduled_task,
+                        persist=persist_current_task_state,
+                        raise_on_failed=True,
+                        eligible_task_ids=selected_task_ids,
+                        defer_when=defer_reason_from_control,
+                        max_concurrency=max_concurrency,
+                        resource_limits=resource_limits,
+                    )
                 for task_id in eligible_task_ids:
                     current_task = next((existing for existing in task_queue if existing.id == task_id), None)
                     if current_task and current_task.status == "deferred":
@@ -524,6 +776,23 @@ def run_research_cycle(
 
             def execute_generation(_task: Task) -> list[str]:
                 nonlocal generated
+                if "generation" in disabled_agents:
+                    generated = []
+                    return []
+                if generation_limit:
+                    run_agent_retrieval(
+                        cycle=cycle,
+                        task_id=_task.id,
+                        agent="generation",
+                        input_refs=[goal.id],
+                        planner=lambda iteration, observations: generation.plan_retrieval_queries(
+                            goal,
+                            retrieval_session.available_tools if retrieval_session else [],
+                            iteration=iteration,
+                            observations=observations,
+                            agent_feedback=generation_feedback,
+                        ),
+                    )
                 generated_candidates = _generate_for_plan(
                     generation=generation,
                     goal=goal,
@@ -548,6 +817,75 @@ def run_research_cycle(
             def make_execute_review(target: Hypothesis) -> Callable[[Task], list[str]]:
                 def execute_review(_task: Task) -> list[str]:
                     nonlocal hypotheses, reviewed
+                    active_review_types = _active_review_types(plan, use_grounded_review)
+                    if {
+                        "full_review",
+                        "deep_verification",
+                        "observation_review",
+                        "simulation_review",
+                    }.intersection(active_review_types):
+                        for manifest_path in agent_validation_manifests:
+                            request = AgentRetrievalRequest(
+                                tool="empirical_validation",
+                                query=f"{target.id}: {manifest_path.resolve()}",
+                                rationale=(
+                                    "Execute a researcher-configured no-shell validation "
+                                    "before ranking this hypothesis."
+                                ),
+                            )
+
+                            def execute_manifest(
+                                query: str,
+                                *,
+                                selected_manifest: Path = manifest_path,
+                            ) -> ToolSearchResult:
+                                evidence_item = run_agent_validation_manifest(
+                                    selected_manifest,
+                                    state,
+                                    target,
+                                    work_dir=(
+                                        out_path
+                                        / "agent-validations"
+                                        / target.id
+                                        / stable_id("manifest", str(selected_manifest.resolve()))
+                                    ),
+                                )
+                                return ToolSearchResult(query=query, evidence=[evidence_item])
+
+                            run_agent_retrieval(
+                                cycle=cycle,
+                                task_id=_task.id,
+                                agent="reflection",
+                                input_refs=[target.id],
+                                planner=lambda iteration, _observations, item=request: (
+                                    [item] if iteration == 0 else []
+                                ),
+                                max_iterations=1,
+                                executor_overrides={"empirical_validation": execute_manifest},
+                                trace_action="agent_driven_empirical_validation",
+                            )
+                    if {
+                        "full_review",
+                        "novelty_review",
+                        "deep_verification",
+                        "observation_review",
+                        "simulation_review",
+                    }.intersection(active_review_types):
+                        run_agent_retrieval(
+                            cycle=cycle,
+                            task_id=_task.id,
+                            agent="reflection",
+                            input_refs=[target.id],
+                            planner=lambda iteration, observations: reflection.plan_retrieval_queries(
+                                goal,
+                                target,
+                                active_review_types,
+                                retrieval_session.available_tools if retrieval_session else [],
+                                iteration=iteration,
+                                observations=observations,
+                                agent_feedback=reflection_feedback,
+                            ),
+                        )
                     # Only the snapshot read of `reviews` (for prior_reviews) and the
                     # shared-list mutations below need the lock; the LLM call and
                     # evidence-store drain inside _review_for_plan run on thread-local
@@ -607,24 +945,53 @@ def run_research_cycle(
             initial_ready_tasks = register_resumed_review_tasks()
             run_ready_cycle_tasks({generation_task.id, *[task.id for task in initial_ready_tasks]})
 
+            def portable_review_payload(item: Hypothesis) -> dict[str, Any]:
+                payload: dict[str, Any] = {
+                    "cycle": cycle,
+                    "packet_type": (
+                        "provider_review" if is_llm_provider(provider) else "deterministic_review"
+                    ),
+                    "required_provider": provider,
+                    "required_model": resolve_provider_model(provider, model),
+                    "requested_max_tokens": max_tokens,
+                    "use_grounded": use_grounded_review,
+                    "safety_policies": [policy.to_dict() for policy in safety_policies],
+                    "review_types": _active_review_types(plan, use_grounded_review),
+                    "hypothesis_id": item.id,
+                    "hypothesis_ids": [item.id],
+                    "goal": goal.to_dict(),
+                    "hypothesis": item.to_dict(),
+                    "evidence": [
+                        evidence_item.to_dict()
+                        for evidence_item in _portable_review_evidence(
+                            item,
+                            evidence_store,
+                            goal.objective,
+                        )
+                    ],
+                    "output_path": f"worker-results/review-{cycle}-{item.id}.json",
+                    "reflection_feedback": reflection_feedback,
+                    "safety_feedback": safety_feedback,
+                    "matches": [match.to_dict() for match in matches],
+                    "prior_reviews": [
+                        review.to_dict()
+                        for review in reviews
+                        if review.hypothesis_id == item.id
+                    ],
+                }
+                payload["packet_digest"] = review_packet_digest(payload)
+                return payload
+
             review_tasks = [
                 schedule_cycle_task(
                     "review",
-                    {
-                        "review_types": _active_review_types(plan, use_grounded_review),
-                        "hypothesis_id": item.id,
-                        "hypothesis_ids": [item.id],
-                        "agent_feedback": _unique_refs([*reflection_feedback, *safety_feedback]),
-                    },
+                    portable_review_payload(item),
                     make_execute_review(item),
+                    depends_on=[generation_task.id],
+                    resource_class="review",
                 )
                 for item in generated
             ]
-            if review_tasks:
-                run_ready_cycle_tasks(
-                    {task.id for task in review_tasks},
-                    max_concurrency=max(1, min(review_concurrency, len(review_tasks))),
-                )
 
             def execute_empty_review(_task: Task) -> list[str]:
                 nonlocal hypotheses, reviewed
@@ -647,7 +1014,7 @@ def run_research_cycle(
                 return [item.id for item in reviewed]
 
             if not review_tasks:
-                run_cycle_task(
+                review_tasks = [schedule_cycle_task(
                     "review",
                     {
                         "review_types": _active_review_types(plan, use_grounded_review),
@@ -655,12 +1022,16 @@ def run_research_cycle(
                         "agent_feedback": _unique_refs([*reflection_feedback, *safety_feedback]),
                     },
                     execute_empty_review,
-                )
-
-            hypotheses = _apply_safety_quarantine(hypotheses, reviews)
+                    depends_on=[generation_task.id],
+                    resource_class="review",
+                )]
 
             def execute_proximity(_task: Task) -> list[str]:
                 nonlocal hypotheses, proximity_edges
+                if "proximity" in disabled_agents:
+                    proximity_edges = []
+                    return []
+                hypotheses = _apply_safety_quarantine(hypotheses, reviews)
                 proximity_edges = proximity.compute_goal_aware(
                     goal, hypotheses, reviews, evidence_store, agent_feedback=proximity_feedback
                 )
@@ -712,12 +1083,17 @@ def run_research_cycle(
                     "agent_feedback": proximity_feedback,
                 },
                 execute_proximity,
+                depends_on=[task.id for task in review_tasks],
+                resource_class="state_mutation",
             )
 
             debate_depth_override = _debate_depth_override(plan)
 
             def execute_ranking(_task: Task) -> list[str]:
                 nonlocal hypotheses
+                if "ranking" in disabled_agents:
+                    return []
+                hypotheses = _apply_safety_quarantine(hypotheses, reviews)
                 cycle_match_ids: list[str] = []
                 cycle_match_evidence_refs: list[str] = []
                 multi_round_count = 0
@@ -733,25 +1109,15 @@ def run_research_cycle(
                         and second.id in top_tier
                     )
                     pair_reviews = _reviews_for_pair(reviews, first.id, second.id)
-                    ranked_pair, match = (
-                        ranking.compare_multi_round_debate(
-                            goal,
-                            first,
-                            second,
-                            reviews=pair_reviews,
-                            rounds=2,
-                            evidence_store=evidence_store if use_grounded_review else None,
-                            agent_feedback=ranking_feedback,
-                        )
-                        if use_multi_round
-                        else ranking.compare_debate(
-                            goal,
-                            first,
-                            second,
-                            reviews=pair_reviews,
-                            evidence_store=evidence_store if use_grounded_review else None,
-                            agent_feedback=ranking_feedback,
-                        )
+                    ranked_pair, match = ranking.compare_position_stable(
+                        goal,
+                        first,
+                        second,
+                        reviews=pair_reviews,
+                        evidence_store=evidence_store if use_grounded_review else None,
+                        agent_feedback=ranking_feedback,
+                        multi_round=use_multi_round,
+                        rounds=2,
                     )
                     if use_multi_round:
                         multi_round_count += 1
@@ -838,100 +1204,105 @@ def run_research_cycle(
                     "agent_feedback": ranking_feedback,
                 },
                 execute_ranking,
+                depends_on=[task.id for task in review_tasks],
+                resource_class="state_mutation",
             )
-            run_ready_cycle_tasks({proximity_task.id, ranking_task.id})
 
-            leaders = _select_diverse_evolution_leaders(hypotheses, proximity_edges, limit=2)
-            child_limit = min(2, max(max_hypotheses - len(hypotheses), 0))
             evolution_strategy = _active_evolution_strategy(plan, cycle, use_grounded=use_grounded_review)
-            evolution_task: Task | None = None
-            if leaders and child_limit:
-                def execute_evolution(_task: Task) -> list[str]:
-                    nonlocal hypotheses, proximity_edges
-                    if evolution_strategy == "simplification":
-                        children = evolution.evolve(
-                            goal,
-                            leaders,
-                            evolution_feedback,
-                            limit=child_limit,
-                            evidence_store=evidence_store if use_grounded_review else None,
-                        )
-                    else:
-                        children = evolution.evolve_with_strategy(
-                            goal,
-                            leaders,
-                            evolution_feedback,
-                            strategy=evolution_strategy,
-                            limit=child_limit,
-                            evidence_store=evidence_store if use_grounded_review else None,
-                        )
-                    task_retrievals = evidence_store.consume_retrieval_memory(
+            def execute_evolution(_task: Task) -> list[str]:
+                nonlocal hypotheses, proximity_edges
+                if "evolution" in disabled_agents:
+                    return []
+                leaders = _select_diverse_evolution_leaders(hypotheses, proximity_edges, limit=2)
+                child_limit = min(2, max(max_hypotheses - len(hypotheses), 0))
+                if not leaders or not child_limit:
+                    return []
+                if evolution_strategy == "simplification":
+                    children = evolution.evolve(
+                        goal,
+                        leaders,
+                        evolution_feedback,
+                        limit=child_limit,
+                        evidence_store=evidence_store if use_grounded_review else None,
+                    )
+                else:
+                    children = evolution.evolve_with_strategy(
+                        goal,
+                        leaders,
+                        evolution_feedback,
+                        strategy=evolution_strategy,
+                        limit=child_limit,
+                        evidence_store=evidence_store if use_grounded_review else None,
+                    )
+                task_retrievals = evidence_store.consume_retrieval_memory(
+                    cycle=cycle,
+                    agent="evolution",
+                    task_id=_task.id,
+                    reason=f"{evolution_strategy} evolution retrieval",
+                )
+                retrieval_memory.extend(task_retrievals)
+                evolution_notes = f"Evolved {len(children)} child hypotheses from current leaders."
+                if evolution_feedback:
+                    evolution_notes += f" Agent feedback: {'; '.join(evolution_feedback)}."
+                agent_traces.append(
+                    _build_agent_trace(
                         cycle=cycle,
                         agent="evolution",
+                        action=evolution_strategy,
+                        input_refs=[item.id for item in leaders],
+                        output_refs=[item.id for item in children],
+                        notes=evolution_notes,
+                        evidence_refs=_evidence_refs_for_hypotheses(children),
                         task_id=_task.id,
-                        reason=f"{evolution_strategy} evolution retrieval",
+                        llm_interactions=evolution.consume_llm_interactions(),
+                        scratchpad=_trace_scratchpad(
+                            [
+                                f"strategy={evolution_strategy}",
+                                f"leader_count={len(leaders)}",
+                                f"child_count={len(children)}",
+                            ],
+                            task_retrievals,
+                        ),
+                        tool_calls=_tool_calls_from_retrievals(task_retrievals),
                     )
-                    retrieval_memory.extend(task_retrievals)
-                    evolution_notes = f"Evolved {len(children)} child hypotheses from current leaders."
-                    if evolution_feedback:
-                        evolution_notes += f" Agent feedback: {'; '.join(evolution_feedback)}."
-                    agent_traces.append(
-                        _build_agent_trace(
-                            cycle=cycle,
-                            agent="evolution",
-                            action=evolution_strategy,
-                            input_refs=[item.id for item in leaders],
-                            output_refs=[item.id for item in children],
-                            notes=evolution_notes,
-                            evidence_refs=_evidence_refs_for_hypotheses(children),
-                            task_id=_task.id,
-                            llm_interactions=evolution.consume_llm_interactions(),
-                            scratchpad=_trace_scratchpad(
-                                [
-                                    f"strategy={evolution_strategy}",
-                                    f"leader_count={len(leaders)}",
-                                    f"child_count={len(children)}",
-                                ],
-                                task_retrievals,
-                            ),
-                            tool_calls=_tool_calls_from_retrievals(task_retrievals),
-                        )
-                    )
-                    child_reviews = _review_for_plan(
-                        reflection=reflection,
-                        goal=goal,
-                        plan=plan,
-                        hypotheses=children,
-                        evidence_store=evidence_store,
-                        use_grounded=use_grounded_review,
-                        cycle=cycle,
-                        agent_traces=agent_traces,
-                        task_id=_task.id,
-                        retrieval_memory=retrieval_memory,
-                        matches=matches,
-                        prior_reviews=reviews,
-                    )
-                    accepted_child_ids = _accepted_hypothesis_ids(children, child_reviews)
-                    hypotheses = _merge_hypotheses(
-                        hypotheses,
-                        [item.with_status("accepted") for item in children if item.id in accepted_child_ids],
-                    )
-                    reviews.extend(child_reviews)
-                    proximity_edges = proximity.compute_goal_aware(
-                        goal, hypotheses, reviews, evidence_store, agent_feedback=proximity_feedback
-                    )
-                    hypotheses = _apply_proximity_deduplication(hypotheses, proximity_edges)
-                    return [item.id for item in children]
-
-                evolution_task = schedule_cycle_task(
-                    "evolution",
-                    {
-                        "strategy": evolution_strategy,
-                        "leader_ids": [item.id for item in leaders],
-                        "agent_feedback": evolution_feedback,
-                    },
-                    execute_evolution,
                 )
+                child_reviews = _review_for_plan(
+                    reflection=reflection,
+                    goal=goal,
+                    plan=plan,
+                    hypotheses=children,
+                    evidence_store=evidence_store,
+                    use_grounded=use_grounded_review,
+                    cycle=cycle,
+                    agent_traces=agent_traces,
+                    task_id=_task.id,
+                    retrieval_memory=retrieval_memory,
+                    matches=matches,
+                    prior_reviews=reviews,
+                )
+                accepted_child_ids = _accepted_hypothesis_ids(children, child_reviews)
+                hypotheses = _merge_hypotheses(
+                    hypotheses,
+                    [item.with_status("accepted") for item in children if item.id in accepted_child_ids],
+                )
+                reviews.extend(child_reviews)
+                proximity_edges = proximity.compute_goal_aware(
+                    goal, hypotheses, reviews, evidence_store, agent_feedback=proximity_feedback
+                )
+                hypotheses = _apply_proximity_deduplication(hypotheses, proximity_edges)
+                return [item.id for item in children]
+
+            evolution_task = schedule_cycle_task(
+                "evolution",
+                {
+                    "strategy": evolution_strategy,
+                    "leader_ids": [],
+                    "agent_feedback": evolution_feedback,
+                },
+                execute_evolution,
+                depends_on=[ranking_task.id, proximity_task.id],
+                resource_class="state_mutation",
+            )
 
             top_hypothesis_ids = [
                 item.id
@@ -986,15 +1357,9 @@ def run_research_cycle(
                     "top_hypothesis_ids": top_hypothesis_ids,
                 },
                 execute_meta_review,
+                depends_on=[ranking_task.id],
+                resource_class="state_mutation",
             )
-            ready_meta_ids = {meta_review_task.id}
-            if evolution_task is not None:
-                ready_meta_ids.add(evolution_task.id)
-            run_ready_cycle_tasks(ready_meta_ids)
-            top_hypothesis_ids = [
-                item.id
-                for item in sorted(_active_hypotheses(hypotheses), key=lambda hyp: hyp.elo, reverse=True)[:3]
-            ]
 
             def execute_overview(_task: Task) -> list[str]:
                 nonlocal research_overview
@@ -1034,7 +1399,7 @@ def run_research_cycle(
                 )
                 return [research_overview.id]
 
-            run_cycle_task(
+            overview_task = schedule_cycle_task(
                 "overview",
                 {
                     "generated_by": "meta_review",
@@ -1042,6 +1407,8 @@ def run_research_cycle(
                     "agent_feedback": overview_feedback,
                 },
                 execute_overview,
+                depends_on=[meta_review_task.id, evolution_task.id, proximity_task.id],
+                resource_class="state_mutation",
             )
 
             def execute_research_outputs(_task: Task) -> list[str]:
@@ -1093,7 +1460,7 @@ def run_research_cycle(
                 )
                 return [item.id for item in cycle_outputs]
 
-            run_cycle_task(
+            research_outputs_task = schedule_cycle_task(
                 "research_outputs",
                 {
                     "generated_by": "meta_review",
@@ -1101,6 +1468,70 @@ def run_research_cycle(
                     "output_types": ["publication_brief", "grant_brief", "contact_suggestions"],
                 },
                 execute_research_outputs,
+                depends_on=[overview_task.id],
+                resource_class="state_mutation",
+            )
+
+            global_task_ids = {
+                *(task.id for task in review_tasks),
+                proximity_task.id,
+                ranking_task.id,
+                evolution_task.id,
+                meta_review_task.id,
+                overview_task.id,
+                research_outputs_task.id,
+            }
+            if review_processes > 0 and review_tasks:
+                persist_current_task_state(task_queue)
+                _run_review_packet_processes(
+                    out_path,
+                    process_count=review_processes,
+                    task_ids=[task.id for task in review_tasks],
+                    provider=provider,
+                    model=model or DEFAULT_ANTHROPIC_MODEL,
+                    max_tokens=max_tokens,
+                    env_file=str(Path(env_file).resolve()),
+                    provider_call_budget=provider_call_budget,
+                )
+                prior_review_ids = {review.id for review in reviews}
+                reconciled = _reconcile_coordinator_results(
+                    out_path,
+                    current_state(run_status, task_queue),
+                )
+                task_queue = reconciled.task_queue
+                reviews = reconciled.reviews
+                agent_traces = reconciled.agent_traces
+                reviewed = [review for review in reviews if review.id not in prior_review_ids]
+                accepted_ids = _accepted_hypothesis_ids(generated, reviewed)
+                hypotheses = _merge_hypotheses(
+                    hypotheses,
+                    [
+                        item.with_status("accepted")
+                        for item in generated
+                        if item.id in accepted_ids
+                    ],
+                )
+                agent_traces.append(
+                    _build_agent_trace(
+                        cycle=cycle,
+                        agent="reflection",
+                        action="multiprocess_review_packets",
+                        input_refs=[task.id for task in review_tasks],
+                        output_refs=[review.id for review in reviewed],
+                        notes=(
+                            f"Executed {len(review_tasks)} portable {provider} review packets "
+                            f"through {max(int(review_processes), 1)} lease-based worker processes."
+                        ),
+                        task_id="",
+                    )
+                )
+            run_ready_cycle_tasks(
+                global_task_ids,
+                max_concurrency=max(1, review_concurrency),
+                resource_limits={
+                    "review": max(1, review_concurrency),
+                    "state_mutation": 1,
+                },
             )
 
             feedback_evaluation = _build_feedback_loop_evaluation(
@@ -1154,33 +1585,10 @@ def run_research_cycle(
         capability_evaluations,
         load_capability_evaluation_fixtures(capability_evaluation_paths or [], goal, final_hypotheses),
     )
-    state = RunState(
-        goal=goal,
-        run_status=run_status,
-        plan=plan,
-        evidence=state.evidence,
-        evidence_safety_findings=evidence_safety_findings,
+    state = replace(
+        current_state(run_status, task_queue),
         hypotheses=final_hypotheses,
-        reviews=reviews,
-        matches=matches,
-        elo_trajectory=elo_trajectory,
-        elo_concordance=elo_concordance,
-        proximity_edges=proximity_edges,
-        benchmark_results=benchmarks,
         capability_evaluations=capability_evaluations,
-        prospective_evaluations=prospective_evaluations,
-        scaling_curve=scaling_curve,
-        safety_evaluations=safety_evaluations,
-        feedback_loop_evaluations=feedback_loop_evaluations,
-        research_output_artifacts=research_output_artifacts,
-        meta_reviews=metas,
-        context_snapshots=context_snapshots,
-        safety=safety,
-        research_overview=research_overview,
-        user_feedback=user_feedback,
-        agent_traces=agent_traces,
-        retrieval_memory=retrieval_memory,
-        task_queue=task_queue,
     )
     _write_state(state_path, state)
     return state
@@ -1215,6 +1623,17 @@ def run_continuous_research(
     max_continuous_cycles: int | None = None,
     after_cycle: Callable[[RunState], None] | None = None,
     review_concurrency: int = 1,
+    review_processes: int = 0,
+    provider_call_budget: int = 100,
+    pdf_vision: bool = False,
+    pdf_vision_max_regions: int = 10,
+    pdf_vision_call_budget: int = 10,
+    agent_retrieval: bool = False,
+    tool_budget: int = 0,
+    agent_validation_manifest_paths: list[str | Path] | None = None,
+    disabled_agent_kinds: list[str] | None = None,
+    agent_retrieval_iterations: int = 2,
+    agent_fetch_domains: list[str] | None = None,
 ) -> RunState:
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -1227,6 +1646,7 @@ def run_continuous_research(
         model=model,
         env_file=env_file,
         llm_client=llm_client,
+        bridge_dir=out_path / "llm-bridge",
     )
     state = _ensure_continuous_state(
         objective=objective,
@@ -1244,7 +1664,9 @@ def run_continuous_research(
         web_search_crawl_depth=web_search_crawl_depth,
         literature_search_queries=literature_search_queries,
         literature_full_text=literature_full_text,
-        safety_llm_client=model_client if provider == "anthropic" else None,
+        agent_retrieval=agent_retrieval,
+        tool_budget=tool_budget,
+        safety_llm_client=model_client if is_llm_provider(provider) else None,
         max_tokens=max_tokens,
     )
 
@@ -1290,6 +1712,17 @@ def run_continuous_research(
             run_status="running",
             control_path=control_path,
             review_concurrency=review_concurrency,
+            review_processes=review_processes,
+            provider_call_budget=provider_call_budget,
+            pdf_vision=pdf_vision,
+            pdf_vision_max_regions=pdf_vision_max_regions,
+            pdf_vision_call_budget=pdf_vision_call_budget,
+            agent_retrieval=agent_retrieval,
+            tool_budget=tool_budget,
+            agent_validation_manifest_paths=agent_validation_manifest_paths,
+            disabled_agent_kinds=disabled_agent_kinds,
+            agent_retrieval_iterations=agent_retrieval_iterations,
+            agent_fetch_domains=agent_fetch_domains,
         )
         if state.run_status == "stopped":
             return state
@@ -1340,9 +1773,489 @@ def _goal_safety_text(goal: ResearchGoal) -> str:
     )
 
 
+def apply_goal_revision_to_state(
+    state: RunState,
+    patch: dict[str, Any],
+    *,
+    user_message: str,
+    safety_policies: list[SafetyPolicy] | None = None,
+) -> RunState:
+    allowed_fields = {
+        "objective",
+        "preferences",
+        "constraints",
+        "metrics",
+        "safety_notes",
+        "allowed_sources",
+        "allowed_tools",
+        "output_formats",
+        "termination_criteria",
+        "follow_up_direction",
+    }
+    unknown = set(patch) - allowed_fields
+    if unknown:
+        raise ValueError(f"Unsupported goal revision fields: {', '.join(sorted(unknown))}")
+    list_fields = allowed_fields - {"objective", "follow_up_direction"}
+    updates: dict[str, Any] = {}
+    for field_name in list_fields:
+        if field_name not in patch:
+            continue
+        value = patch[field_name]
+        if not isinstance(value, list):
+            raise ValueError(f"Goal revision field {field_name} must be a list")
+        updates[field_name] = _unique_refs([str(item) for item in value if str(item).strip()])
+    if "objective" in patch:
+        objective = " ".join(str(patch["objective"]).split())
+        if not objective:
+            raise ValueError("Goal revision objective cannot be blank")
+        updates["objective"] = objective
+    candidate = replace(state.goal, **updates)
+    candidate_identity = json.dumps(
+        {
+            "objective": candidate.objective,
+            "preferences": candidate.preferences,
+            "constraints": candidate.constraints,
+            "metrics": candidate.metrics,
+            "safety_notes": candidate.safety_notes,
+            "allowed_sources": candidate.allowed_sources,
+            "allowed_tools": candidate.allowed_tools,
+            "output_formats": candidate.output_formats,
+            "termination_criteria": candidate.termination_criteria,
+        },
+        sort_keys=True,
+    )
+    candidate = replace(candidate, id=stable_id("goal", candidate_identity))
+    safety = review_goal_safety(
+        _goal_safety_text(candidate),
+        safety_policies=safety_policies or [],
+    )
+    prior_plan = state.plan or ResearchPlanConfig.from_goal(state.goal)
+    candidate_plan_base = ResearchPlanConfig.from_goal(candidate)
+    candidate_plan = replace(
+        candidate_plan_base,
+        generation_methods=list(prior_plan.generation_methods),
+        review_types=list(prior_plan.review_types),
+        evolution_strategies=list(prior_plan.evolution_strategies),
+        scheduler_weights=dict(prior_plan.scheduler_weights),
+    )
+    affected_task_ids = [
+        task.id for task in state.task_queue if task.status in {"queued", "deferred"}
+    ]
+    revision_number = len(state.goal_revisions) + 1
+    revision = GoalRevision(
+        id=stable_id(
+            "goal-revision",
+            f"{state.goal.id}:{candidate.id}:{revision_number}:{user_message}:{json.dumps(patch, sort_keys=True)}",
+        ),
+        revision=revision_number,
+        prior_goal_id=state.goal.id,
+        new_goal_id=candidate.id,
+        prior_plan_id=prior_plan.id,
+        new_plan_id=candidate_plan.id,
+        user_message=user_message,
+        structured_changes=patch,
+        approval_status="approved" if safety.allowed else "rejected",
+        safety=safety,
+        affected_task_ids=affected_task_ids,
+    )
+    if not safety.allowed:
+        return replace(state, goal_revisions=[*state.goal_revisions, revision])
+
+    follow_up = " ".join(str(patch.get("follow_up_direction", "")).split())
+    feedback = list(state.user_feedback)
+    if follow_up:
+        feedback.append(
+            UserFeedback(
+                id=stable_id("feedback", f"{candidate.id}:{revision.id}:{follow_up}"),
+                kind="follow_up_direction",
+                target_id=candidate.id,
+                content=follow_up,
+                influence="scheduler_boost",
+            )
+        )
+    superseded_tasks = [
+        replace(
+            task,
+            status="superseded",
+            error=f"superseded by approved goal revision {revision.id}",
+            worker_state=_task_worker_state(
+                task,
+                phase="superseded",
+                last_event="goal_revision_superseded",
+                goal_revision_id=revision.id,
+            ),
+        )
+        if task.id in set(affected_task_ids)
+        else task
+        for task in state.task_queue
+    ]
+    return replace(
+        state,
+        goal=candidate,
+        plan=candidate_plan,
+        safety=safety,
+        user_feedback=feedback,
+        goal_revisions=[*state.goal_revisions, revision],
+        task_queue=superseded_tasks,
+    )
+
+
 def _write_state(path: Path, state: RunState) -> None:
     _write_agent_transcripts(path.parent, state)
-    path.write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+    _write_activity_ledger(path.parent / "activity.jsonl", state)
+    coordinator = SQLiteTaskCoordinator(path.parent / "coordination.sqlite3")
+    coordinator.sync_tasks(state.task_queue)
+    if state.tool_budget is not None:
+        coordinator.configure_budget(
+            "agent_tools",
+            state.tool_budget.limit,
+            used=state.tool_budget.used,
+        )
+    atomic_write_json(path, state.to_dict())
+
+
+def _reconcile_coordinator_results(run_dir: Path, state: RunState) -> RunState:
+    database = run_dir / "coordination.sqlite3"
+    if not database.exists():
+        return state
+    coordinated_tasks = SQLiteTaskCoordinator(database).list_tasks()
+    if not coordinated_tasks:
+        return state
+    coordinated_by_id = {task.id: task for task in coordinated_tasks}
+    task_queue = [coordinated_by_id.get(task.id, task) for task in state.task_queue]
+    known_task_ids = {task.id for task in task_queue}
+    task_queue.extend(task for task in coordinated_tasks if task.id not in known_task_ids)
+
+    reviews_by_id = {review.id: review for review in state.reviews}
+    traces_by_id = {trace.id: trace for trace in state.agent_traces}
+    root = run_dir.resolve()
+    for task in coordinated_tasks:
+        if task.status != "completed" or task.payload.get("packet_type") not in {
+            "deterministic_review",
+            "provider_review",
+        }:
+            continue
+        for result_ref in task.result_refs:
+            candidate = Path(result_ref)
+            if not candidate.is_absolute():
+                candidate = run_dir / candidate
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                continue
+            if root not in resolved.parents or not resolved.is_file() or resolved.suffix != ".json":
+                continue
+            try:
+                data = json.loads(resolved.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(data, dict):
+                raise RuntimeError(f"Invalid worker result object for task {task.id}")
+            expected_provider = str(task.payload.get("required_provider", "deterministic"))
+            if (
+                data.get("schema_version") != 1
+                or data.get("task_id") != task.id
+                or data.get("packet_digest") != task.payload.get("packet_digest")
+                or data.get("hypothesis_id") != task.payload.get("hypothesis_id")
+                or data.get("provider") != expected_provider
+            ):
+                raise RuntimeError(f"Worker result attestation failed for task {task.id}")
+            raw_reviews = data.get("reviews", []) if isinstance(data, dict) else []
+            if not isinstance(raw_reviews, list):
+                raise RuntimeError(f"Worker result reviews are invalid for task {task.id}")
+            packet_evidence_ids = {
+                str(item.get("id", ""))
+                for item in task.payload.get("evidence", [])
+                if isinstance(item, dict)
+            }
+            hypothesis_data = task.payload.get("hypothesis", {})
+            if isinstance(hypothesis_data, dict):
+                packet_evidence_ids.update(
+                    str(item) for item in hypothesis_data.get("evidence_refs", [])
+                )
+            requested_review_types = [
+                str(item) for item in task.payload.get("review_types", [])
+            ]
+            if len(raw_reviews) != len(requested_review_types):
+                raise RuntimeError(f"Worker result review count mismatch for task {task.id}")
+            for review_index, raw_review in enumerate(raw_reviews):
+                if not isinstance(raw_review, dict):
+                    raise RuntimeError(f"Worker result review is invalid for task {task.id}")
+                try:
+                    review = Review.from_dict(raw_review)
+                except (TypeError, ValueError, KeyError):
+                    raise RuntimeError(f"Worker result review could not be loaded for task {task.id}")
+                expected_review_type = requested_review_types[review_index]
+                acceptable_review_types = {
+                    expected_review_type,
+                    f"llm_{expected_review_type}",
+                }
+                if (
+                    review.hypothesis_id != task.payload.get("hypothesis_id")
+                    or review.decision not in {"accept", "revise", "reject"}
+                    or review.review_type not in acceptable_review_types
+                    or not set(review.evidence_refs).issubset(packet_evidence_ids)
+                ):
+                    raise RuntimeError(f"Worker result review validation failed for task {task.id}")
+                reviews_by_id.setdefault(review.id, review)
+            raw_trace = data.get("agent_trace") if isinstance(data, dict) else None
+            if isinstance(raw_trace, dict):
+                try:
+                    trace = AgentTrace.from_dict(raw_trace)
+                except (TypeError, ValueError, KeyError):
+                    pass
+                else:
+                    traces_by_id.setdefault(trace.id, trace)
+    return replace(
+        state,
+        task_queue=task_queue,
+        reviews=list(reviews_by_id.values()),
+        agent_traces=list(traces_by_id.values()),
+    )
+
+
+def _apply_pending_goal_commands(
+    run_dir: Path,
+    state: RunState,
+    *,
+    safety_policies: list[SafetyPolicy],
+) -> RunState:
+    coordinator = SQLiteTaskCoordinator(run_dir / "coordination.sqlite3")
+    current = state
+    for command in coordinator.pending_human_commands("goal_revision"):
+        sequence = int(command["sequence"])
+        payload = command["payload"]
+        patch = payload.get("patch", {})
+        message = str(payload.get("message", "Goal revision"))
+        if not isinstance(patch, dict):
+            coordinator.complete_human_command(
+                sequence,
+                error="Goal revision patch must be an object",
+            )
+            continue
+        try:
+            current = apply_goal_revision_to_state(
+                current,
+                patch,
+                user_message=message,
+                safety_policies=safety_policies,
+            )
+        except (TypeError, ValueError) as exc:
+            coordinator.complete_human_command(sequence, error=str(exc))
+            continue
+        revision = current.goal_revisions[-1]
+        coordinator.complete_human_command(
+            sequence,
+            result={
+                "goal_revision_id": revision.id,
+                "approval_status": revision.approval_status,
+            },
+        )
+    return current
+
+
+def _run_review_packet_processes(
+    run_dir: Path,
+    *,
+    process_count: int,
+    task_ids: list[str],
+    provider: str,
+    model: str,
+    max_tokens: int,
+    env_file: str,
+    provider_call_budget: int,
+) -> None:
+    unique_task_ids = list(dict.fromkeys(task_ids))
+    workers = min(max(int(process_count), 1), max(len(unique_task_ids), 1))
+    coordinator = SQLiteTaskCoordinator(run_dir / "coordination.sqlite3")
+    coordinator.set_resource_limits(
+        {"review": workers, "state_mutation": 1}
+    )
+    if is_llm_provider(provider):
+        if provider_call_budget <= 0:
+            raise ValueError("Provider review processes require a positive provider call budget")
+        coordinator.configure_budget("provider_calls", provider_call_budget)
+    assignments = [unique_task_ids[index::workers] for index in range(workers)]
+    processes = [
+        (
+            assignment,
+            subprocess.Popen(
+                [
+                sys.executable,
+                "-m",
+                "code_scientist.cli",
+                "worker",
+                str(run_dir),
+                "--worker-id",
+                f"review-process-{index + 1}",
+                "--max-tasks",
+                str(len(assignment)),
+                "--provider",
+                provider,
+                "--model",
+                model,
+                "--max-tokens",
+                str(max_tokens),
+                "--env-file",
+                env_file,
+                "--provider-call-budget",
+                str(provider_call_budget),
+                *[
+                    argument
+                    for task_id in assignment
+                    for argument in ("--task-id", task_id)
+                ],
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            ),
+        )
+        for index, assignment in enumerate(assignments)
+        if assignment
+    ]
+    failures: list[str] = []
+    for assignment, process in processes:
+        try:
+            stdout, stderr = process.communicate(timeout=300)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            try:
+                process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+            failures.append(f"worker timed out for tasks: {', '.join(assignment)}")
+            continue
+        if process.returncode != 0:
+            failures.append(stderr.strip() or stdout.strip() or f"exit {process.returncode}")
+    incomplete = [
+        task_id
+        for task_id in unique_task_ids
+        if (task := coordinator.get_task(task_id)) is None or task.status != "completed"
+    ]
+    if incomplete:
+        failures.append(f"review tasks did not complete: {', '.join(incomplete)}")
+    if failures:
+        raise RuntimeError(f"Review worker process failed: {'; '.join(failures)}")
+
+
+def _write_activity_ledger(path: Path, state: RunState) -> None:
+    """Append newly observable run events without rewriting prior audit history."""
+    existing_ids: set[str] = set()
+    existing_count = 0
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            existing_count += 1
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            event_id = str(record.get("id", "")) if isinstance(record, dict) else ""
+            if event_id:
+                existing_ids.add(event_id)
+
+    pending: list[dict[str, Any]] = []
+
+    def add(event_type: str, subject_id: str, status: str, details: dict[str, Any]) -> None:
+        event_id = stable_id(
+            "event",
+            f"{event_type}:{subject_id}:{status}:{json.dumps(details, sort_keys=True)}",
+        )
+        if event_id in existing_ids:
+            return
+        existing_ids.add(event_id)
+        pending.append(
+            {
+                "id": event_id,
+                "sequence": existing_count + len(pending) + 1,
+                "event_type": event_type,
+                "subject_id": subject_id,
+                "status": status,
+                "details": details,
+            }
+        )
+
+    add("run_status", state.goal.id, state.run_status, {"objective": state.goal.objective})
+    if state.safety is not None:
+        add(
+            "goal_safety",
+            state.goal.id,
+            "allowed" if state.safety.allowed else "blocked",
+            {"reason": state.safety.reason, "flags": state.safety.flags},
+        )
+    for finding in state.evidence_safety_findings:
+        add(
+            "evidence_safety",
+            finding.id,
+            "allowed" if finding.allowed else "blocked",
+            {
+                "evidence_id": finding.evidence_id,
+                "source": finding.source,
+                "flags": finding.flags,
+                "reason": finding.reason,
+            },
+        )
+    for task in state.task_queue:
+        add(
+            "task_transition",
+            task.id,
+            task.status,
+            {
+                "kind": task.kind,
+                "attempts": task.attempts,
+                "error": task.error,
+                "result_refs": task.result_refs,
+                "last_event": str(task.worker_state.get("last_event", "")),
+                "depends_on": task.depends_on,
+                "resource_class": task.resource_class,
+            },
+        )
+    for call in state.agent_tool_calls:
+        add(
+            "agent_tool_call",
+            call.id,
+            call.status,
+            {
+                "agent": call.agent,
+                "tool": call.tool,
+                "query": call.query,
+                "source_ref": call.source_ref,
+                "task_id": call.task_id,
+                "evidence_refs": call.evidence_refs,
+                "budget_before": call.budget_before,
+                "budget_after": call.budget_after,
+                "error": call.error,
+            },
+        )
+    for item in state.evidence:
+        if item.kind.startswith(("web_", "literature_", "tool_result_", "agent_empirical_")):
+            add(
+                "source_ingestion",
+                item.id,
+                "available",
+                {"kind": item.kind, "source": item.source, "citation": item.metadata.get("citation", "")},
+            )
+    for feedback in state.user_feedback:
+        add(
+            "user_feedback",
+            feedback.id,
+            "recorded",
+            {
+                "kind": feedback.kind,
+                "target_id": feedback.target_id,
+                "influence": feedback.influence,
+            },
+        )
+
+    if not pending:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        for event in pending:
+            handle.write(json.dumps(event, sort_keys=True) + "\n")
 
 
 def _write_agent_transcripts(run_dir: Path, state: RunState) -> None:
@@ -1561,6 +2474,8 @@ def _ensure_continuous_state(
     web_search_crawl_depth: int = 0,
     literature_search_queries: list[str] | None = None,
     literature_full_text: bool = False,
+    agent_retrieval: bool = False,
+    tool_budget: int = 0,
     safety_llm_client: Any | None = None,
     max_tokens: int = 1024,
 ) -> RunState:
@@ -1574,6 +2489,26 @@ def _ensure_continuous_state(
     plan = ResearchPlanConfig.from_goal(goal)
     safety_policies = load_safety_policies(safety_policy_paths or [])
     safety_fail_closed = any(policy.fail_closed for policy in safety_policies)
+    retrieval_budget_enabled = agent_retrieval and tool_budget > 0
+    agent_repo_enabled = retrieval_budget_enabled and bool(repo_search_paths) and _plan_allows_source_request(
+        plan,
+        ("repo_search", "local_repo_search", "repository", "local_repository", "local"),
+        ("repo_search", "local_repo_search", "repository_search"),
+    )
+    agent_web_enabled = retrieval_budget_enabled and bool(web_search_queries) and _plan_allows_source_request(
+        plan,
+        ("web_search", "web_search_result", "web", "search"),
+        ("web_search",),
+    )
+    agent_literature_enabled = (
+        retrieval_budget_enabled
+        and bool(literature_search_queries)
+        and _plan_allows_source_request(
+            plan,
+            ("literature", "literature_search", "openalex", "publication", "full_text"),
+            ("literature_search", "openalex_literature_search", "openalex"),
+        )
+    )
     seed_evidence = seed_paper_evidence()
     initial_state = RunState(
         goal=goal,
@@ -1581,6 +2516,11 @@ def _ensure_continuous_state(
         plan=plan,
         evidence=seed_evidence,
         benchmark_results=benchmark_results or [],
+        tool_budget=(
+            ToolBudgetState(limit=max(tool_budget, 0), used=0)
+            if agent_retrieval and tool_budget > 0
+            else None
+        ),
     )
     _write_state(state_path, initial_state)
     governed_evidence, governance_findings = _collect_plan_governed_evidence(
@@ -1588,13 +2528,13 @@ def _ensure_continuous_state(
         plan=plan,
         evidence_paths=evidence_paths or [],
         evidence_index_paths=evidence_index_paths or [],
-        repo_search_paths=repo_search_paths or [],
+        repo_search_paths=[] if agent_repo_enabled else repo_search_paths or [],
         web_evidence_urls=web_evidence_urls or [],
         web_crawl_depth=web_crawl_depth,
-        web_search_queries=web_search_queries or [],
+        web_search_queries=[] if agent_web_enabled else web_search_queries or [],
         web_search_fetch=web_search_fetch,
         web_search_crawl_depth=web_search_crawl_depth,
-        literature_search_queries=literature_search_queries or [],
+        literature_search_queries=[] if agent_literature_enabled else literature_search_queries or [],
         literature_full_text=literature_full_text,
         safety_policies=safety_policies,
     )
@@ -1715,13 +2655,13 @@ def _build_model_client(
     model: str | None,
     env_file: str | Path,
     llm_client: Any | None,
+    bridge_dir: str | Path | None = None,
 ) -> Any | None:
     if provider == "deterministic":
         return None
-    if provider == "anthropic":
-        return llm_client or AnthropicHaikuClient.from_environment(
-            model=model or DEFAULT_ANTHROPIC_MODEL,
-            env_path=env_file,
+    if is_llm_provider(provider):
+        return llm_client or create_llm_client(
+            provider, model=model, env_file=env_file, bridge_dir=bridge_dir
         )
     raise ValueError(f"Unknown provider: {provider}")
 
@@ -1732,7 +2672,7 @@ def _plan_for_goal(
     model_client: Any | None,
     max_tokens: int,
 ) -> ResearchPlanConfig:
-    if provider == "anthropic" and model_client is not None:
+    if is_llm_provider(provider) and model_client is not None:
         try:
             return parse_research_plan_with_llm(goal, model_client, max_tokens=max_tokens)
         except LLMResponseError:
@@ -1749,9 +2689,13 @@ def _build_generation_agent(
 ) -> GenerationAgent:
     if provider == "deterministic":
         return GenerationAgent()
-    if provider == "anthropic":
+    if is_llm_provider(provider):
         client = llm_client or _build_model_client(provider, model, env_file, llm_client)
-        return GenerationAgent(llm_client=client, llm_max_tokens=max_tokens, llm_origin="anthropic-haiku")
+        return GenerationAgent(
+            llm_client=client,
+            llm_max_tokens=max_tokens,
+            llm_origin=llm_origin_for_provider(provider),
+        )
     raise ValueError(f"Unknown provider: {provider}")
 
 
@@ -1927,6 +2871,39 @@ def _review_for_plan(
         with lock_context:
             agent_traces.append(trace)
     return reviews
+
+
+def _portable_review_evidence(
+    hypothesis: Hypothesis,
+    evidence_store: EvidenceStore,
+    objective: str,
+    limit: int = 12,
+) -> list[Evidence]:
+    snapshot = evidence_store.snapshot()
+    by_id = {item.id: item for item in snapshot}
+    selected = [
+        by_id[ref]
+        for ref in hypothesis.evidence_refs
+        if ref in by_id
+    ]
+    seen = {item.id for item in selected}
+    query_tokens = set(
+        re.findall(
+            r"[a-z0-9_]{4,}",
+            f"{objective} {hypothesis.title} {hypothesis.claim}".lower(),
+        )
+    )
+    ranked = sorted(
+        (item for item in snapshot if item.id not in seen),
+        key=lambda item: (
+            -len(
+                query_tokens
+                & set(re.findall(r"[a-z0-9_]{4,}", item.content.lower()))
+            ),
+            item.id,
+        ),
+    )
+    return [*selected, *ranked][: max(int(limit), 1)]
 
 
 _FEEDBACK_STOPWORDS = {
@@ -2259,6 +3236,8 @@ def _generation_method_for_origin(origin: str, active_modes: list[str]) -> str |
     if "paper_seeded_idea_generation" in active_modes and clean in {
         "anthropic",
         "anthropic-haiku",
+        "claude-cli",
+        "codex-cli",
         "llm",
         "openai",
     }:
@@ -2903,6 +3882,8 @@ def create_task(
     payload: dict[str, Any],
     result_refs: list[str] | None = None,
     status: str = "queued",
+    depends_on: list[str] | None = None,
+    resource_class: str = "default",
 ) -> Task:
     priority = _task_priority(plan, kind)
     task_payload = {"cycle": cycle, **payload}
@@ -2912,6 +3893,10 @@ def create_task(
         f"{cycle}:{kind}:{priority}:"
         f"{json.dumps(identity_payload, sort_keys=True)}:{','.join(refs)}"
     )
+    if depends_on or (resource_class and resource_class != "default"):
+        task_identity += (
+            f":{','.join(_unique_refs(depends_on or []))}:{resource_class or 'default'}"
+        )
     return Task(
         id=stable_id("task", task_identity),
         kind=kind,
@@ -2925,11 +3910,37 @@ def create_task(
             "attempt": 0,
             "cycle": cycle,
         },
+        depends_on=_unique_refs(depends_on or []),
+        resource_class=resource_class or "default",
     )
 
 
 def _task_identity_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    non_identity_keys = {"agent_feedback", "generation_allocations"}
+    if payload.get("packet_digest"):
+        return {
+            "cycle": payload.get("cycle"),
+            "hypothesis_id": payload.get("hypothesis_id"),
+            "review_types": payload.get("review_types", []),
+            "required_provider": payload.get("required_provider", "deterministic"),
+            "required_model": payload.get("required_model", ""),
+            "packet_digest": payload.get("packet_digest"),
+        }
+    non_identity_keys = {
+        "agent_feedback",
+        "generation_allocations",
+        "packet_type",
+        "goal",
+        "hypothesis",
+        "evidence",
+        "output_path",
+        "provider",
+        "model",
+        "max_tokens",
+        "env_file",
+        "safety_policy_paths",
+        "matches",
+        "prior_reviews",
+    }
     return {key: value for key, value in payload.items() if key not in non_identity_keys}
 
 
@@ -2973,6 +3984,7 @@ def score_task_priority(
 
     score += _proximity_cluster_bonus(task, hypothesis_refs, proximity_edges or [])
     score += _user_feedback_priority_delta(task, hypothesis_refs, user_feedback or [])
+    score += _next_action_priority_delta(task, context_snapshots or [])
     return round(max(score, 0.001), 3)
 
 
@@ -3019,6 +4031,7 @@ def select_scheduler_task_pool(
     max_pool_size: int = 1,
     candidate_task_ids: set[str] | None = None,
     candidate_kinds: set[str] | None = None,
+    resource_limits: dict[str, int] | None = None,
 ) -> list[Task]:
     rescored = rescore_task_queue(
         tasks,
@@ -3034,12 +4047,25 @@ def select_scheduler_task_pool(
         task
         for task in rescored
         if task.status == "queued"
+        and _task_dependencies_satisfied(task, rescored)
         and (candidate_task_ids is None or task.id in candidate_task_ids)
         and (candidate_kinds is None or task.kind in candidate_kinds)
     ]
     if not queued:
         return []
-    selected = sorted(queued, key=lambda task: (-task.priority, task.id))[: max(max_pool_size, 1)]
+    selected: list[Task] = []
+    resource_usage: Counter[str] = Counter()
+    for task in sorted(queued, key=lambda candidate: (-candidate.priority, candidate.id)):
+        resource_limit = max(
+            int((resource_limits or {}).get(task.resource_class, max_pool_size)),
+            1,
+        )
+        if resource_usage[task.resource_class] >= resource_limit:
+            continue
+        selected.append(task)
+        resource_usage[task.resource_class] += 1
+        if len(selected) >= max(max_pool_size, 1):
+            break
     return [
         replace(
             task,
@@ -3059,6 +4085,7 @@ def select_scheduler_task_pool(
                         proximity_edges=proximity_edges,
                         user_feedback=user_feedback,
                         current_cycle=current_cycle,
+                        context_snapshots=context_snapshots,
                     ),
                 },
             ),
@@ -3076,8 +4103,12 @@ def _scheduler_decision_signals(
     proximity_edges: list[ProximityEdge] | None = None,
     user_feedback: list[UserFeedback] | None = None,
     current_cycle: int | None = None,
+    context_snapshots: list[ContextSnapshot] | None = None,
 ) -> list[str]:
     signals = [f"weight:{_task_weight_key(task.kind)}"]
+    if task.depends_on:
+        signals.append(f"dependencies_satisfied:{len(task.depends_on)}")
+    signals.append(f"resource:{task.resource_class}")
     hypothesis_refs = _task_hypothesis_refs(task)
     hypotheses_by_id = {item.id: item for item in hypotheses or []}
     related_hypotheses = [
@@ -3120,7 +4151,31 @@ def _scheduler_decision_signals(
         for item in user_feedback or []
         if _feedback_applies_to_task(item, task, hypothesis_refs)
     )
+    signals.extend(
+        f"next_action:{action}"
+        for action in _matching_next_actions(task, context_snapshots or [])
+    )
     return signals
+
+
+def _next_action_priority_delta(task: Task, snapshots: list[ContextSnapshot]) -> float:
+    return min(0.25 * len(_matching_next_actions(task, snapshots)), 0.5)
+
+
+def _matching_next_actions(task: Task, snapshots: list[ContextSnapshot]) -> list[str]:
+    if not snapshots:
+        return []
+    actions_by_kind = {
+        "generate_or_evolve_more_candidates": {"generate", "evolution"},
+        "run_proximity_guided_tournament_matches": {"proximity", "ranking"},
+        "reuse_meta_review_feedback_in_next_cycle": {"meta_review", "generate", "review"},
+        "render_research_overview_for_human_review": {"overview", "research_outputs"},
+    }
+    return [
+        action
+        for action in snapshots[-1].next_actions
+        if task.kind in actions_by_kind.get(action, set())
+    ]
 
 
 def start_task(task: Task) -> Task:
@@ -3233,11 +4288,35 @@ def pick_next_task(tasks: list[Task]) -> Task | None:
     return sorted(queued, key=lambda task: (-task.priority, task.id))[0]
 
 
-def _pick_next_tasks(tasks: list[Task], limit: int) -> list[Task]:
-    queued = [task for task in tasks if task.status == "queued"]
+def _pick_next_tasks(
+    tasks: list[Task],
+    limit: int,
+    *,
+    dependency_tasks: list[Task] | None = None,
+    resource_limits: dict[str, int] | None = None,
+) -> list[Task]:
+    dependency_queue = dependency_tasks if dependency_tasks is not None else tasks
+    queued = [
+        task
+        for task in tasks
+        if task.status == "queued" and _task_dependencies_satisfied(task, dependency_queue)
+    ]
     if not queued:
         return []
-    return sorted(queued, key=lambda task: (-task.priority, task.id))[: max(limit, 1)]
+    selected: list[Task] = []
+    resource_usage: Counter[str] = Counter()
+    for task in sorted(queued, key=lambda candidate: (-candidate.priority, candidate.id)):
+        resource_limit = max(
+            int((resource_limits or {}).get(task.resource_class, limit)),
+            1,
+        )
+        if resource_usage[task.resource_class] >= resource_limit:
+            continue
+        selected.append(task)
+        resource_usage[task.resource_class] += 1
+        if len(selected) >= max(limit, 1):
+            break
+    return selected
 
 
 def run_task_worker(
@@ -3249,6 +4328,7 @@ def run_task_worker(
     eligible_task_ids: set[str] | None = None,
     defer_when: Callable[[], str | None] | None = None,
     max_concurrency: int = 1,
+    resource_limits: dict[str, int] | None = None,
 ) -> list[Task]:
     task_queue = list(tasks)
     if persist:
@@ -3260,7 +4340,12 @@ def run_task_worker(
             if eligible_task_ids is None
             else [task for task in task_queue if task.id in eligible_task_ids]
         )
-        selected_tasks = _pick_next_tasks(eligible_tasks, max_concurrency)
+        selected_tasks = _pick_next_tasks(
+            eligible_tasks,
+            max_concurrency,
+            dependency_tasks=task_queue,
+            resource_limits=resource_limits,
+        )
         if not selected_tasks:
             return task_queue
         if defer_when:
@@ -3330,6 +4415,13 @@ def _execute_running_task(
 
 def _replace_task(tasks: list[Task], updated: Task) -> list[Task]:
     return [updated if task.id == updated.id else task for task in tasks]
+
+
+def _task_dependencies_satisfied(task: Task, tasks: list[Task]) -> bool:
+    if not task.depends_on:
+        return True
+    status_by_id = {candidate.id: candidate.status for candidate in tasks}
+    return all(status_by_id.get(dependency_id) == "completed" for dependency_id in task.depends_on)
 
 
 def _defer_queued_tasks(
@@ -3441,7 +4533,7 @@ def _user_feedback_priority_delta(
         if ranking_delta:
             delta += ranking_delta
             continue
-        if item.target_id not in target_ids:
+        if item.target_id not in target_ids and not _goal_feedback_targets_task(item, task):
             continue
         text = f"{item.kind} {item.influence} {item.content}".lower()
         if any(marker in text for marker in ("deprioritize", "ignore", "low priority", "scheduler_penalty")):
@@ -3491,7 +4583,38 @@ def _preference_ranking_delta(item: UserFeedback, hypothesis_refs: list[str]) ->
 def _feedback_applies_to_task(item: UserFeedback, task: Task, hypothesis_refs: list[str]) -> bool:
     if _preference_ranking_delta(item, hypothesis_refs):
         return True
-    return item.target_id in {task.id, task.kind, *hypothesis_refs}
+    return (
+        item.target_id in {task.id, task.kind, *hypothesis_refs}
+        or _goal_feedback_targets_task(item, task)
+    )
+
+
+def _goal_feedback_targets_task(item: UserFeedback, task: Task) -> bool:
+    if not item.target_id.startswith("goal-") or item.kind not in {
+        "goal_refinement",
+        "follow_up_direction",
+        "command_note",
+        "constraint",
+        "preference",
+    }:
+        return False
+    text = item.content.lower()
+    routed_kinds = {
+        "review": ("verify", "review", "evidence", "assumption", "safety"),
+        "generate": ("generate", "idea", "hypothesis", "explore"),
+        "evolution": ("evolve", "refine", "combine", "improve"),
+        "ranking": ("rank", "compare", "tournament", "prefer"),
+        "proximity": ("cluster", "similar", "duplicate", "diversity"),
+        "meta_review": ("meta", "synthesize", "weakness"),
+        "overview": ("overview", "report", "summary"),
+        "research_outputs": ("publication", "grant", "contact", "output"),
+    }
+    matched_kinds = {
+        kind
+        for kind, markers in routed_kinds.items()
+        if any(marker in text for marker in markers)
+    }
+    return not matched_kinds or task.kind in matched_kinds
 
 
 def _task_weight_key(kind: str) -> str:

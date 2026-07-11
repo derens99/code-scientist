@@ -82,6 +82,19 @@ export type Review = {
   review_trace?: string[];
   confidence?: number;
   requires_revision?: boolean;
+  assumption_checks?: AssumptionCheck[];
+};
+
+export type AssumptionCheck = {
+  id: string;
+  assumption: string;
+  parent_assumption: string;
+  depth: number;
+  verdict: string;
+  fundamental: boolean;
+  invalidates_hypothesis: boolean;
+  evidence_refs: string[];
+  reasoning: string;
 };
 
 export type Match = {
@@ -180,6 +193,10 @@ export type SafetyEvaluationResult = {
   pass_rate: number;
   failed_case_ids: string[];
   notes: string[];
+  topic_results?: Record<string, { case_count: number; passed_count: number; failed_count: number; pass_rate: number }>;
+  base_pass_rate?: number;
+  variant_pass_rate?: number;
+  degradation_rate?: number;
 };
 
 export type FeedbackLoopEvaluation = {
@@ -288,6 +305,28 @@ export type RetrievalMemoryRecord = {
   reason: string;
 };
 
+export type ToolBudgetState = {
+  limit: number;
+  used: number;
+};
+
+export type AgentToolCall = {
+  id: string;
+  cycle: number;
+  task_id: string;
+  agent: string;
+  tool: string;
+  query: string;
+  rationale: string;
+  status: string;
+  source_ref?: string;
+  evidence_refs: string[];
+  blocked_reasons: string[];
+  budget_before: number;
+  budget_after: number;
+  error: string;
+};
+
 export type Task = {
   id: string;
   kind: string;
@@ -298,12 +337,28 @@ export type Task = {
   result_refs: string[];
   error: string;
   worker_state?: Record<string, unknown>;
+  depends_on?: string[];
+  resource_class?: string;
 };
 
 export type SafetyDecision = {
   allowed: boolean;
   reason: string;
   flags: string[];
+};
+
+export type GoalRevision = {
+  id: string;
+  revision: number;
+  prior_goal_id: string;
+  new_goal_id: string;
+  prior_plan_id: string;
+  new_plan_id: string;
+  user_message: string;
+  structured_changes: Record<string, unknown>;
+  approval_status: string;
+  safety: SafetyDecision;
+  affected_task_ids: string[];
 };
 
 export type ContextSnapshot = {
@@ -344,8 +399,11 @@ export type RunState = {
   safety: SafetyDecision | null;
   research_overview?: ResearchOverview | null;
   user_feedback?: UserFeedback[];
+  goal_revisions?: GoalRevision[];
   agent_traces?: AgentTrace[];
   retrieval_memory?: RetrievalMemoryRecord[];
+  tool_budget?: ToolBudgetState | null;
+  agent_tool_calls?: AgentToolCall[];
   task_queue?: Task[];
 };
 

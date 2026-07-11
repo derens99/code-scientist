@@ -27,6 +27,16 @@ export type StartRunPayload = {
   prospectiveEvaluationPaths: string[];
   feedbackLoopEvaluationPaths: string[];
   feedbackLoopReviewPaths: string[];
+  agentRetrieval: boolean;
+  toolBudget: number;
+  agentValidationManifestPaths: string[];
+  agentRetrievalIterations: number;
+  agentFetchDomains: string[];
+  reviewProcesses: number;
+  providerCallBudget: number;
+  pdfVision: boolean;
+  pdfVisionMaxRegions: number;
+  pdfVisionCallBudget: number;
 };
 
 export type UserFeedbackPayload = {
@@ -61,9 +71,15 @@ export type ManualReviewPayload = {
 };
 
 export type RunGuidancePayload = {
+  objective: string;
   preferences: string[];
   constraints: string[];
+  metrics: string[];
+  safetyNotes: string[];
   allowedSources: string[];
+  allowedTools: string[];
+  outputFormats: string[];
+  terminationCriteria: string[];
   followUpDirection: string;
 };
 

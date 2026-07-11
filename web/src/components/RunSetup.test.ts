@@ -34,5 +34,11 @@ describe("RunSetup", () => {
     expect(markup).toContain("Prospective evaluation fixtures");
     expect(markup).toContain("Feedback-loop evaluation fixtures");
     expect(markup).toContain("Feedback-loop blind review fixtures");
+    expect(markup).toContain("Agent-driven iterative retrieval");
+    expect(markup).toContain("Agent tool budget");
+    expect(markup).toContain("Agent validation manifest paths");
+    expect(markup).toContain("Retrieval iterations per task");
+    expect(markup).toContain("Agent fetch domains");
+    expect(markup).toContain("Review worker processes");
   });
 });

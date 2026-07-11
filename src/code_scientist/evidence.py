@@ -29,6 +29,11 @@ PDF_EXTENSIONS = {".pdf"}
 SKIP_DIRS = {".git", ".next", ".venv", "__pycache__", "node_modules"}
 LOCAL_EMBEDDING_MODEL = "local-hashed-char-ngram-v1"
 LOCAL_EMBEDDING_DIMENSIONS = 256
+PDF_OCR_DPI = 200
+PDF_MAX_PAGES = 200
+PDF_MAX_RENDER_PIXELS = 20_000_000
+_OCR_ENGINE: object | None = None
+_OCR_ENGINE_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -52,7 +57,28 @@ class EvidenceBundle:
 class EvidenceStore:
     def __init__(self, evidence: Iterable[Evidence] = ()) -> None:
         self.evidence = list(evidence)
+        self._evidence_lock = threading.RLock()
         self._retrieval_local = threading.local()
+
+    def snapshot(self) -> list[Evidence]:
+        with self._evidence_lock:
+            return list(self.evidence)
+
+    def add_many(self, evidence: Iterable[Evidence]) -> list[Evidence]:
+        with self._evidence_lock:
+            existing_ids = {item.id for item in self.evidence}
+            added: list[Evidence] = []
+            for item in evidence:
+                if item.id in existing_ids:
+                    continue
+                existing_ids.add(item.id)
+                self.evidence.append(item)
+                added.append(item)
+            return added
+
+    def get(self, evidence_id: str) -> Evidence | None:
+        with self._evidence_lock:
+            return next((item for item in self.evidence if item.id == evidence_id), None)
 
     def _retrieval_buffer(self) -> list[RetrievalMemoryRecord]:
         buffer = getattr(self._retrieval_local, "records", None)
@@ -114,17 +140,18 @@ class EvidenceStore:
 
     def to_index(self, name: str = "") -> dict[str, object]:
         index_name = name.strip() or "local evidence index"
-        evidence_ids = ",".join(item.id for item in self.evidence)
+        evidence = self.snapshot()
+        evidence_ids = ",".join(item.id for item in evidence)
         index_id = stable_id("evidx", f"{index_name}:{evidence_ids}")
         return {
             "schema_version": 1,
             "id": index_id,
             "name": index_name,
-            "evidence_count": len(self.evidence),
+            "evidence_count": len(evidence),
             "retrieval_methods": ["bm25", "local_embedding", "hybrid"],
             "embedding_model": LOCAL_EMBEDDING_MODEL,
             "embedding_dimensions": LOCAL_EMBEDDING_DIMENSIONS,
-            "evidence": [item.to_dict() for item in self.evidence],
+            "evidence": [item.to_dict() for item in evidence],
         }
 
     def write_index(self, path: str | Path, name: str = "") -> None:
@@ -183,7 +210,7 @@ class EvidenceStore:
             return []
 
         ranked: list[tuple[float, str, Evidence]] = []
-        for item in self.evidence:
+        for item in self.snapshot():
             item_vector = _local_embedding_vector(" ".join([item.content, item.notes, item.source]))
             score = _cosine_similarity(query_vector, item_vector)
             if score > 0:
@@ -199,8 +226,9 @@ class EvidenceStore:
     def search_hybrid(self, query: str, limit: int = 5) -> list[Evidence]:
         if limit <= 0:
             return []
-        bm25_ranked = self._bm25_ranked(query, limit=max(limit, len(self.evidence)))
-        embedding_ranked = self._embedding_ranked(query, limit=max(limit, len(self.evidence)))
+        evidence_count = len(self.snapshot())
+        bm25_ranked = self._bm25_ranked(query, limit=max(limit, evidence_count))
+        embedding_ranked = self._embedding_ranked(query, limit=max(limit, evidence_count))
         scores: dict[str, float] = {}
         items_by_id: dict[str, Evidence] = {}
         for score, item in bm25_ranked:
@@ -224,7 +252,7 @@ class EvidenceStore:
             return []
         corpus_counts: list[tuple[Evidence, Counter[str]]] = [
             (item, Counter(_tokens(" ".join([item.content, item.notes, item.source]))))
-            for item in self.evidence
+            for item in self.snapshot()
         ]
         document_frequency: Counter[str] = Counter()
         for _item, token_counts in corpus_counts:
@@ -258,7 +286,7 @@ class EvidenceStore:
             return []
 
         ranked: list[tuple[float, str, Evidence]] = []
-        for item in self.evidence:
+        for item in self.snapshot():
             item_vector = _local_embedding_vector(" ".join([item.content, item.notes, item.source]))
             score = _cosine_similarity(query_vector, item_vector)
             if score > 0:
@@ -336,8 +364,7 @@ class EvidenceStore:
         return records
 
     def add(self, evidence: Evidence) -> None:
-        if evidence.id not in {item.id for item in self.evidence}:
-            self.evidence.append(evidence)
+        self.add_many([evidence])
 
 
 def read_document_text(path: str | Path) -> str:
@@ -508,7 +535,7 @@ def _read_pdf_text(path: Path) -> str:
 
         reader = PdfReader(str(path))
         page_texts: list[str] = []
-        for page in reader.pages:
+        for page in list(reader.pages)[:PDF_MAX_PAGES]:
             try:
                 page_texts.append(page.extract_text() or "")
             except Exception:
@@ -517,7 +544,7 @@ def _read_pdf_text(path: Path) -> str:
             return "\n".join(page_texts)
     except Exception:
         pass
-    return path.read_bytes().decode("utf-8", errors="ignore")
+    return ""
 
 
 def _evidence_from_pdf(path: Path) -> list[Evidence]:
@@ -528,7 +555,7 @@ def _evidence_from_pdf(path: Path) -> list[Evidence]:
         evidence: list[Evidence] = []
         failed_pages: list[str] = []
         empty_pages: list[str] = []
-        for page_number, page in enumerate(reader.pages, start=1):
+        for page_number, page in enumerate(list(reader.pages)[:PDF_MAX_PAGES], start=1):
             try:
                 page_text = page.extract_text() or ""
             except Exception:
@@ -555,7 +582,14 @@ def _evidence_from_pdf(path: Path) -> list[Evidence]:
                     )
                 )
         if empty_pages:
-            evidence.append(_pdf_ocr_required_evidence(path, empty_pages))
+            ocr_evidence, unresolved_ocr_pages = _ocr_pdf_pages(
+                path,
+                [int(page_number) for page_number in empty_pages],
+            )
+            evidence.extend(ocr_evidence)
+            if unresolved_ocr_pages:
+                evidence.append(_pdf_ocr_required_evidence(path, unresolved_ocr_pages))
+        evidence.extend(_pdf_visual_evidence(path))
         if evidence:
             if empty_pages:
                 empty_page_text = ",".join(empty_pages)
@@ -590,10 +624,32 @@ def _evidence_from_pdf(path: Path) -> list[Evidence]:
         pass
 
     text = _read_pdf_text(path)
-    return [
+    fallback_evidence = [
         _evidence_for_chunk(path, start_line, end_line, content)
         for start_line, end_line, content in _ingestible_chunks(text)
     ]
+    return fallback_evidence or [_pdf_parse_error_evidence(path)]
+
+
+def _pdf_parse_error_evidence(path: Path) -> Evidence:
+    source = _source_for(path)
+    return Evidence(
+        id=stable_id("ev", f"{source}:pdf_parse_error"),
+        kind="pdf_parse_diagnostic",
+        source=source,
+        content=(
+            f"PDF {path.name} could not be parsed as a valid PDF document. No raw PDF bytes "
+            "were treated as trustworthy text."
+        ),
+        notes="PDF parsing failed; source requires repair or replacement",
+        metadata={
+            "path": source,
+            "extension": path.suffix.lower(),
+            "parser": "pdf_parse_error",
+            "citation": source,
+            "parse_failed": "true",
+        },
+    )
 
 
 def _pdf_ocr_required_evidence(path: Path, empty_pages: list[str]) -> Evidence:
@@ -621,6 +677,276 @@ def _pdf_ocr_required_evidence(path: Path, empty_pages: list[str]) -> Evidence:
             "requires_ocr": "true",
         },
     )
+
+
+def _ocr_pdf_pages(path: Path, page_numbers: list[int]) -> tuple[list[Evidence], list[str]]:
+    if not page_numbers:
+        return [], []
+    try:
+        import pymupdf  # type: ignore[import-not-found]
+
+        document = pymupdf.open(str(path))
+    except Exception:
+        return [], [str(page_number) for page_number in page_numbers]
+
+    evidence: list[Evidence] = []
+    unresolved: list[str] = []
+    try:
+        for page_number in page_numbers:
+            try:
+                page = document[page_number - 1]
+                estimated_pixels = (
+                    float(page.rect.width) / 72 * PDF_OCR_DPI
+                    * float(page.rect.height) / 72 * PDF_OCR_DPI
+                )
+                if estimated_pixels > PDF_MAX_RENDER_PIXELS:
+                    unresolved.append(str(page_number))
+                    continue
+                pixmap = page.get_pixmap(
+                    dpi=PDF_OCR_DPI,
+                    colorspace=pymupdf.csRGB,
+                    alpha=False,
+                )
+                output = _rapidocr_engine()(pixmap.tobytes("png"))
+                texts = [str(text).strip() for text in (output.txts or ()) if str(text).strip()]
+                if not texts:
+                    unresolved.append(str(page_number))
+                    continue
+                scores = [float(score) for score in (output.scores or ())]
+                boxes = _ocr_boxes_in_pdf_coordinates(
+                    output.boxes,
+                    pixmap.width,
+                    pixmap.height,
+                    float(page.rect.width),
+                    float(page.rect.height),
+                )
+                page_text = "\n".join(texts)
+                for start_line, end_line, content in _ingestible_chunks(page_text):
+                    item = _evidence_for_chunk(
+                        path,
+                        start_line,
+                        end_line,
+                        content,
+                        citation=f"{_source_for(path)}:page {page_number}",
+                        notes=f"OCR page {page_number} lines {start_line}-{end_line}",
+                        parser="pdf_page_ocr",
+                        metadata_extra={
+                            "page_number": str(page_number),
+                            "page_start_line": str(start_line),
+                            "page_end_line": str(end_line),
+                            "ocr_engine": "rapidocr-onnxruntime",
+                            "ocr_dpi": str(PDF_OCR_DPI),
+                            "ocr_mean_confidence": (
+                                f"{sum(scores) / len(scores):.4f}" if scores else ""
+                            ),
+                            "ocr_boxes": json.dumps(boxes, separators=(",", ":")),
+                            "requires_ocr": "false",
+                        },
+                    )
+                    evidence.append(replace(item, kind="pdf_ocr_text"))
+            except Exception:
+                unresolved.append(str(page_number))
+    finally:
+        document.close()
+    return evidence, unresolved
+
+
+def _rapidocr_engine():
+    global _OCR_ENGINE
+    with _OCR_ENGINE_LOCK:
+        if _OCR_ENGINE is None:
+            from rapidocr import RapidOCR  # type: ignore[import-not-found]
+
+            _OCR_ENGINE = RapidOCR()
+        return _OCR_ENGINE
+
+
+def _ocr_boxes_in_pdf_coordinates(
+    raw_boxes,
+    image_width: int,
+    image_height: int,
+    page_width: float,
+    page_height: float,
+) -> list[list[float]]:
+    if raw_boxes is None or not image_width or not image_height:
+        return []
+    boxes: list[list[float]] = []
+    for raw_box in raw_boxes:
+        points = raw_box.tolist() if hasattr(raw_box, "tolist") else raw_box
+        xs = [float(point[0]) for point in points]
+        ys = [float(point[1]) for point in points]
+        boxes.append(
+            [
+                round(min(xs) / image_width * page_width, 2),
+                round(min(ys) / image_height * page_height, 2),
+                round(max(xs) / image_width * page_width, 2),
+                round(max(ys) / image_height * page_height, 2),
+            ]
+        )
+    return boxes
+
+
+def _pdf_visual_evidence(path: Path) -> list[Evidence]:
+    try:
+        import pymupdf  # type: ignore[import-not-found]
+
+        document = pymupdf.open(str(path))
+    except Exception:
+        return []
+    evidence: list[Evidence] = []
+    try:
+        for page_index in range(min(document.page_count, PDF_MAX_PAGES)):
+            page_number = page_index + 1
+            page = document[page_index]
+            evidence.extend(_pdf_image_region_evidence(path, page, page_number))
+            evidence.extend(_pdf_table_region_evidence(path, page, page_number))
+    finally:
+        document.close()
+    return evidence
+
+
+def _pdf_image_region_evidence(path: Path, page, page_number: int) -> list[Evidence]:
+    source = _source_for(path)
+    evidence: list[Evidence] = []
+    seen_rectangles: set[tuple[float, float, float, float]] = set()
+    try:
+        images = page.get_images(full=True)
+    except Exception:
+        return []
+    for image_index, image in enumerate(images, start=1):
+        xref = int(image[0])
+        try:
+            rectangles = page.get_image_rects(xref)
+        except Exception:
+            rectangles = []
+        for region_index, rectangle in enumerate(rectangles, start=1):
+            bbox = tuple(round(float(value), 2) for value in rectangle)
+            if bbox in seen_rectangles:
+                continue
+            seen_rectangles.add(bbox)
+            page_area = max(float(page.rect.width) * float(page.rect.height), 1.0)
+            region_area = max((bbox[2] - bbox[0]) * (bbox[3] - bbox[1]), 0.0)
+            page_width = max(float(page.rect.width), 1.0)
+            page_height = max(float(page.rect.height), 1.0)
+            width_coverage = max(bbox[2] - bbox[0], 0.0) / page_width
+            height_coverage = max(bbox[3] - bbox[1], 0.0) / page_height
+            image_coverage = region_area / page_area
+            native_text = " ".join(str(page.get_text("text")).split())
+            is_page_scan = (
+                not native_text
+                and image_coverage >= 0.65
+                and max(width_coverage, height_coverage) >= 0.95
+            )
+            region_type = "page_scan" if is_page_scan else "raster_figure"
+            region_label = "scan" if is_page_scan else "figure"
+            citation = (
+                f"{source}:page {page_number}:{region_label} {image_index}.{region_index}"
+            )
+            caption = _pdf_nearby_caption(page, bbox, "figure") if not is_page_scan else ""
+            content = (
+                f"{'Scanned page image' if is_page_scan else 'Figure or raster image region'} "
+                f"{image_index}.{region_index} on page {page_number} of {path.name}; "
+                f"bounding box {bbox}."
+            )
+            if caption:
+                content += f" Nearby caption: {caption}."
+            if not is_page_scan:
+                content += (
+                    " Visual interpretation is required before using this region to support "
+                    "a scientific claim."
+                )
+            evidence.append(
+                Evidence(
+                    id=stable_id("ev", f"{citation}:{xref}:{bbox}"),
+                    kind="pdf_page_scan_region" if is_page_scan else "pdf_figure_region",
+                    source=source,
+                    content=content,
+                    notes=f"page {page_number} raster figure region",
+                    metadata={
+                        "path": source,
+                        "extension": path.suffix.lower(),
+                        "parser": "pdf_visual_region",
+                        "page_number": str(page_number),
+                        "citation": citation,
+                        "region_type": region_type,
+                        "bbox": json.dumps(bbox),
+                        "image_xref": str(xref),
+                        "page_coverage": f"{image_coverage:.4f}",
+                        "caption": caption,
+                        "requires_visual_interpretation": str(not is_page_scan).lower(),
+                    },
+                )
+            )
+    return evidence
+
+
+def _pdf_table_region_evidence(path: Path, page, page_number: int) -> list[Evidence]:
+    try:
+        finder = page.find_tables()
+        tables = list(finder.tables)
+    except Exception:
+        return []
+    source = _source_for(path)
+    evidence: list[Evidence] = []
+    for table_index, table in enumerate(tables, start=1):
+        try:
+            rows = table.extract()
+        except Exception:
+            rows = []
+        rendered_rows = [
+            " | ".join("" if cell is None else str(cell).strip() for cell in row)
+            for row in rows
+        ]
+        content = "\n".join(row for row in rendered_rows if row.strip(" |"))
+        if not content:
+            continue
+        bbox = tuple(round(float(value), 2) for value in table.bbox)
+        citation = f"{source}:page {page_number}:table {table_index}"
+        caption = _pdf_nearby_caption(page, bbox, "table")
+        evidence.append(
+            Evidence(
+                id=stable_id("ev", f"{citation}:{bbox}:{content}"),
+                kind="pdf_table_region",
+                source=source,
+                content=content,
+                notes=f"page {page_number} extracted table {table_index}",
+                metadata={
+                    "path": source,
+                    "extension": path.suffix.lower(),
+                    "parser": "pdf_table_extraction",
+                    "page_number": str(page_number),
+                    "citation": citation,
+                    "region_type": "table",
+                    "bbox": json.dumps(bbox),
+                    "row_count": str(len(rendered_rows)),
+                    "caption": caption,
+                    "requires_visual_interpretation": "false",
+                },
+            )
+        )
+    return evidence
+
+
+def _pdf_nearby_caption(page, bbox: tuple[float, float, float, float], label: str) -> str:
+    try:
+        blocks = page.get_text("blocks")
+    except Exception:
+        return ""
+    candidates: list[tuple[float, str]] = []
+    left, top, right, bottom = bbox
+    for block in blocks:
+        if len(block) < 5:
+            continue
+        block_left, block_top, block_right, block_bottom = map(float, block[:4])
+        text = " ".join(str(block[4]).split())
+        if not text:
+            continue
+        horizontally_near = block_right >= left - 40 and block_left <= right + 40
+        vertical_distance = min(abs(block_top - bottom), abs(top - block_bottom))
+        marker = text.lower().startswith((label.lower(), f"{label.lower()}.", "fig.", "fig "))
+        if horizontally_near and vertical_distance <= 80 and marker:
+            candidates.append((vertical_distance, text))
+    return min(candidates, default=(0.0, ""), key=lambda item: item[0])[1]
 
 
 def _source_for(path: Path) -> str:

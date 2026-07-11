@@ -1,5 +1,7 @@
 # Paper Alignment Audit — 2026-07-04
 
+> Superseded by `docs/paper-alignment-audit-2026-07-09-v2.md`, which audits the current checkout against the substantially revised 2026-06-29 arXiv v2 paper.
+
 Fresh audit of Code Scientist against "Towards an AI co-scientist" (arXiv 2502.18864, local text at `tmp/pdfs/2502.18864.clean.txt`), verified against the working tree at commit `64c8e55`. This supersedes the coverage assessment in `docs/paper-implementation-gap-analysis.md` (2026-06-25), which is stale in both directions: it understates some delivered work (task queue, scientist-in-the-loop, evidence safety) and overstates other coverage (hypothesis safety enforcement, meta-review feedback wiring, Elo/scaling evaluation methods).
 
 Verification at audit time: `uv run pytest -q` 303 passed; web `npm test` 31 passed; web typecheck clean.

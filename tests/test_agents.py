@@ -50,6 +50,42 @@ def test_generation_creates_structured_hypotheses():
     assert all(item.assumptions for item in hypotheses)
 
 
+def test_provider_generation_prompt_includes_current_goal_guidance():
+    class FakeLLM:
+        def __init__(self):
+            self.prompts = []
+
+        def complete(self, prompt, max_tokens):
+            self.prompts.append(prompt)
+            return json.dumps(
+                {
+                    "hypotheses": [
+                        {
+                            "title": "Constrained idea",
+                            "claim": "A constrained agent workflow improves pass rate.",
+                            "rationale": "It follows current operator guidance.",
+                            "assumptions": ["The benchmark is representative."],
+                            "risks": ["Latency"],
+                        }
+                    ]
+                }
+            )
+
+    goal = replace(
+        ResearchGoal.from_objective("Improve LLM coding agents"),
+        preferences=["Prefer repository-grounded mechanisms."],
+        constraints=["Do not use private source code."],
+        allowed_tools=["repo_search"],
+    )
+    client = FakeLLM()
+
+    GenerationAgent(llm_client=client).generate(goal, seed_paper_evidence(), limit=1)
+
+    assert "Preferences: Prefer repository-grounded mechanisms." in client.prompts[0]
+    assert "Constraints: Do not use private source code." in client.prompts[0]
+    assert "Allowed tools: repo_search" in client.prompts[0]
+
+
 def test_generation_records_multi_turn_generation_trace():
     goal = ResearchGoal.from_objective("Improve LLM coding agents")
     hypotheses = GenerationAgent().generate(goal, seed_paper_evidence(), limit=1)
@@ -60,6 +96,89 @@ def test_generation_records_multi_turn_generation_trace():
     assert any("Turn 2 evidence scan" in line for line in trace)
     assert any("Turn 3 proposal synthesis" in line for line in trace)
     assert trace[-1].startswith("Generation assessment:")
+
+
+def test_generation_plans_observation_driven_governed_retrieval_queries():
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    agent = GenerationAgent()
+    observation = Evidence(
+        id="ev-prior",
+        kind="literature_search_result",
+        source="https://example.test/paper",
+        content="Prior work reports critic latency and weak transfer to unseen repositories.",
+        notes="safe prior observation",
+    )
+
+    first = agent.plan_retrieval_queries(
+        goal,
+        ["literature_search", "web_search"],
+        iteration=0,
+    )
+    second = agent.plan_retrieval_queries(
+        goal,
+        ["literature_search", "web_search"],
+        iteration=1,
+        observations=[observation],
+    )
+
+    assert first[0].tool == "literature_search"
+    assert second[0].tool == "web_search"
+    assert first[0].query != second[0].query
+    assert "latency" in second[0].query or "transfer" in second[0].query
+
+
+def test_generation_plans_reference_bound_full_text_fetch_after_observing_result():
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    observation = Evidence(
+        id="ev-openalex-paper",
+        kind="literature_search_result",
+        source="https://openalex.org/W123",
+        content="A relevant coding-agent benchmark paper.",
+        notes="OpenAlex result",
+        metadata={"full_text_url": "https://arxiv.org/pdf/2310.06770"},
+    )
+
+    request = GenerationAgent().plan_retrieval_queries(
+        goal,
+        ["literature_search", "literature_full_text_fetch"],
+        iteration=1,
+        observations=[observation],
+    )[0]
+
+    assert request.tool == "literature_full_text_fetch"
+    assert request.source_ref == observation.id
+    assert request.query == ""
+
+
+def test_reflection_llm_planner_rejects_unavailable_tools():
+    class FakeLLM:
+        def complete(self, prompt, max_tokens):
+            assert "Allowed tools: repo_search" in prompt
+            return json.dumps(
+                {
+                    "requests": [
+                        {"tool": "shell", "query": "run tests", "rationale": "unsafe"},
+                        {
+                            "tool": "repo_search",
+                            "query": "critic false premise benchmark failures",
+                            "rationale": "check local failure evidence",
+                        },
+                    ]
+                }
+            )
+
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    hypothesis = GenerationAgent().generate(goal, [], limit=1)[0]
+    requests = ReflectionAgent(llm_client=FakeLLM()).plan_retrieval_queries(
+        goal,
+        hypothesis,
+        ["deep_verification"],
+        ["repo_search"],
+    )
+
+    assert len(requests) == 1
+    assert requests[0].tool == "repo_search"
+    assert "benchmark" in requests[0].query
 
 
 def test_generation_uses_retrieved_evidence_for_citations():
@@ -748,6 +867,65 @@ def test_deep_verification_records_multi_turn_review_trace():
     assert review.review_trace[-1].startswith("Assessment:")
 
 
+def test_deep_verification_rejects_a_fundamental_contradicted_assumption():
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    hypothesis = GenerationAgent().generate(goal, seed_paper_evidence(), limit=1)[0]
+    store = EvidenceStore(
+        [
+            Evidence(
+                id="ev-fundamental-contradiction",
+                kind="benchmark_result",
+                source="benchmark.json",
+                content=(
+                    "The critic cannot identify false premises cheaply and did not improve "
+                    "pass_rate in the benchmark."
+                ),
+                notes="contradictory assumption evidence",
+            )
+        ]
+    )
+
+    review = ReflectionAgent().review_with_type(goal, hypothesis, "deep_verification", store)
+
+    contradicted = [check for check in review.assumption_checks if check.verdict == "contradicted"]
+    assert contradicted
+    assert contradicted[0].fundamental is True
+    assert contradicted[0].invalidates_hypothesis is True
+    assert contradicted[0].evidence_refs == ["ev-fundamental-contradiction"]
+    assert review.decision == "reject"
+    assert review.requires_revision is True
+    assert review.scores["plausibility"] == 1
+    assert any("fundamental assumption" in item.lower() for item in review.weaknesses)
+
+
+def test_deep_verification_revises_but_does_not_reject_non_fundamental_failure():
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    hypothesis = replace(
+        GenerationAgent().generate(goal, seed_paper_evidence(), limit=1)[0],
+        assumptions=["Optional cache optimization can reduce review latency."],
+    )
+    store = EvidenceStore(
+        [
+            Evidence(
+                id="ev-secondary-contradiction",
+                kind="benchmark_result",
+                source="benchmark.json",
+                content="The optional cache optimization did not improve review latency.",
+                notes="repairable implementation detail",
+            )
+        ]
+    )
+
+    review = ReflectionAgent().review_with_type(goal, hypothesis, "deep_verification", store)
+
+    check = review.assumption_checks[0]
+    assert check.verdict == "contradicted"
+    assert check.fundamental is False
+    assert check.invalidates_hypothesis is False
+    assert review.decision == "revise"
+    assert review.requires_revision is True
+
+
 def test_reflection_supports_observation_and_simulation_review_modes():
     goal = ResearchGoal.from_objective("Improve LLM coding agents")
     hypothesis = GenerationAgent().generate(goal, seed_paper_evidence(), limit=1)[0]
@@ -776,11 +954,46 @@ def test_reflection_supports_observation_and_simulation_review_modes():
     assert observation.review_type == "observation_review"
     assert "ev-observation" in observation.evidence_refs
     assert any("observation evidence" in finding.lower() for finding in observation.findings)
+    assert any("comparison: supports" in line.lower() for line in observation.review_trace)
+    assert any("observation assessment" in line.lower() for line in observation.review_trace)
     assert "missing observation evidence" not in observation.weaknesses
     assert simulation.review_type == "simulation_review"
     assert "ev-simulation" in simulation.evidence_refs
     assert any("simulation evidence" in finding.lower() for finding in simulation.findings)
+    assert any("simulation step 1 - mechanism" in line.lower() for line in simulation.review_trace)
+    assert any("simulation step 5 - assessment" in line.lower() for line in simulation.review_trace)
     assert "missing simulation evidence" not in simulation.weaknesses
+
+
+def test_observation_and_simulation_reviews_revise_on_explicit_negative_outcomes():
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    hypothesis = GenerationAgent().generate(goal, seed_paper_evidence(), limit=1)[0]
+    store = EvidenceStore(
+        [
+            Evidence(
+                id="ev-negative-runtime",
+                kind="tool_result_repo_search",
+                source="repo://negative-trace",
+                content="Runtime observation: the candidate failed and latency was worse than baseline.",
+            ),
+            Evidence(
+                id="ev-negative-simulation",
+                kind="benchmark_result",
+                source="simulation-negative.json",
+                content="Simulation benchmark: pass_rate did not improve and regression_count increased.",
+            ),
+        ]
+    )
+
+    observation = ReflectionAgent().review_with_type(goal, hypothesis, "observation_review", store)
+    simulation = ReflectionAgent().review_with_type(goal, hypothesis, "simulation_review", store)
+
+    assert observation.decision == "revise"
+    assert observation.requires_revision is True
+    assert "observed behavior contradicts the predicted mechanism" in observation.weaknesses
+    assert simulation.decision == "revise"
+    assert simulation.requires_revision is True
+    assert "simulated outcome contradicts the expected success condition" in simulation.weaknesses
 
 
 def test_recurrent_tournament_review_cites_match_record():
@@ -970,6 +1183,86 @@ def test_llm_deep_verification_uses_multi_turn_worker_trace():
     assert any("LLM turn 2 assumption risk audit" in line for line in review.review_trace)
     assert any("LLM turn 3 benchmark validation synthesis" in line for line in review.review_trace)
     assert review.review_trace[-1].startswith("LLM multi-turn reflection assessment:")
+
+
+def test_llm_deep_verification_preserves_subassumption_tree_and_enforces_fundamental_failure():
+    class FakeLLM:
+        def complete(self, prompt, max_tokens):
+            lowered = prompt.lower()
+            if "reflection turn 1 claim mechanism" in lowered:
+                return "The causal claim depends on the critic detecting false premises."
+            if "reflection turn 2 assumption risk audit" in lowered:
+                return json.dumps(
+                    {
+                        "assumption_checks": [
+                            {
+                                "assumption": "The critic can identify false premises cheaply.",
+                                "parent_assumption": "",
+                                "depth": 0,
+                                "verdict": "uncertain",
+                                "fundamental": True,
+                                "invalidates_hypothesis": False,
+                                "evidence_refs": ["ev-benchmark"],
+                                "reasoning": "The top-level assumption depends on classifier recall.",
+                            },
+                            {
+                                "assumption": "Classifier recall remains above 0.8 on unseen repositories.",
+                                "parent_assumption": "The critic can identify false premises cheaply.",
+                                "depth": 1,
+                                "verdict": "contradicted",
+                                "fundamental": True,
+                                "invalidates_hypothesis": True,
+                                "evidence_refs": ["ev-benchmark"],
+                                "reasoning": "The held-out benchmark measured recall of 0.41.",
+                            },
+                        ]
+                    }
+                )
+            if "reflection turn 3 benchmark validation synthesis" in lowered:
+                return json.dumps(
+                    {
+                        "decision": "accept",
+                        "scores": {"plausibility": 5},
+                        "strengths": ["Testable."],
+                        "weaknesses": [],
+                        "safety_notes": [],
+                        "findings": ["The benchmark is available."],
+                        "confidence": 0.9,
+                        "requires_revision": False,
+                        "evidence_refs": ["ev-benchmark"],
+                    }
+                )
+            raise AssertionError(prompt)
+
+    goal = ResearchGoal.from_objective("Improve LLM coding agents with deep verification")
+    hypothesis = GenerationAgent().generate(goal, seed_paper_evidence(), limit=1)[0]
+    store = EvidenceStore(
+        [
+            Evidence(
+                id="ev-benchmark",
+                kind="benchmark_result",
+                source="benchmark.json",
+                content="Held-out critic recall was 0.41.",
+                notes="assumption benchmark",
+            )
+        ]
+    )
+
+    review = ReflectionAgent(llm_client=FakeLLM()).review_with_type(
+        goal,
+        hypothesis,
+        "deep_verification",
+        store,
+    )
+
+    assert len(review.assumption_checks) == 2
+    child = review.assumption_checks[1]
+    assert child.parent_assumption == review.assumption_checks[0].assumption
+    assert child.depth == 1
+    assert child.invalidates_hypothesis is True
+    assert review.decision == "reject"
+    assert review.requires_revision is True
+    assert review.scores["plausibility"] == 1
 
 
 def test_llm_safety_review_uses_multi_turn_red_team_trace():
@@ -1552,6 +1845,51 @@ def test_debate_ranking_records_arguments_evidence_and_ties():
     assert match.review_refs == ["rev-a", "rev-b"]
     assert any("Pro" in line for line in match.debate_transcript)
     assert "abstain" in match.judge_trace.lower()
+
+
+def test_position_stable_ranking_records_order_swapped_agreement():
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    left, right = GenerationAgent().generate(goal, seed_paper_evidence(), limit=2)
+    left = replace(left, evidence_refs=["ev-a", "ev-b"], assumptions=["A", "B"])
+    right = replace(right, evidence_refs=[], assumptions=[])
+
+    _ranked, match = RankingAgent().compare_position_stable(goal, left, right)
+
+    assert match.winner == left.id
+    assert match.comparison_mode == "deterministic_debate_judge"
+    assert "order_swap" in match.judge_trace
+    assert "position_stable=true" in match.judge_trace
+    assert "Order-swapped replay:" in match.debate_transcript
+
+
+def test_position_stable_ranking_abstains_when_order_changes_winner(monkeypatch):
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    left, right = GenerationAgent().generate(goal, seed_paper_evidence(), limit=2)
+    agent = RankingAgent()
+
+    def first_position_always_wins(_goal, first, second, **_kwargs):
+        match = replace(
+            _make_match(first.id, second.id),
+            hypothesis_a=first.id,
+            hypothesis_b=second.id,
+            comparison_mode="biased_test_judge",
+            judge_trace=f"first-position winner={first.id}",
+            debate_transcript=[f"First position: {first.id}"],
+            outcome="win",
+        )
+        return [first, second], match
+
+    monkeypatch.setattr(agent, "compare_debate", first_position_always_wins)
+
+    ranked, match = agent.compare_position_stable(goal, left, right)
+
+    assert {item.id for item in ranked} == {left.id, right.id}
+    assert match.winner == "tie"
+    assert match.outcome == "tie"
+    assert match.elo_after == {left.id: left.elo, right.id: right.elo}
+    assert match.uncertainty == 1.0
+    assert "position_stable=false" in match.judge_trace
+    assert "abstain=position_disagreement" in match.judge_trace
 
 
 def test_debate_ranking_retrieves_pair_specific_evidence():

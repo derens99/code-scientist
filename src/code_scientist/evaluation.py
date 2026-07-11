@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 import os
+import signal
+import shutil
 import subprocess
+import tempfile
+from hashlib import sha256
 from collections.abc import Mapping
 from math import comb, sqrt
 from pathlib import Path
@@ -14,6 +18,7 @@ from code_scientist.models import (
     CapabilityStudyCoverage,
     CapabilityStudySummary,
     FeedbackLoopEvaluation,
+    Evidence,
     Hypothesis,
     ProspectiveEvaluation,
     ResearchGoal,
@@ -118,19 +123,28 @@ def run_prospective_validation_manifest(
     state: RunState,
     *,
     work_dir: str | Path,
+    hypothesis_override: Hypothesis | None = None,
 ) -> dict[str, Any]:
     path = Path(manifest_path)
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"Prospective validation manifest must be a JSON object: {path}")
 
-    hypothesis = _fixture_hypothesis(data, state.hypotheses)
+    hypothesis = hypothesis_override or _fixture_hypothesis(data, state.hypotheses)
     baseline_metrics = _fixture_metric_map(data.get("baseline_metrics"), "baseline_metrics")
     implementation_refs = _fixture_string_list(data.get("implementation_refs"), "implementation_refs")
     success_metric = _fixture_text(data.get("success_metric"), "")
     if not success_metric:
         raise ValueError("Prospective validation manifest must include success_metric.")
     command = _validation_command(data.get("command"), "command")
+    execution_policy = _fixture_text(data.get("execution_policy"), "trusted_local")
+    if execution_policy not in {"trusted_local", "hardened"}:
+        raise ValueError("execution_policy must be trusted_local or hardened.")
+    if execution_policy == "hardened":
+        raise ValueError(
+            "Hardened validation requires a configured container or VM runner; "
+            "host execution refuses to claim sandbox isolation."
+        )
 
     output_dir = Path(work_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -150,7 +164,7 @@ def run_prospective_validation_manifest(
     if metrics_path.exists():
         metrics_path.unlink()
 
-    env = os.environ.copy()
+    env = _minimal_validation_environment()
     env.update(_validation_env(data.get("env"), "env"))
     env.update(
         {
@@ -158,14 +172,11 @@ def run_prospective_validation_manifest(
             "CODE_SCIENTIST_METRICS_PATH": str(metrics_path),
         }
     )
-    completed = subprocess.run(
+    completed, execution_attestation = _run_restricted_validation_command(
         command,
-        cwd=_validation_cwd(data.get("cwd"), path),
+        cwd=_validation_cwd(data.get("cwd"), path, output_dir),
         env=env,
-        capture_output=True,
-        text=True,
         timeout=_validation_timeout(data.get("timeout_seconds", 300)),
-        check=False,
     )
     if completed.returncode != 0:
         stderr = completed.stderr.strip()
@@ -187,7 +198,61 @@ def run_prospective_validation_manifest(
             *command_notes,
         ],
         "source_manifest": str(path),
+        "execution_attestation": execution_attestation,
     }
+
+
+def run_agent_validation_manifest(
+    manifest_path: str | Path,
+    state: RunState,
+    hypothesis: Hypothesis,
+    *,
+    work_dir: str | Path,
+) -> Evidence:
+    """Execute a researcher-owned no-shell manifest as in-loop empirical evidence."""
+    fixture = run_prospective_validation_manifest(
+        manifest_path,
+        state,
+        work_dir=work_dir,
+        hypothesis_override=hypothesis,
+    )
+    measured_metrics = fixture["measured_metrics"]
+    baseline_metrics = fixture["baseline_metrics"]
+    content = json.dumps(
+        {
+            "hypothesis_id": hypothesis.id,
+            "hypothesis_title": hypothesis.title,
+            "hypothesis_claim": hypothesis.claim,
+            "experiment": hypothesis.test_plan.experiment,
+            "baseline_metrics": baseline_metrics,
+            "measured_metrics": measured_metrics,
+            "success_metric": fixture["success_metric"],
+            "measurement_status": fixture["measurement_status"],
+            "notes": fixture["notes"],
+        },
+        sort_keys=True,
+    )
+    source = str(Path(manifest_path))
+    return Evidence(
+        id=stable_id("ev", f"agent_validation:{hypothesis.id}:{source}:{content}"),
+        kind="agent_empirical_validation",
+        source=source,
+        content=content,
+        notes="Researcher-configured no-shell validation executed during Reflection.",
+        metadata={
+            "tool": "empirical_validation",
+            "hypothesis_id": hypothesis.id,
+            "citation": source,
+            "measurement_source": str(fixture["measurement_source"]),
+            "measurement_status": str(fixture["measurement_status"]),
+            "execution_policy": str(fixture["execution_attestation"]["execution_policy"]),
+            "isolation_level": str(fixture["execution_attestation"]["isolation_level"]),
+            "network_isolated": str(fixture["execution_attestation"]["network_isolated"]).lower(),
+            "ambient_secrets_inherited": str(
+                fixture["execution_attestation"]["ambient_secrets_inherited"]
+            ).lower(),
+        },
+    )
 
 
 def load_feedback_loop_evaluation_fixture(path: str | Path) -> FeedbackLoopEvaluation:
@@ -1481,16 +1546,127 @@ def _validation_env(value: object, label: str) -> dict[str, str]:
         return {}
     if not isinstance(value, Mapping):
         raise ValueError(f"{label} must be an object.")
-    return {str(key): str(raw_value) for key, raw_value in value.items()}
+    result: dict[str, str] = {}
+    for key, raw_value in value.items():
+        name = str(key).strip()
+        if not name:
+            raise ValueError(f"{label} contains an empty environment variable name.")
+        if any(marker in name.upper() for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL")):
+            raise ValueError(f"{label}.{name} may expose a secret and is not allowed.")
+        result[name] = str(raw_value)
+    return result
 
 
-def _validation_cwd(value: object, manifest_path: Path) -> Path:
+def _validation_cwd(value: object, manifest_path: Path, output_dir: Path) -> Path:
     if value is None or not str(value).strip():
-        return manifest_path.parent
-    path = Path(str(value))
-    if not path.is_absolute():
-        path = manifest_path.parent / path
-    return path
+        path = manifest_path.parent
+    else:
+        path = Path(str(value))
+        if not path.is_absolute():
+            path = manifest_path.parent / path
+    resolved = path.resolve()
+    allowed_roots = {manifest_path.parent.resolve(), output_dir.resolve()}
+    if not any(resolved == root or root in resolved.parents for root in allowed_roots):
+        raise ValueError("Validation cwd must remain inside the manifest or work directory.")
+    if not resolved.is_dir():
+        raise ValueError(f"Validation cwd does not exist: {resolved}")
+    return resolved
+
+
+def _minimal_validation_environment() -> dict[str, str]:
+    environment = {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+        "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8"),
+    }
+    for name in ("TMPDIR", "SYSTEMROOT", "WINDIR"):
+        value = os.environ.get(name)
+        if value:
+            environment[name] = value
+    return environment
+
+
+def _run_restricted_validation_command(
+    command: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    timeout: float,
+    output_limit: int = 1_000_000,
+) -> tuple[subprocess.CompletedProcess[str], dict[str, Any]]:
+    executable = shutil.which(command[0], path=env.get("PATH")) or command[0]
+    executable_path = Path(executable)
+    executable_digest = ""
+    if executable_path.is_file():
+        executable_digest = sha256(executable_path.read_bytes()).hexdigest()
+
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            env=env,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            start_new_session=True,
+            preexec_fn=_validation_resource_limits(timeout, output_limit) if os.name == "posix" else None,
+        )
+        try:
+            return_code = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            if os.name == "posix":
+                os.killpg(process.pid, signal.SIGTERM)
+            else:
+                process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                if os.name == "posix":
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
+                process.wait()
+            raise ValueError("Prospective validation command timed out; process group terminated.") from exc
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        stdout_bytes = stdout_file.read(output_limit + 1)
+        stderr_bytes = stderr_file.read(output_limit + 1)
+    if len(stdout_bytes) > output_limit or len(stderr_bytes) > output_limit:
+        raise ValueError("Prospective validation command exceeded the output byte limit.")
+    stdout = stdout_bytes.decode("utf-8", errors="replace")
+    stderr = stderr_bytes.decode("utf-8", errors="replace")
+    completed = subprocess.CompletedProcess(command, return_code, stdout, stderr)
+    return completed, {
+        "execution_policy": "trusted_local",
+        "isolation_level": "host_restricted_not_sandboxed",
+        "network_isolated": False,
+        "ambient_secrets_inherited": False,
+        "process_group_isolated": True,
+        "resource_limits_applied": os.name == "posix",
+        "stdout_stderr_byte_limit": output_limit,
+        "executable": str(executable_path),
+        "executable_sha256": executable_digest,
+    }
+
+
+def _validation_resource_limits(timeout: float, output_limit: int):
+    def apply_limits() -> None:
+        import resource
+
+        cpu_seconds = max(int(timeout) + 1, 1)
+        limits = [
+            (resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds)),
+            (resource.RLIMIT_FSIZE, (10_000_000, 10_000_000)),
+            (resource.RLIMIT_NOFILE, (128, 128)),
+        ]
+        if hasattr(resource, "RLIMIT_NPROC"):
+            limits.append((resource.RLIMIT_NPROC, (64, 64)))
+        for limit, values in limits:
+            try:
+                resource.setrlimit(limit, values)
+            except (OSError, ValueError):
+                continue
+
+    return apply_limits
 
 
 def _validation_timeout(value: object) -> float:
@@ -1503,6 +1679,8 @@ def _validation_timeout(value: object) -> float:
 def _validation_metrics(metrics_path: Path, stdout: str) -> tuple[dict[str, float], list[str]]:
     raw_text = ""
     if metrics_path.exists():
+        if metrics_path.stat().st_size > 1_000_000:
+            raise ValueError("Prospective validation metrics exceeded the byte limit.")
         raw_text = metrics_path.read_text(encoding="utf-8").strip()
     if not raw_text:
         raw_text = stdout.strip()

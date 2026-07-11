@@ -113,6 +113,18 @@ export function HypothesisDetail({ hypothesis, review, parents }: HypothesisDeta
               </SimpleGrid>
               <ListSection title="Safety notes" items={review.safety_notes} />
               <ListSection title="Grounded findings" items={review.findings ?? []} />
+              <ListSection
+                title="Assumption verification"
+                items={(review.assumption_checks ?? []).map((check) => {
+                  const flags = [
+                    check.verdict,
+                    check.fundamental ? "fundamental" : "repairable",
+                    check.invalidates_hypothesis ? "invalidates hypothesis" : ""
+                  ].filter(Boolean);
+                  const parent = check.parent_assumption ? `; parent: ${check.parent_assumption}` : "";
+                  return `${check.assumption} (${flags.join(", ")}${parent}) - ${check.reasoning}`;
+                })}
+              />
               <ListSection title="Review trace" items={review.review_trace ?? []} />
               <ListSection title="Evidence refs" items={review.evidence_refs ?? []} />
             </>

@@ -32,6 +32,16 @@ export async function POST(request: Request) {
       prospectiveEvaluationPaths: cleanStringList(body.prospectiveEvaluationPaths),
       feedbackLoopEvaluationPaths: cleanStringList(body.feedbackLoopEvaluationPaths),
       feedbackLoopReviewPaths: cleanStringList(body.feedbackLoopReviewPaths),
+      agentRetrieval: Boolean(body.agentRetrieval),
+      toolBudget: clampInteger(body.toolBudget, 0, 1000, 0),
+      agentValidationManifestPaths: cleanStringList(body.agentValidationManifestPaths),
+      agentRetrievalIterations: clampInteger(body.agentRetrievalIterations, 1, 10, 2),
+      agentFetchDomains: cleanStringList(body.agentFetchDomains),
+      reviewProcesses: clampInteger(body.reviewProcesses, 0, 32, 0),
+      providerCallBudget: clampInteger(body.providerCallBudget, 1, 10000, 100),
+      pdfVision: Boolean(body.pdfVision),
+      pdfVisionMaxRegions: clampInteger(body.pdfVisionMaxRegions, 0, 100, 10),
+      pdfVisionCallBudget: clampInteger(body.pdfVisionCallBudget, 1, 1000, 10),
       runName: sanitizeRunName(String(body.runName ?? ""))
     });
     return NextResponse.json({ run });

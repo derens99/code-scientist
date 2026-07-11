@@ -1,14 +1,21 @@
 from dataclasses import replace
 
-from code_scientist.reporting import render_benchmark_comparison_study_report, render_report
+from code_scientist.reporting import (
+    render_benchmark_comparison_study_report,
+    render_capability_study_report,
+    render_report,
+)
 from code_scientist.models import (
+    AgentToolCall,
     AgentTrace,
+    AssumptionCheck,
     BenchmarkResult,
     CapabilityEvaluation,
     Evidence,
     EvidenceSafetyFinding,
     EloConcordanceResult,
     FeedbackLoopEvaluation,
+    GoalRevision,
     Match,
     MetaReview,
     ProximityEdge,
@@ -16,8 +23,10 @@ from code_scientist.models import (
     ResearchOutputArtifact,
     RetrievalMemoryRecord,
     Review,
+    SafetyDecision,
     SafetyEvaluationResult,
     ScalingCurvePoint,
+    ToolBudgetState,
 )
 from code_scientist.supervisor import run_research_cycle
 
@@ -43,6 +52,111 @@ def test_render_report_includes_leaderboard_and_limitations(tmp_path):
     assert "Ranked Hypotheses" in report
     assert "Elo is an auto-evaluation proxy" in report
     assert "Recommended Next Experiments" in report
+
+
+def test_render_report_surfaces_goal_revision_visual_and_validation_trust(tmp_path):
+    state = run_research_cycle(
+        objective="Find traceable coding-agent research ideas",
+        cycles=1,
+        max_hypotheses=4,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+    )
+    visual = Evidence(
+        id="ev-visual",
+        kind="pdf_visual_claim",
+        source="paper.pdf",
+        content="A machine interpretation of a figure.",
+        metadata={
+            "page_number": "4",
+            "model": "vision-model",
+            "confidence": "0.820",
+            "parent_evidence_id": "ev-region",
+            "requires_human_verification": "true",
+        },
+    )
+    validation = Evidence(
+        id="ev-validation",
+        kind="agent_empirical_validation",
+        source="validation.json",
+        content="Measured validation metrics.",
+        metadata={
+            "execution_policy": "trusted_local",
+            "isolation_level": "host_restricted_not_sandboxed",
+            "network_isolated": "false",
+            "ambient_secrets_inherited": "false",
+        },
+    )
+    revision = GoalRevision(
+        id="goal-revision-1",
+        revision=1,
+        prior_goal_id=state.goal.id,
+        new_goal_id="goal-revised",
+        prior_plan_id=state.plan.id if state.plan else "",
+        new_plan_id="plan-revised",
+        user_message="Prefer local evidence.",
+        structured_changes={"constraints": ["local only"]},
+        approval_status="approved",
+        safety=SafetyDecision(allowed=True, reason="Allowed", flags=[]),
+        affected_task_ids=["task-1"],
+    )
+
+    report = render_report(
+        replace(state, evidence=[visual, validation], goal_revisions=[revision])
+    )
+
+    assert "## Goal Revision History" in report
+    assert "Revision 1: approved" in report
+    assert "Machine-interpreted PDF visual claims: 1" in report
+    assert "model vision-model; confidence 0.820" in report
+    assert "Agent empirical validation records: 1" in report
+    assert "isolation host_restricted_not_sandboxed" in report
+    assert "network isolated false" in report
+
+
+def test_capability_study_report_renders_paired_component_ablation_delta(tmp_path):
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=4,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+    )
+    off = replace(
+        state,
+        scaling_curve=[
+            ScalingCurvePoint(
+                id="scale-evolution-off",
+                label="evolution-off",
+                cycles=1,
+                task_count=8,
+                tool_budget=8,
+                baseline_score=0.4,
+                code_scientist_score=0.55,
+                delta=0.15,
+            )
+        ],
+    )
+    on = replace(
+        state,
+        scaling_curve=[
+            ScalingCurvePoint(
+                id="scale-evolution-on",
+                label="evolution-on",
+                cycles=1,
+                task_count=8,
+                tool_budget=8,
+                baseline_score=0.4,
+                code_scientist_score=0.68,
+                delta=0.28,
+            )
+        ],
+    )
+
+    report = render_capability_study_report([off, on])
+
+    assert "Component Ablation Readout" in report
+    assert "evolution: evolution-off 0.550; evolution-on 0.680; delta +0.13" in report
 
 
 def test_render_report_includes_elo_trajectory_section(tmp_path):
@@ -80,6 +194,43 @@ def test_render_report_includes_elo_concordance_section(tmp_path):
     assert "## Elo Concordance" in report
     assert "objective-demo" in report
     assert "Concordance index" in report
+
+
+def test_render_report_includes_agent_tool_budget_and_call_audit(tmp_path):
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=3,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+    )
+    state = replace(
+        state,
+        tool_budget=ToolBudgetState(limit=5, used=2),
+        agent_tool_calls=[
+            AgentToolCall(
+                id="tool-call-1",
+                cycle=1,
+                task_id="task-generation-1",
+                agent="generation",
+                tool="literature_search",
+                query="coding agent critic benchmark",
+                rationale="Ground the proposal.",
+                status="completed",
+                evidence_refs=["ev-paper"],
+                budget_before=5,
+                budget_after=4,
+            )
+        ],
+    )
+
+    report = render_report(state)
+
+    assert "## Agent Tool Budget" in report
+    assert "Used: 2" in report
+    assert "Remaining: 3" in report
+    assert "literature_search" in report
+    assert "coding agent critic benchmark" in report
 
 
 def test_render_report_includes_benchmark_results(tmp_path):
@@ -203,6 +354,19 @@ def test_render_report_includes_review_trace(tmp_path):
             "Turn 3 evidence: ev-bench",
             "Assessment: benchmark evidence missing; revision required: true.",
         ],
+        assumption_checks=[
+            AssumptionCheck(
+                id="assumption-check-1",
+                assumption="The critic can identify false premises.",
+                parent_assumption="",
+                depth=0,
+                verdict="contradicted",
+                fundamental=True,
+                invalidates_hypothesis=True,
+                evidence_refs=["ev-bench"],
+                reasoning="The held-out benchmark reports no improvement.",
+            )
+        ],
     )
 
     report = render_report(
@@ -217,6 +381,9 @@ def test_render_report_includes_review_trace(tmp_path):
     assert "Review trace" in report
     assert "Turn 1 query (claim mechanism)" in report
     assert "Turn 3 evidence: ev-bench" in report
+    assert "Assumption verification" in report
+    assert "fundamental; invalidates hypothesis" in report
+    assert "The critic can identify false premises." in report
 
 
 def test_render_report_includes_evolution_trace(tmp_path):

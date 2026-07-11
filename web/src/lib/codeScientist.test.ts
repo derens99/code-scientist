@@ -116,6 +116,8 @@ describe("buildRunArgs", () => {
       "5",
       "--max-wall-minutes",
       "30",
+      "--provider-call-budget",
+      "100",
       "--out",
       path.join("runs", "continuous-demo")
     ]);
@@ -146,7 +148,13 @@ describe("buildRunArgs", () => {
       preferenceReviewPaths: ["/tmp/preference.json", " ", "/tmp/preference-review.json"],
       prospectiveEvaluationPaths: ["/tmp/prospective.json", " ", "/tmp/external-validation.json"],
       feedbackLoopEvaluationPaths: ["/tmp/feedback-loop.json", " ", "/tmp/external-feedback.json"],
-      feedbackLoopReviewPaths: ["/tmp/blind-review.json", " ", "/tmp/reviewer-scores.json"]
+      feedbackLoopReviewPaths: ["/tmp/blind-review.json", " ", "/tmp/reviewer-scores.json"],
+      agentRetrieval: true,
+      toolBudget: 12,
+      agentValidationManifestPaths: ["/tmp/agent-validation.json", " "],
+      agentRetrievalIterations: 4,
+      agentFetchDomains: ["arxiv.org", " ", "example.org"],
+      reviewProcesses: 2
     });
 
     expect(args).toContain("--goal-brief");
@@ -194,6 +202,18 @@ describe("buildRunArgs", () => {
     expect(args).toContain("--feedback-loop-review-fixture");
     expect(args).toContain("/tmp/blind-review.json");
     expect(args).toContain("/tmp/reviewer-scores.json");
+    expect(args).toContain("--agent-retrieval");
+    expect(args).toContain("--tool-budget");
+    expect(args).toContain("12");
+    expect(args).toContain("--agent-validation-manifest");
+    expect(args).toContain("/tmp/agent-validation.json");
+    expect(args).toContain("--agent-retrieval-iterations");
+    expect(args).toContain("4");
+    expect(args).toContain("--agent-fetch-domain");
+    expect(args).toContain("arxiv.org");
+    expect(args).toContain("example.org");
+    expect(args).toContain("--review-processes");
+    expect(args).toContain("2");
     expect(args).not.toContain(" ");
   });
 });
@@ -333,6 +353,12 @@ describe("human run inputs", () => {
       requires_revision: true
     });
 
+    await writeFile(
+      path.join(root, "runs", "human-loop", "state.json"),
+      JSON.stringify({ ...reviewState, run_status: "completed" }),
+      "utf8"
+    );
+
     const guidanceState = await updateRunGuidance("human-loop", {
       preferences: ["Prefer low-cost local experiments."],
       constraints: ["Do not use external services."],
@@ -344,7 +370,7 @@ describe("human run inputs", () => {
     expect(guidanceState.plan?.allowed_sources).toEqual(["local_evidence_paths", "prior_run_state"]);
     expect(guidanceState.user_feedback?.at(-1)).toMatchObject({
       kind: "follow_up_direction",
-      target_id: "goal-1",
+      target_id: guidanceState.goal.id,
       influence: "scheduler_boost",
       content: "Compare the manual hypothesis against the current top Elo candidate."
     });
@@ -354,7 +380,7 @@ describe("human run inputs", () => {
     });
     expect(preferenceCommandState.user_feedback?.at(-1)).toMatchObject({
       kind: "preference_ranking",
-      target_id: "goal-1",
+      target_id: guidanceState.goal.id,
       influence: "scheduler_boost",
       content: "prefer hyp-1 over hyp-2 for the next tournament"
     });

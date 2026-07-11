@@ -152,6 +152,47 @@ describe("RunInsights", () => {
     expect(markup).toContain("user_feedback:feedback-1");
   });
 
+  it("renders agent retrieval budget and governed tool calls", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        MantineProvider,
+        {},
+        React.createElement(RunInsights as React.ComponentType<any>, {
+          matches: [],
+          metaReviews: [],
+          hypotheses: [],
+          toolBudget: { limit: 6, used: 2 },
+          agentToolCalls: [
+            {
+              id: "tool-call-1",
+              cycle: 1,
+              task_id: "task-generation",
+              agent: "generation",
+              tool: "literature_full_text_fetch",
+              query: "coding agent benchmark limitations",
+              rationale: "Ground the proposal.",
+              status: "completed",
+              source_ref: "ev-openalex-result",
+              evidence_refs: ["ev-paper"],
+              blocked_reasons: [],
+              budget_before: 6,
+              budget_after: 5,
+              error: ""
+            }
+          ],
+          defaultTab: "plan",
+          report: ""
+        })
+      )
+    );
+
+    expect(markup).toContain("Agent tool budget");
+    expect(markup).toContain("2 used");
+    expect(markup).toContain("4 remaining");
+    expect(markup).toContain("literature_full_text_fetch");
+    expect(markup).toContain("Source ref: ev-openalex-result");
+  });
+
   it("renders capability, prospective, scaling, and safety evaluations", () => {
     const hypothesis: Hypothesis = {
       id: "hyp-1",

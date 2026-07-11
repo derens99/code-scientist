@@ -32,11 +32,17 @@ describe("HumanInputPanel", () => {
         {},
         React.createElement(HumanInputPanel, {
           goalId: "goal-1",
+          goalObjective: "Improve agents",
           selectedHypothesis: hypothesis,
           submitting: false,
           goalPreferences: [],
           goalConstraints: [],
+          goalMetrics: ["pass_rate"],
+          goalSafetyNotes: [],
           allowedSources: ["seed_paper_evidence"],
+          allowedTools: ["repo_search"],
+          outputFormats: ["markdown_report"],
+          terminationCriteria: ["max_cycles"],
           onFeedback: async () => {},
           onManualHypothesis: async () => {},
           onManualReview: async () => {},
@@ -52,6 +58,8 @@ describe("HumanInputPanel", () => {
     expect(markup).toContain("Add hypothesis");
     expect(markup).toContain("Add review");
     expect(markup).toContain("Update guidance");
+    expect(markup).toContain("Research objective");
+    expect(markup).toContain("Termination criteria");
     expect(markup).toContain("Run command");
   });
 
@@ -62,11 +70,17 @@ describe("HumanInputPanel", () => {
         {},
         React.createElement(HumanInputPanel, {
           goalId: "goal-1",
+          goalObjective: "Improve agents",
           selectedHypothesis: null,
           submitting: false,
           goalPreferences: [],
           goalConstraints: [],
+          goalMetrics: ["pass_rate"],
+          goalSafetyNotes: [],
           allowedSources: ["seed_paper_evidence"],
+          allowedTools: ["repo_search"],
+          outputFormats: ["markdown_report"],
+          terminationCriteria: ["max_cycles"],
           onFeedback: async () => {},
           onManualHypothesis: async () => {},
           onManualReview: async () => {},

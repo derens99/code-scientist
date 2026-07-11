@@ -365,6 +365,36 @@ class Hypothesis:
 
 
 @dataclass(frozen=True)
+class AssumptionCheck:
+    """An independently evaluated assumption from a deep-verification review."""
+
+    id: str
+    assumption: str
+    parent_assumption: str
+    depth: int
+    verdict: str
+    fundamental: bool
+    invalidates_hypothesis: bool
+    evidence_refs: list[str] = field(default_factory=list)
+    reasoning: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AssumptionCheck:
+        copied = dict(data)
+        copied.setdefault("parent_assumption", "")
+        copied.setdefault("depth", 0)
+        copied.setdefault("verdict", "uncertain")
+        copied.setdefault("fundamental", False)
+        copied.setdefault("invalidates_hypothesis", False)
+        copied.setdefault("evidence_refs", [])
+        copied.setdefault("reasoning", "")
+        return cls(**copied)
+
+
+@dataclass(frozen=True)
 class Review:
     id: str
     hypothesis_id: str
@@ -379,6 +409,7 @@ class Review:
     review_trace: list[str] = field(default_factory=list)
     confidence: float = 0.5
     requires_revision: bool = False
+    assumption_checks: list[AssumptionCheck] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -392,6 +423,11 @@ class Review:
         copied.setdefault("review_trace", [])
         copied.setdefault("confidence", 0.5)
         copied.setdefault("requires_revision", False)
+        copied["assumption_checks"] = [
+            AssumptionCheck.from_dict(item)
+            for item in (copied.get("assumption_checks") or [])
+            if isinstance(item, dict)
+        ]
         return cls(**copied)
 
 
@@ -695,6 +731,10 @@ class SafetyEvaluationResult:
     pass_rate: float
     failed_case_ids: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    topic_results: dict[str, dict[str, float | int]] = field(default_factory=dict)
+    base_pass_rate: float = 0.0
+    variant_pass_rate: float = 0.0
+    degradation_rate: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -704,6 +744,10 @@ class SafetyEvaluationResult:
         copied = dict(data)
         copied.setdefault("failed_case_ids", [])
         copied.setdefault("notes", [])
+        copied.setdefault("topic_results", {})
+        copied.setdefault("base_pass_rate", 0.0)
+        copied.setdefault("variant_pass_rate", 0.0)
+        copied.setdefault("degradation_rate", 0.0)
         return cls(**copied)
 
 
@@ -821,6 +865,33 @@ class UserFeedback:
 
 
 @dataclass(frozen=True)
+class GoalRevision:
+    id: str
+    revision: int
+    prior_goal_id: str
+    new_goal_id: str
+    prior_plan_id: str
+    new_plan_id: str
+    user_message: str
+    structured_changes: dict[str, Any]
+    approval_status: str
+    safety: SafetyDecision
+    affected_task_ids: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["safety"] = self.safety.to_dict()
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> GoalRevision:
+        copied = dict(data)
+        copied["safety"] = SafetyDecision.from_dict(copied["safety"])
+        copied.setdefault("affected_task_ids", [])
+        return cls(**copied)
+
+
+@dataclass(frozen=True)
 class RetrievalMemoryRecord:
     id: str
     query: str
@@ -844,6 +915,65 @@ class RetrievalMemoryRecord:
         copied.setdefault("task_id", "")
         copied.setdefault("citations", [])
         copied.setdefault("reason", "")
+        return cls(**copied)
+
+
+@dataclass(frozen=True)
+class ToolBudgetState:
+    """Persisted hard budget for agent-originated external tool invocations."""
+
+    limit: int
+    used: int = 0
+
+    @property
+    def remaining(self) -> int:
+        return max(self.limit - self.used, 0)
+
+    @property
+    def exhausted(self) -> bool:
+        return self.remaining == 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ToolBudgetState:
+        limit = max(int(data.get("limit", 0)), 0)
+        used = min(max(int(data.get("used", 0)), 0), limit)
+        return cls(limit=limit, used=used)
+
+
+@dataclass(frozen=True)
+class AgentToolCall:
+    """Auditable record of one agent-requested governed tool operation."""
+
+    id: str
+    cycle: int
+    task_id: str
+    agent: str
+    tool: str
+    query: str
+    rationale: str
+    status: str
+    source_ref: str = ""
+    evidence_refs: list[str] = field(default_factory=list)
+    blocked_reasons: list[str] = field(default_factory=list)
+    budget_before: int = 0
+    budget_after: int = 0
+    error: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AgentToolCall:
+        copied = dict(data)
+        copied.setdefault("source_ref", "")
+        copied.setdefault("evidence_refs", [])
+        copied.setdefault("blocked_reasons", [])
+        copied.setdefault("budget_before", 0)
+        copied.setdefault("budget_after", 0)
+        copied.setdefault("error", "")
         return cls(**copied)
 
 
@@ -894,6 +1024,8 @@ class Task:
     result_refs: list[str] = field(default_factory=list)
     error: str = ""
     worker_state: dict[str, Any] = field(default_factory=dict)
+    depends_on: list[str] = field(default_factory=list)
+    resource_class: str = "default"
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -907,6 +1039,8 @@ class Task:
         copied.setdefault("result_refs", [])
         copied.setdefault("error", "")
         copied.setdefault("worker_state", {})
+        copied.setdefault("depends_on", [])
+        copied.setdefault("resource_class", "default")
         return cls(**copied)
 
 
@@ -976,8 +1110,11 @@ class RunState:
     safety: SafetyDecision | None = None
     research_overview: ResearchOverview | None = None
     user_feedback: list[UserFeedback] = field(default_factory=list)
+    goal_revisions: list[GoalRevision] = field(default_factory=list)
     agent_traces: list[AgentTrace] = field(default_factory=list)
     retrieval_memory: list[RetrievalMemoryRecord] = field(default_factory=list)
+    tool_budget: ToolBudgetState | None = None
+    agent_tool_calls: list[AgentToolCall] = field(default_factory=list)
     task_queue: list[Task] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -1005,8 +1142,11 @@ class RunState:
             "safety": self.safety.to_dict() if self.safety else None,
             "research_overview": self.research_overview.to_dict() if self.research_overview else None,
             "user_feedback": [item.to_dict() for item in self.user_feedback],
+            "goal_revisions": [item.to_dict() for item in self.goal_revisions],
             "agent_traces": [item.to_dict() for item in self.agent_traces],
             "retrieval_memory": [item.to_dict() for item in self.retrieval_memory],
+            "tool_budget": self.tool_budget.to_dict() if self.tool_budget else None,
+            "agent_tool_calls": [item.to_dict() for item in self.agent_tool_calls],
             "task_queue": [item.to_dict() for item in self.task_queue],
         }
 
@@ -1073,10 +1213,22 @@ class RunState:
                 else None
             ),
             user_feedback=[UserFeedback.from_dict(item) for item in data.get("user_feedback", [])],
+            goal_revisions=[
+                GoalRevision.from_dict(item) for item in data.get("goal_revisions", [])
+            ],
             agent_traces=[AgentTrace.from_dict(item) for item in data.get("agent_traces", [])],
             retrieval_memory=[
                 RetrievalMemoryRecord.from_dict(item)
                 for item in data.get("retrieval_memory", [])
+            ],
+            tool_budget=(
+                ToolBudgetState.from_dict(data["tool_budget"])
+                if data.get("tool_budget")
+                else None
+            ),
+            agent_tool_calls=[
+                AgentToolCall.from_dict(item)
+                for item in data.get("agent_tool_calls", [])
             ],
             task_queue=[Task.from_dict(item) for item in data.get("task_queue", [])],
         )

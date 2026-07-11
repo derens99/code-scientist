@@ -1,5 +1,6 @@
 import json
 import threading
+from io import BytesIO
 
 from code_scientist.evidence import EvidenceStore
 from code_scientist.models import Evidence
@@ -44,12 +45,18 @@ def test_evidence_store_preserves_markdown_section_citations(tmp_path):
 
 
 def test_evidence_store_classifies_code_markdown_and_pdf_sources(tmp_path):
+    import pymupdf
+
     markdown = tmp_path / "findings.md"
     markdown.write_text("Failure-derived benchmark seeds improved pass_rate on repair tasks.", encoding="utf-8")
     code = tmp_path / "workflow.py"
     code.write_text("def critic_before_edit():\n    return 'tracks assumptions before patching'\n", encoding="utf-8")
     pdf = tmp_path / "paper.pdf"
-    pdf.write_bytes(b"%PDF-1.4\nLLM coding-agent memory freshness reduced repeated errors.\n%%EOF")
+    document = pymupdf.open()
+    page = document.new_page()
+    page.insert_text((72, 72), "LLM coding-agent memory freshness reduced repeated errors.")
+    document.save(pdf)
+    document.close()
 
     store = EvidenceStore.from_paths([tmp_path])
 
@@ -152,6 +159,108 @@ def test_evidence_store_records_scanned_pdf_pages_that_need_ocr(tmp_path, monkey
     assert result.metadata["requires_ocr"] == "true"
     assert result.metadata["citation"].endswith("scanned-paper.pdf:page 1")
     assert "OCR is required" in result.content
+
+
+def test_evidence_store_ocr_extracts_scanned_pdf_text_and_figure_provenance(tmp_path):
+    import pymupdf
+    from PIL import Image, ImageDraw, ImageFont
+
+    image = Image.new("RGB", (1400, 320), "white")
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 58)
+    draw.text(
+        (30, 70),
+        "Coding agent benchmark pass rate improved 27 percent",
+        fill="black",
+        font=font,
+    )
+    image_bytes = BytesIO()
+    image.save(image_bytes, format="PNG")
+
+    pdf = tmp_path / "scanned-benchmark.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=700, height=220)
+    page.insert_image(page.rect, stream=image_bytes.getvalue())
+    document.save(pdf)
+    document.close()
+
+    store = EvidenceStore.from_paths([pdf])
+    ocr = next(item for item in store.evidence if item.kind == "pdf_ocr_text")
+    scan = next(item for item in store.evidence if item.kind == "pdf_page_scan_region")
+
+    assert "Coding agent benchmark pass rate improved" in ocr.content
+    assert ocr.metadata["parser"] == "pdf_page_ocr"
+    assert ocr.metadata["ocr_engine"] == "rapidocr-onnxruntime"
+    assert float(ocr.metadata["ocr_mean_confidence"]) > 0.8
+    assert json.loads(ocr.metadata["ocr_boxes"])
+    assert ocr.metadata["citation"].endswith("scanned-benchmark.pdf:page 1")
+    assert scan.metadata["region_type"] == "page_scan"
+    assert scan.metadata["requires_visual_interpretation"] == "false"
+    assert "scan 1.1" in scan.metadata["citation"]
+    assert not any(item.metadata.get("requires_ocr") == "true" for item in store.evidence)
+
+
+def test_evidence_store_extracts_pdf_table_cells_with_bounding_box(tmp_path):
+    import pymupdf
+
+    pdf = tmp_path / "benchmark-table.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=400, height=240)
+    x_positions = [40, 190, 340]
+    y_positions = [40, 100, 160]
+    for x in x_positions:
+        page.draw_line((x, y_positions[0]), (x, y_positions[-1]))
+    for y in y_positions:
+        page.draw_line((x_positions[0], y), (x_positions[-1], y))
+    page.insert_text((55, 75), "Method", fontsize=14)
+    page.insert_text((205, 75), "Pass rate", fontsize=14)
+    page.insert_text((55, 135), "Critic", fontsize=14)
+    page.insert_text((205, 135), "0.72", fontsize=14)
+    document.save(pdf)
+    document.close()
+
+    store = EvidenceStore.from_paths([pdf])
+    table = next(item for item in store.evidence if item.kind == "pdf_table_region")
+
+    assert "Method | Pass rate" in table.content
+    assert "Critic | 0.72" in table.content
+    assert table.metadata["parser"] == "pdf_table_extraction"
+    assert table.metadata["row_count"] == "2"
+    assert len(json.loads(table.metadata["bbox"])) == 4
+    assert table.metadata["citation"].endswith("benchmark-table.pdf:page 1:table 1")
+
+
+def test_evidence_store_records_pdf_figure_regions_with_nearby_caption(tmp_path):
+    import pymupdf
+    from PIL import Image, ImageDraw
+
+    image = Image.new("RGB", (360, 140), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((20, 25, 160, 120), outline="navy", width=8)
+    draw.line((190, 115, 330, 35), fill="darkgreen", width=10)
+    image_bytes = BytesIO()
+    image.save(image_bytes, format="PNG")
+
+    pdf = tmp_path / "paper-figure.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=612, height=792)
+    page.insert_image((80, 120, 440, 260), stream=image_bytes.getvalue())
+    page.insert_text(
+        (80, 282),
+        "Figure 2. Architecture ablation outcomes by configuration.",
+        fontsize=11,
+    )
+    document.save(pdf)
+    document.close()
+
+    store = EvidenceStore.from_paths([pdf])
+    figure = next(item for item in store.evidence if item.kind == "pdf_figure_region")
+
+    assert figure.metadata["region_type"] == "raster_figure"
+    assert figure.metadata["requires_visual_interpretation"] == "true"
+    assert figure.metadata["caption"].startswith("Figure 2.")
+    assert len(json.loads(figure.metadata["bbox"])) == 4
+    assert "Nearby caption: Figure 2." in figure.content
 
 
 def test_evidence_store_extracts_benchmark_and_prior_trace_json(tmp_path):

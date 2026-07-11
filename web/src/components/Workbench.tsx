@@ -439,11 +439,17 @@ export function Workbench() {
                   <HypothesisDetail hypothesis={selectedHypothesis} review={selectedReview} parents={parentHypotheses} />
                   <HumanInputPanel
                     goalId={state.goal.id}
+                    goalObjective={state.goal.objective}
                     selectedHypothesis={selectedHypothesis}
                     submitting={submittingHumanInput}
                     goalPreferences={state.goal.preferences}
                     goalConstraints={state.goal.constraints}
+                    goalMetrics={state.goal.metrics}
+                    goalSafetyNotes={state.goal.safety_notes}
                     allowedSources={state.plan?.allowed_sources ?? []}
+                    allowedTools={state.plan?.allowed_tools ?? []}
+                    outputFormats={state.plan?.output_formats ?? []}
+                    terminationCriteria={state.plan?.termination_criteria ?? []}
                     onFeedback={handleFeedback}
                     onManualHypothesis={handleManualHypothesis}
                     onManualReview={handleManualReview}
@@ -483,8 +489,11 @@ export function Workbench() {
                 researchOverview={state.research_overview}
                 agentTraces={state.agent_traces}
                 retrievalMemory={state.retrieval_memory}
+                toolBudget={state.tool_budget}
+                agentToolCalls={state.agent_tool_calls}
                 taskQueue={state.task_queue}
                 userFeedback={state.user_feedback}
+                goalRevisions={state.goal_revisions}
                 onProximityOverride={handleProximityOverride}
                 onProximityClusterOverride={handleProximityClusterOverride}
                 onProximityClusterAssignment={handleProximityClusterAssignment}

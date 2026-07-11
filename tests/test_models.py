@@ -1,5 +1,7 @@
 from code_scientist.models import (
+    AgentToolCall,
     AgentTrace,
+    AssumptionCheck,
     BenchmarkResult,
     ContextSnapshot,
     EloConcordanceResult,
@@ -21,6 +23,7 @@ from code_scientist.models import (
     ScalingCurvePoint,
     Task,
     TestPlan,
+    ToolBudgetState,
     UserFeedback,
 )
 import code_scientist.models as models_module
@@ -50,6 +53,69 @@ def test_hypothesis_round_trips_to_dict():
     assert restored == hypothesis
     assert restored.elo == 1200.0
     assert restored.status == "candidate"
+
+
+def test_review_round_trips_assumption_checks_and_loads_old_defaults():
+    check = AssumptionCheck(
+        id="assumption-check-1",
+        assumption="The critic can identify false premises.",
+        parent_assumption="",
+        depth=0,
+        verdict="contradicted",
+        fundamental=True,
+        invalidates_hypothesis=True,
+        evidence_refs=["ev-contradiction"],
+        reasoning="Retrieved benchmark evidence reports no improvement.",
+    )
+    review = Review(
+        id="rev-1",
+        hypothesis_id="hyp-1",
+        decision="reject",
+        scores={"plausibility": 1},
+        strengths=[],
+        weaknesses=["fundamental assumption contradicted"],
+        safety_notes=[],
+        review_type="deep_verification",
+        assumption_checks=[check],
+    )
+
+    assert Review.from_dict(review.to_dict()) == review
+
+    old_data = review.to_dict()
+    old_data.pop("assumption_checks")
+    assert Review.from_dict(old_data).assumption_checks == []
+
+
+def test_run_state_round_trips_tool_budget_and_agent_tool_calls_with_old_defaults():
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    call = AgentToolCall(
+        id="tool-call-1",
+        cycle=2,
+        task_id="task-review-1",
+        agent="reflection",
+        tool="web_search",
+        query="critic before edit prior art",
+        rationale="Check novelty before tournament entry.",
+        status="completed",
+        evidence_refs=["ev-web-1"],
+        blocked_reasons=[],
+        budget_before=3,
+        budget_after=2,
+    )
+    state = RunState(
+        goal=goal,
+        tool_budget=ToolBudgetState(limit=4, used=2),
+        agent_tool_calls=[call],
+    )
+
+    assert RunState.from_dict(state.to_dict()) == state
+
+    old_data = state.to_dict()
+    old_data.pop("tool_budget")
+    old_data.pop("agent_tool_calls")
+    restored = RunState.from_dict(old_data)
+    assert restored.tool_budget is None
+    assert restored.agent_tool_calls == []
 
 
 def test_hypothesis_round_trips_generation_trace_and_loads_old_defaults():
@@ -493,16 +559,24 @@ def test_task_round_trips_worker_state_and_loads_old_defaults():
             "last_event": "scheduled",
             "attempt": 0,
         },
+        depends_on=["task-prerequisite"],
+        resource_class="llm",
     )
     old_task = task.to_dict()
     old_task.pop("worker_state")
+    old_task.pop("depends_on")
+    old_task.pop("resource_class")
 
     restored = Task.from_dict(task.to_dict())
     restored_old = Task.from_dict(old_task)
 
     assert restored.worker_state["last_event"] == "scheduled"
     assert restored.worker_state["attempt"] == 0
+    assert restored.depends_on == ["task-prerequisite"]
+    assert restored.resource_class == "llm"
     assert restored_old.worker_state == {}
+    assert restored_old.depends_on == []
+    assert restored_old.resource_class == "default"
 
 
 def test_review_round_trips_review_trace_and_loads_old_defaults():

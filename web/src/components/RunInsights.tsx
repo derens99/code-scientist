@@ -4,11 +4,13 @@ import { useState } from "react";
 import { Badge, Button, Group, Paper, ScrollArea, Stack, Tabs, Text, TextInput, Title } from "@mantine/core";
 import { Activity, Brain, Database, FileText, GitMerge, Sparkles } from "lucide-react";
 import type {
+  AgentToolCall,
   AgentTrace,
   BenchmarkResult,
   CapabilityEvaluation,
   ContextSnapshot,
   FeedbackLoopEvaluation,
+  GoalRevision,
   Hypothesis,
   Match,
   MetaReview,
@@ -21,6 +23,7 @@ import type {
   SafetyEvaluationResult,
   ScalingCurvePoint,
   Task,
+  ToolBudgetState,
   UserFeedback
 } from "@/lib/types";
 
@@ -41,8 +44,11 @@ type RunInsightsProps = {
   researchOverview?: ResearchOverview | null;
   agentTraces?: AgentTrace[];
   retrievalMemory?: RetrievalMemoryRecord[];
+  toolBudget?: ToolBudgetState | null;
+  agentToolCalls?: AgentToolCall[];
   taskQueue?: Task[];
   userFeedback?: UserFeedback[];
+  goalRevisions?: GoalRevision[];
   onProximityOverride?: (edge: ProximityEdge, decision: "merge" | "preserve") => void;
   onProximityClusterOverride?: (clusterId: string, decision: "merge" | "preserve") => void;
   onProximityClusterAssignment?: (edge: ProximityEdge, clusterId: string) => void;
@@ -106,8 +112,11 @@ export function RunInsights({
   researchOverview = null,
   agentTraces = [],
   retrievalMemory = [],
+  toolBudget = null,
+  agentToolCalls = [],
   taskQueue = [],
   userFeedback = [],
+  goalRevisions = [],
   onProximityOverride,
   onProximityClusterOverride,
   onProximityClusterAssignment,
@@ -177,7 +186,10 @@ export function RunInsights({
             plan={plan}
             contextSnapshots={contextSnapshots}
             retrievalMemory={retrievalMemory}
+            toolBudget={toolBudget}
+            agentToolCalls={agentToolCalls}
             taskQueue={taskQueue}
+            goalRevisions={goalRevisions}
             proximityEdges={proximityEdges}
             hypotheses={byId}
             onProximityOverride={onProximityOverride}
@@ -241,6 +253,16 @@ function MatchPanel({
             <Badge color="yellow" variant="light">
               Uncertainty {formatMetric(match.uncertainty ?? 0)}
             </Badge>
+            {match.judge_trace?.includes("position_stable=") ? (
+              <Badge
+                color={match.judge_trace.includes("position_stable=false") ? "red" : "green"}
+                variant="light"
+              >
+                {match.judge_trace.includes("position_stable=false")
+                  ? "Order disagreement"
+                  : "Order stable"}
+              </Badge>
+            ) : null}
           </Group>
           {match.review_refs?.length ? (
             <Text size="xs" c="dimmed">
@@ -475,6 +497,16 @@ function BenchmarkPanel({
               <Text size="xs" c="dimmed">
                 Failed cases: {evaluation.failed_case_ids.join(", ") || "none"}
               </Text>
+              {evaluation.topic_results ? (
+                <Text size="xs" c="dimmed">
+                  Base {formatMetric(evaluation.base_pass_rate ?? 0)}; variants{" "}
+                  {formatMetric(evaluation.variant_pass_rate ?? 0)}; degradation{" "}
+                  {formatMetric(evaluation.degradation_rate ?? 0)}. Topics:{" "}
+                  {Object.entries(evaluation.topic_results)
+                    .map(([topic, result]) => `${topic} ${result.passed_count}/${result.case_count}`)
+                    .join(", ")}
+                </Text>
+              ) : null}
             </Stack>
             <Badge color={evaluation.failed_count ? "red" : "green"} variant="light">
               {evaluation.failed_count ? "Failures" : "Passed"}
@@ -665,7 +697,10 @@ function PlanContextPanel({
   plan,
   contextSnapshots,
   retrievalMemory,
+  toolBudget,
+  agentToolCalls,
   taskQueue,
+  goalRevisions,
   proximityEdges,
   hypotheses,
   onProximityOverride,
@@ -676,7 +711,10 @@ function PlanContextPanel({
   plan?: ResearchPlanConfig | null;
   contextSnapshots: ContextSnapshot[];
   retrievalMemory: RetrievalMemoryRecord[];
+  toolBudget: ToolBudgetState | null;
+  agentToolCalls: AgentToolCall[];
   taskQueue: Task[];
+  goalRevisions: GoalRevision[];
   proximityEdges: ProximityEdge[];
   hypotheses: Map<string, Hypothesis>;
   onProximityOverride?: (edge: ProximityEdge, decision: "merge" | "preserve") => void;
@@ -712,6 +750,29 @@ function PlanContextPanel({
       ) : (
         <EmptyText>No research plan configuration recorded for this run.</EmptyText>
       )}
+
+      {goalRevisions.length ? (
+        <Stack gap="xs">
+          <Title order={3}>Goal revision history</Title>
+          {goalRevisions.map((revision) => (
+            <Paper key={revision.id} p="xs" withBorder radius="sm" bg="#fbfcfe">
+              <Stack gap={3}>
+                <Group justify="space-between" gap="xs">
+                  <Text size="sm" fw={700}>Revision {revision.revision}</Text>
+                  <Badge color={revision.approval_status === "approved" ? "green" : "red"} variant="light">
+                    {revision.approval_status}
+                  </Badge>
+                </Group>
+                <Text size="xs" c="dimmed">
+                  {revision.prior_goal_id} to {revision.new_goal_id}; {revision.affected_task_ids.length} queued tasks affected
+                </Text>
+                {revision.user_message ? <Text size="sm">{revision.user_message}</Text> : null}
+                {!revision.safety.allowed ? <Text size="xs" c="red">{revision.safety.reason}</Text> : null}
+              </Stack>
+            </Paper>
+          ))}
+        </Stack>
+      ) : null}
 
       {latest ? (
         <Stack gap="xs">
@@ -750,6 +811,37 @@ function PlanContextPanel({
                     Evidence: {record.evidence_refs.slice(0, 5).join(", ")}
                   </Text>
                 ) : null}
+              </Stack>
+            </Paper>
+          ))}
+        </Stack>
+      ) : null}
+
+      {toolBudget ? (
+        <Stack gap="xs">
+          <Title order={3}>Agent tool budget</Title>
+          <Group gap={6}>
+            <Badge variant="light">{toolBudget.used} used</Badge>
+            <Badge variant="light">{Math.max(toolBudget.limit - toolBudget.used, 0)} remaining</Badge>
+            <Badge color={toolBudget.used >= toolBudget.limit ? "red" : "green"} variant="light">
+              limit {toolBudget.limit}
+            </Badge>
+          </Group>
+          {agentToolCalls.slice(-5).map((call) => (
+            <Paper key={call.id} p="xs" withBorder radius="sm" bg="#fbfcfe">
+              <Stack gap={2}>
+                <Group gap={6}>
+                  <Text size="sm" fw={700}>{call.agent} - {call.tool}</Text>
+                  <Badge size="xs" color={call.status === "completed" ? "green" : "yellow"}>
+                    {call.status}
+                  </Badge>
+                </Group>
+                <Text size="xs" c="dimmed">
+                  {call.source_ref ? `Source ref: ${call.source_ref}` : call.query}
+                </Text>
+                <Text size="xs" c="dimmed">
+                  Budget {call.budget_before} to {call.budget_after}; new evidence {call.evidence_refs.length}
+                </Text>
               </Stack>
             </Paper>
           ))}

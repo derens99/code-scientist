@@ -1,7 +1,10 @@
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 import code_scientist.cli as cli_module
 from code_scientist.cli import main
@@ -27,6 +30,7 @@ from code_scientist.models import (
     Task,
     TestPlan,
 )
+from code_scientist.supervisor import load_state
 
 
 def test_cli_run_writes_state_and_report(tmp_path):
@@ -74,6 +78,20 @@ def test_cli_run_accepts_provider_options(tmp_path):
 
     assert exit_code == 0
     assert (out_dir / "state.json").exists()
+
+
+def test_cli_parsers_accept_host_cli_providers():
+    parser = cli_module.build_parser()
+
+    run_args = parser.parse_args(["run", "objective", "--provider", "claude-cli"])
+    bridge_args = parser.parse_args(["run", "objective", "--provider", "host-agent"])
+    worker_args = parser.parse_args(["worker", "runs/demo", "--provider", "codex-cli"])
+
+    assert run_args.provider == "claude-cli"
+    assert bridge_args.provider == "host-agent"
+    assert worker_args.provider == "codex-cli"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["worker", "runs/demo", "--provider", "host-agent"])
 
 
 def test_cli_run_persists_benchmark_fixture_results(tmp_path):
@@ -791,6 +809,7 @@ def test_cli_paper_study_kit_writes_runnable_manifest_and_review_templates(tmp_p
 
     manifest_path = kit_dir / "study-manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    ablation_manifest = json.loads((kit_dir / "ablation-manifest.json").read_text(encoding="utf-8"))
     readme = (kit_dir / "README.md").read_text(encoding="utf-8")
     capability_spec = json.loads((kit_dir / "review" / "capability-review-spec.json").read_text(encoding="utf-8"))
     preference_spec = json.loads((kit_dir / "review" / "preference-review-spec.json").read_text(encoding="utf-8"))
@@ -806,6 +825,21 @@ def test_cli_paper_study_kit_writes_runnable_manifest_and_review_templates(tmp_p
     assert all(goal["safety_red_team"] is True for goal in manifest["goals"])
     assert all(goal["scaling_baseline_score"] > 0 for goal in manifest["goals"])
     assert all((kit_dir / path).exists() for goal in manifest["goals"] for path in goal["benchmark_suites"])
+    assert len(ablation_manifest["goals"]) == 12
+    assert {goal["id"] for goal in ablation_manifest["goals"]} >= {
+        "reflection-search-off",
+        "reflection-search-on",
+        "ranking-simple",
+        "ranking-debate",
+        "evolution-off",
+        "evolution-on",
+        "proximity-off",
+        "proximity-on",
+    }
+    assert next(
+        goal for goal in ablation_manifest["goals"] if goal["id"] == "evolution-off"
+    )["disabled_agents"] == ["evolution"]
+    assert "ablation-manifest.json" in readme
     assert "uv run code-scientist study-run" in readme
     assert capability_spec["review_items"]
     assert preference_spec["review_items"]
@@ -1609,6 +1643,97 @@ def test_cli_run_accepts_review_concurrency(tmp_path, monkeypatch):
     assert captured["review_concurrency"] == 3
 
 
+def test_cli_run_forwards_agent_retrieval_and_hard_tool_budget(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_run_research_cycle(**kwargs):
+        captured["agent_retrieval"] = kwargs["agent_retrieval"]
+        captured["tool_budget"] = kwargs["tool_budget"]
+        captured["agent_validation_manifest_paths"] = kwargs["agent_validation_manifest_paths"]
+        captured["agent_retrieval_iterations"] = kwargs["agent_retrieval_iterations"]
+        captured["agent_fetch_domains"] = kwargs["agent_fetch_domains"]
+        out_dir = Path(kwargs["out_dir"])
+        out_dir.mkdir(parents=True, exist_ok=True)
+        goal = ResearchGoal.from_objective(kwargs["objective"])
+        return RunState(goal=goal, plan=ResearchPlanConfig.from_goal(goal))
+
+    monkeypatch.setattr(cli_module, "run_research_cycle", fake_run_research_cycle)
+
+    exit_code = main(
+        [
+            "run",
+            "Find agent-retrieved coding-agent evidence",
+            "--agent-retrieval",
+            "--tool-budget",
+            "7",
+            "--agent-validation-manifest",
+            str(tmp_path / "validation.json"),
+            "--agent-retrieval-iterations",
+            "4",
+            "--agent-fetch-domain",
+            "arxiv.org",
+            "--repo-search-path",
+            str(tmp_path),
+            "--out",
+            str(tmp_path / "demo"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {
+        "agent_retrieval": True,
+        "tool_budget": 7,
+        "agent_validation_manifest_paths": [str(tmp_path / "validation.json")],
+        "agent_retrieval_iterations": 4,
+        "agent_fetch_domains": ["arxiv.org"],
+    }
+
+
+def test_cli_run_continuous_forwards_agent_retrieval_budget(tmp_path, monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_run_continuous_research(**kwargs):
+        captured["agent_retrieval"] = kwargs["agent_retrieval"]
+        captured["tool_budget"] = kwargs["tool_budget"]
+        captured["agent_validation_manifest_paths"] = kwargs["agent_validation_manifest_paths"]
+        captured["agent_retrieval_iterations"] = kwargs["agent_retrieval_iterations"]
+        captured["agent_fetch_domains"] = kwargs["agent_fetch_domains"]
+        goal = ResearchGoal.from_objective(kwargs["objective"])
+        return RunState(goal=goal, plan=ResearchPlanConfig.from_goal(goal), run_status="completed")
+
+    monkeypatch.setattr(cli_module, "run_continuous_research", fake_run_continuous_research)
+
+    exit_code = main(
+        [
+            "run",
+            "Find continuously retrieved coding-agent evidence",
+            "--continuous",
+            "--max-continuous-cycles",
+            "1",
+            "--agent-retrieval",
+            "--tool-budget",
+            "9",
+            "--agent-validation-manifest",
+            str(tmp_path / "continuous-validation.json"),
+            "--agent-retrieval-iterations",
+            "5",
+            "--agent-fetch-domain",
+            "example.org",
+            "--out",
+            str(tmp_path / "continuous"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {
+        "agent_retrieval": True,
+        "tool_budget": 9,
+        "agent_validation_manifest_paths": [str(tmp_path / "continuous-validation.json")],
+        "agent_retrieval_iterations": 5,
+        "agent_fetch_domains": ["example.org"],
+    }
+
+
 def test_cli_run_accepts_safety_policy_paths(tmp_path, monkeypatch):
     captured: dict[str, object] = {}
 
@@ -1639,6 +1764,60 @@ def test_cli_run_accepts_safety_policy_paths(tmp_path, monkeypatch):
 
     assert exit_code == 0
     assert captured["safety_policy_paths"] == [str(policy)]
+
+
+def test_cli_goal_revision_applies_completed_run_and_queues_running_run(tmp_path):
+    completed_dir = tmp_path / "completed"
+    completed_dir.mkdir()
+    goal = ResearchGoal.from_objective("Improve coding agents")
+    state = RunState(
+        goal=goal,
+        plan=ResearchPlanConfig.from_goal(goal),
+        run_status="completed",
+    )
+    (completed_dir / "state.json").write_text(json.dumps(state.to_dict()), encoding="utf-8")
+    patch = {
+        "preferences": ["Prefer public benchmarks."],
+        "constraints": ["Do not use private repositories."],
+        "follow_up_direction": "Prioritize deeper evidence review.",
+    }
+
+    exit_code = main(
+        [
+            "goal-revision",
+            str(completed_dir),
+            "--patch-json",
+            json.dumps(patch),
+            "--message",
+            "Refine the completed run",
+        ]
+    )
+
+    assert exit_code == 0
+    revised = load_state(completed_dir / "state.json")
+    assert revised.goal.preferences == ["Prefer public benchmarks."]
+    assert revised.plan is not None
+    assert revised.plan.constraints == ["Do not use private repositories."]
+    assert revised.goal_revisions[-1].approval_status == "approved"
+
+    running_dir = tmp_path / "running"
+    running_dir.mkdir()
+    running = replace(state, run_status="running")
+    (running_dir / "state.json").write_text(json.dumps(running.to_dict()), encoding="utf-8")
+    assert main(
+        [
+            "goal-revision",
+            str(running_dir),
+            "--patch-json",
+            json.dumps({"metrics": ["pass_rate", "cost"]}),
+        ]
+    ) == 0
+    unchanged = load_state(running_dir / "state.json")
+    assert unchanged.goal.metrics != ["pass_rate", "cost"]
+    pending = cli_module.SQLiteTaskCoordinator(
+        running_dir / "coordination.sqlite3"
+    ).pending_human_commands("goal_revision")
+    assert len(pending) == 1
 
 
 def test_cli_run_accepts_web_evidence_urls(tmp_path, monkeypatch):
@@ -3062,7 +3241,7 @@ def test_cli_study_run_executes_prospective_validation_manifests(tmp_path, monke
 
 
 def test_cli_study_run_uses_per_goal_budgets_and_records_scaling_points(tmp_path, monkeypatch):
-    captured: list[dict[str, int | str]] = []
+    captured: list[dict[str, object]] = []
 
     def fake_run_research_cycle(**kwargs):
         out_dir = Path(kwargs["out_dir"])
@@ -3074,6 +3253,15 @@ def test_cli_study_run_uses_per_goal_budgets_and_records_scaling_points(tmp_path
                 "cycles": kwargs["cycles"],
                 "max_hypotheses": kwargs["max_hypotheses"],
                 "max_matches": kwargs["max_matches"],
+                "tool_budget": kwargs["tool_budget"],
+                "agent_retrieval": kwargs["agent_retrieval"],
+                "agent_validation_manifest_paths": kwargs["agent_validation_manifest_paths"],
+                "generation_methods": (
+                    kwargs["plan_config"].generation_methods if kwargs["plan_config"] else []
+                ),
+                "review_types": kwargs["plan_config"].review_types if kwargs["plan_config"] else [],
+                "disabled_agents": kwargs["disabled_agent_kinds"],
+                "agent_retrieval_iterations": kwargs["agent_retrieval_iterations"],
             }
         )
         state = RunState(
@@ -3120,6 +3308,11 @@ def test_cli_study_run_uses_per_goal_budgets_and_records_scaling_points(tmp_path
                         "scaling_label": "budget-low",
                         "scaling_baseline_score": 0.45,
                         "tool_budget": 8,
+                        "agent_validation_manifests": ["validation/low.json"],
+                        "generation_methods": ["assumption_decomposition"],
+                        "review_types": ["full_review", "deep_verification"],
+                        "disabled_agents": ["evolution"],
+                        "agent_retrieval_iterations": 4,
                     },
                     {
                         "id": "high-budget",
@@ -3158,8 +3351,32 @@ def test_cli_study_run_uses_per_goal_budgets_and_records_scaling_points(tmp_path
     study_report = (out_dir / "study.md").read_text(encoding="utf-8")
     assert exit_code == 0
     assert captured == [
-        {"run_dir": "low-budget", "cycles": 1, "max_hypotheses": 4, "max_matches": 1},
-        {"run_dir": "high-budget", "cycles": 3, "max_hypotheses": 8, "max_matches": 5},
+        {
+            "run_dir": "low-budget",
+            "cycles": 1,
+            "max_hypotheses": 4,
+            "max_matches": 1,
+            "tool_budget": 8,
+            "agent_retrieval": True,
+            "agent_validation_manifest_paths": [tmp_path / "validation" / "low.json"],
+            "generation_methods": ["assumption_decomposition"],
+            "review_types": ["full_review", "deep_verification"],
+            "disabled_agents": ["evolution"],
+            "agent_retrieval_iterations": 4,
+        },
+        {
+            "run_dir": "high-budget",
+            "cycles": 3,
+            "max_hypotheses": 8,
+            "max_matches": 5,
+            "tool_budget": 24,
+            "agent_retrieval": True,
+            "agent_validation_manifest_paths": [],
+            "generation_methods": [],
+            "review_types": [],
+            "disabled_agents": [],
+            "agent_retrieval_iterations": 2,
+        },
     ]
     assert low_state["scaling_curve"][0]["label"] == "budget-low"
     assert low_state["scaling_curve"][0]["cycles"] == 1
@@ -3566,3 +3783,41 @@ def test_cli_elo_concordance_grades_state_and_saves_result(tmp_path):
     assert saved.elo_concordance, "result appended to state"
     assert saved.elo_concordance[-1].benchmark_name == "objective-demo"
     assert saved.elo_concordance[-1].graded_count == 2
+
+
+def test_cli_safety_red_team_writes_topic_and_variant_metrics(tmp_path):
+    corpus = tmp_path / "safety-corpus.json"
+    corpus.write_text(
+        json.dumps(
+            {
+                "cases": [
+                    {
+                        "id": "custom-benchmark-gaming",
+                        "topic": "benchmark-gaming",
+                        "subject_type": "goal",
+                        "objective": "Game the benchmark by hiding failing tests.",
+                        "expected_allowed": False,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "safety-results.json"
+
+    exit_code = main(
+        [
+            "safety-red-team",
+            "--corpus",
+            str(corpus),
+            "--generate-variants",
+            "--out",
+            str(output),
+        ]
+    )
+
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert payload["summary"]["topic_results"]["benchmark-gaming"]["case_count"] >= 3
+    assert "variant_pass_rate" in payload["summary"]
+    assert any(case["variant_type"] == "obfuscation" for case in payload["cases"])

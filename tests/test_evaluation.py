@@ -1,4 +1,5 @@
 import json
+import sys
 
 import pytest
 
@@ -17,6 +18,7 @@ from code_scientist.evaluation import (
     record_scaling_curve_point,
     record_prospective_measurement,
     run_prospective_validation_manifest,
+    run_agent_validation_manifest,
     retrospective_benchmark_fixtures,
     summarize_capability_study,
 )
@@ -248,6 +250,117 @@ def test_run_prospective_validation_manifest_rejects_shell_string_commands(tmp_p
     )
 
     with pytest.raises(ValueError, match="command must be a non-empty list"):
+        run_prospective_validation_manifest(manifest, state, work_dir=tmp_path / "work")
+
+
+def test_run_agent_validation_manifest_executes_researcher_command_for_target_hypothesis(tmp_path):
+    target = _hypothesis("hyp-target", 1240)
+    state = RunState(goal=ResearchGoal.from_objective("Improve empirical validation"))
+    manifest = tmp_path / "agent-validation.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "implementation_refs": ["local/empirical-probe"],
+                "baseline_metrics": {"pass_rate": 0.4},
+                "success_metric": "pass_rate",
+                "command": [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import json, os; from pathlib import Path; "
+                        "payload=json.loads(Path(os.environ['CODE_SCIENTIST_HYPOTHESIS_PATH']).read_text()); "
+                        "assert payload['hypothesis']['id'] == 'hyp-target'; "
+                        "Path(os.environ['CODE_SCIENTIST_METRICS_PATH']).write_text("
+                        "json.dumps({'metrics': {'pass_rate': 0.73}, 'notes': ['in-loop probe']}))"
+                    ),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    evidence = run_agent_validation_manifest(
+        manifest,
+        state,
+        target,
+        work_dir=tmp_path / "work",
+    )
+
+    assert evidence.kind == "agent_empirical_validation"
+    assert evidence.metadata["tool"] == "empirical_validation"
+    assert evidence.metadata["hypothesis_id"] == "hyp-target"
+    assert '"pass_rate": 0.73' in evidence.content
+    assert evidence.metadata["isolation_level"] == "host_restricted_not_sandboxed"
+    assert evidence.metadata["ambient_secrets_inherited"] == "false"
+
+
+def test_validation_runner_uses_secret_free_environment_and_hardened_policy_fails_closed(
+    tmp_path,
+    monkeypatch,
+):
+    target = _hypothesis("hyp-env", 1200)
+    state = RunState(
+        goal=ResearchGoal.from_objective("Improve validation isolation"),
+        hypotheses=[target],
+    )
+    monkeypatch.setenv("SYNTHETIC_SECRET_TOKEN", "must-not-leak")
+    manifest = tmp_path / "restricted-validation.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "hypothesis_id": target.id,
+                "baseline_metrics": {"pass_rate": 0.4},
+                "success_metric": "pass_rate",
+                "execution_policy": "trusted_local",
+                "command": [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import json, os; from pathlib import Path; "
+                        "assert 'SYNTHETIC_SECRET_TOKEN' not in os.environ; "
+                        "Path(os.environ['CODE_SCIENTIST_METRICS_PATH']).write_text("
+                        "json.dumps({'metrics': {'pass_rate': 0.6}}))"
+                    ),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_prospective_validation_manifest(
+        manifest,
+        state,
+        work_dir=tmp_path / "work",
+    )
+
+    assert result["execution_attestation"]["ambient_secrets_inherited"] is False
+    assert result["execution_attestation"]["process_group_isolated"] is True
+
+    data = json.loads(manifest.read_text())
+    data["execution_policy"] = "hardened"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="container or VM runner"):
+        run_prospective_validation_manifest(manifest, state, work_dir=tmp_path / "hardened")
+
+
+def test_validation_manifest_rejects_secret_environment_values(tmp_path):
+    target = _hypothesis("hyp-secret-env", 1200)
+    state = RunState(goal=ResearchGoal.from_objective("Improve validation"), hypotheses=[target])
+    manifest = tmp_path / "secret-env.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "hypothesis_id": target.id,
+                "baseline_metrics": {"pass_rate": 0.4},
+                "success_metric": "pass_rate",
+                "env": {"API_TOKEN": "not-allowed"},
+                "command": [sys.executable, "-c", "print('{}')"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="may expose a secret"):
         run_prospective_validation_manifest(manifest, state, work_dir=tmp_path / "work")
 
 

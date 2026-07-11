@@ -21,20 +21,39 @@ If the user supplies no objective, or asks to "find something to research", use 
 
 Pick the run level from the user's intent before choosing flags:
 
-**Research-grade (default when the user wants real research, new ideas, or discoveries).** The deterministic provider assembles hypotheses from fixed blueprints — it can never produce a novel discovery. Legitimate new hypotheses require the LLM provider plus grounded evidence:
+**Research-grade (default when the user wants real research, new ideas, or discoveries).** The deterministic provider assembles hypotheses from fixed blueprints — it can never produce a novel discovery. Legitimate new hypotheses require an LLM provider plus grounded evidence:
 
-- Confirm `ANTHROPIC_API_KEY` is available (environment or `.env`; the run command reads `--env-file .env` by default). If it is missing, say so and ask the user for it — do not silently fall back to deterministic and present the output as research.
-- Run with `--provider anthropic`.
-- Budgets: `--cycles 3 --max-hypotheses 10 --max-matches 8` (scale up if the user asks for depth; multiple cycles are required for the meta-review feedback loop to influence later generations).
+- Provider selection:
+  1. Default: `--provider host-agent`. The engine routes every LLM call to this session through the run's file bridge (see "Host-Agent Bridge Loop" below) — you and your subagents are the model, with no API key and no extra login.
+  2. `--provider anthropic` only when the user explicitly asks for an API-backed run. Never pick it just because `ANTHROPIC_API_KEY` happens to exist in the environment or `.env`.
+  3. `--provider codex-cli` or `--provider claude-cli` when the user wants a detached or headless run: each provider call shells out to `codex exec` / `claude -p` using that CLI's own login. Confirm the binary answers first (an expired login fails with 401).
+  4. If the user picked a provider explicitly, use it as given.
+- Budgets: `--cycles 3 --max-hypotheses 10 --max-matches 8` (scale up if the user asks for depth; multiple cycles are required for the meta-review feedback loop to influence later generations). For host-agent runs add `--review-concurrency 3` so review requests arrive in batches you can fan out to subagents, and trim budgets (for example `--cycles 2 --max-hypotheses 8 --max-matches 4`) when the user wants a faster loop.
 - Ground the run in real evidence — pass at least one of:
   - `--repo-search-path <path>` pointing at the code the objective concerns,
   - `--web-search-query "<objective keywords>"` (1-3 focused queries),
   - `--evidence-path <notes.md>` for local findings, or `--literature-search-query` for paper-style sourcing.
 - Packet limit: `3`-`5`.
+- `--pdf-vision` requires `--provider anthropic`; host-CLI providers cannot send image payloads.
 
 **Smoke (only for wiring checks, demos, or when the user explicitly asks for a dry run).** Deterministic provider with `--cycles 1 --max-hypotheses 6 --max-matches 2` and packet limit `3`. Label the output as a deterministic dry run, never as research findings.
 
 Run directory: `runs/<safe-objective-slug>`. Always use `uv` for Python commands.
+
+## Host-Agent Bridge Loop (`--provider host-agent`)
+
+The engine blocks each of its LLM calls on a file handshake that this session answers — the built-in agents are the model.
+
+1. Start the run in the background (do not block waiting for it):
+   - `uv run code-scientist run "<objective>" --provider host-agent --review-concurrency 3 <other flags> --out runs/<run-id>`
+2. Loop until the run process exits:
+   - List `runs/<run-id>/llm-bridge/requests/*.json`. Each file is one pending call; it disappears once the engine consumes its answer.
+   - For each pending request, read its `id`, `prompt`, and `max_tokens`, produce the completion the prompt asks for, and write `runs/<run-id>/llm-bridge/responses/<id>.json` containing exactly `{"id": "<id>", "response": "<completion text>"}`.
+   - Follow the prompt's requested output format precisely — usually bare JSON. Return raw text with no markdown fences and no commentary, sized within the request's `max_tokens`.
+   - Answer short prompts inline. When several requests are pending at once (parallel reviews), spawn one subagent per request and write each response as it returns.
+   - If a request cannot be answered, write `{"id": "<id>", "error": "<short reason>"}` so the engine fails that call cleanly instead of waiting on it.
+   - If no requests are pending and the process is still running, wait briefly and poll again.
+3. A request left unanswered for 600 seconds fails that engine call, so stay in the loop until the run process exits, then continue the workflow (report, packets, reviewers).
 
 ## Workflow
 
@@ -48,7 +67,8 @@ Run directory: `runs/<safe-objective-slug>`. Always use `uv` for Python commands
    - If discovery returns nothing, say so and ask the user for an objective instead of inventing one.
 3. If the user supplied an existing state file, skip directly to packet generation.
 4. Otherwise run Code Scientist:
-   - `uv run code-scientist run "<objective>" --cycles <n> --max-hypotheses <n> --max-matches <n> --out runs/<run-id>`
+   - `uv run code-scientist run "<objective>" --provider host-agent --cycles <n> --max-hypotheses <n> --max-matches <n> --out runs/<run-id>`
+   - For host-agent runs, start the command in the background and drive the Host-Agent Bridge Loop above until it exits.
    - Preserve user-supplied flags such as `--provider`, `--goal-brief`, `--evidence-path`, `--evidence-index`, `--repo-search-path`, `--web-search-query`, or `--continuous`.
 5. Generate subagent packets:
    - `uv run code-scientist agent-packets runs/<run-id>/state.json --out runs/<run-id>/agent-packets --limit <n>`

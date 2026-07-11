@@ -8,9 +8,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ run
     const { runId } = await params;
     const body = await request.json();
     const state = await updateRunGuidance(runId, {
+      objective: String(body.objective ?? ""),
       preferences: toStringList(body.preferences),
       constraints: toStringList(body.constraints),
+      metrics: toStringList(body.metrics),
+      safetyNotes: toStringList(body.safetyNotes),
       allowedSources: toStringList(body.allowedSources),
+      allowedTools: toStringList(body.allowedTools),
+      outputFormats: toStringList(body.outputFormats),
+      terminationCriteria: toStringList(body.terminationCriteria),
       followUpDirection: String(body.followUpDirection ?? "")
     });
     return NextResponse.json({ state });

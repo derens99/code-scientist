@@ -14,11 +14,17 @@ import type { Hypothesis } from "@/lib/types";
 
 type HumanInputPanelProps = {
   goalId: string;
+  goalObjective: string;
   selectedHypothesis: Hypothesis | null;
   submitting: boolean;
   goalPreferences: string[];
   goalConstraints: string[];
+  goalMetrics: string[];
+  goalSafetyNotes: string[];
   allowedSources: string[];
+  allowedTools: string[];
+  outputFormats: string[];
+  terminationCriteria: string[];
   onFeedback: (payload: UserFeedbackPayload) => Promise<void>;
   onManualHypothesis: (payload: ManualHypothesisPayload) => Promise<void>;
   onManualReview: (payload: ManualReviewPayload) => Promise<void>;
@@ -29,11 +35,17 @@ type HumanInputPanelProps = {
 
 export function HumanInputPanel({
   goalId,
+  goalObjective,
   selectedHypothesis,
   submitting,
   goalPreferences,
   goalConstraints,
+  goalMetrics,
+  goalSafetyNotes,
   allowedSources,
+  allowedTools,
+  outputFormats,
+  terminationCriteria,
   onFeedback,
   onManualHypothesis,
   onManualReview,
@@ -61,17 +73,39 @@ export function HumanInputPanel({
   const [reviewEvidenceRefs, setReviewEvidenceRefs] = useState("");
   const [confidence, setConfidence] = useState(0.6);
   const [requiresRevision, setRequiresRevision] = useState(true);
+  const [objectiveRevision, setObjectiveRevision] = useState(goalObjective);
   const [preferences, setPreferences] = useState(goalPreferences.join("\n"));
   const [constraints, setConstraints] = useState(goalConstraints.join("\n"));
   const [sourceSelection, setSourceSelection] = useState(allowedSources.join(", "));
+  const [metricSelection, setMetricSelection] = useState(goalMetrics.join(", "));
+  const [safetySelection, setSafetySelection] = useState(goalSafetyNotes.join("\n"));
+  const [toolSelection, setToolSelection] = useState(allowedTools.join(", "));
+  const [formatSelection, setFormatSelection] = useState(outputFormats.join(", "));
+  const [terminationSelection, setTerminationSelection] = useState(terminationCriteria.join("\n"));
   const [followUpDirection, setFollowUpDirection] = useState("");
   const [command, setCommand] = useState("");
 
   useEffect(() => {
+    setObjectiveRevision(goalObjective);
     setPreferences(goalPreferences.join("\n"));
     setConstraints(goalConstraints.join("\n"));
     setSourceSelection(allowedSources.join(", "));
-  }, [allowedSources, goalConstraints, goalPreferences]);
+    setMetricSelection(goalMetrics.join(", "));
+    setSafetySelection(goalSafetyNotes.join("\n"));
+    setToolSelection(allowedTools.join(", "));
+    setFormatSelection(outputFormats.join(", "));
+    setTerminationSelection(terminationCriteria.join("\n"));
+  }, [
+    allowedSources,
+    allowedTools,
+    goalConstraints,
+    goalMetrics,
+    goalObjective,
+    goalPreferences,
+    goalSafetyNotes,
+    outputFormats,
+    terminationCriteria
+  ]);
 
   const feedbackKindValue = selectedHypothesis ? feedbackKind : "goal_refinement";
   const feedbackKindOptions = selectedHypothesis
@@ -152,9 +186,15 @@ export function HumanInputPanel({
   async function submitGuidance(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await onGuidance({
+      objective: objectiveRevision,
       preferences: toList(preferences),
       constraints: toList(constraints),
+      metrics: toList(metricSelection),
+      safetyNotes: toList(safetySelection),
       allowedSources: toList(sourceSelection),
+      allowedTools: toList(toolSelection),
+      outputFormats: toList(formatSelection),
+      terminationCriteria: toList(terminationSelection),
       followUpDirection
     });
     setFollowUpDirection("");
@@ -217,6 +257,13 @@ export function HumanInputPanel({
           <Tabs.Panel value="feedback" pt="md">
             <form onSubmit={(event) => void submitFeedback(event)}>
               <Stack gap="sm">
+                <Textarea
+                  label="Research objective"
+                  value={objectiveRevision}
+                  onChange={(event) => setObjectiveRevision(event.currentTarget.value)}
+                  autosize
+                  minRows={2}
+                />
                 <Group grow align="flex-start">
                   <Select
                     label="Kind"
@@ -351,6 +398,35 @@ export function HumanInputPanel({
                   value={sourceSelection}
                   onChange={(event) => setSourceSelection(event.currentTarget.value)}
                 />
+                <TextInput
+                  label="Metrics"
+                  value={metricSelection}
+                  onChange={(event) => setMetricSelection(event.currentTarget.value)}
+                />
+                <Textarea
+                  label="Safety notes"
+                  value={safetySelection}
+                  onChange={(event) => setSafetySelection(event.currentTarget.value)}
+                  autosize
+                  minRows={2}
+                />
+                <TextInput
+                  label="Allowed tools"
+                  value={toolSelection}
+                  onChange={(event) => setToolSelection(event.currentTarget.value)}
+                />
+                <TextInput
+                  label="Output formats"
+                  value={formatSelection}
+                  onChange={(event) => setFormatSelection(event.currentTarget.value)}
+                />
+                <Textarea
+                  label="Termination criteria"
+                  value={terminationSelection}
+                  onChange={(event) => setTerminationSelection(event.currentTarget.value)}
+                  autosize
+                  minRows={2}
+                />
                 <Textarea
                   label="Follow-up direction"
                   value={followUpDirection}
@@ -361,7 +437,7 @@ export function HumanInputPanel({
                 <Button
                   type="submit"
                   leftSection={<Settings2 size={16} />}
-                  disabled={!preferences.trim() && !constraints.trim() && !sourceSelection.trim() && !followUpDirection.trim()}
+                  disabled={!objectiveRevision.trim()}
                   loading={submitting}
                 >
                   Update guidance

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from code_scientist.benchmarks import (
     summarize_benchmark_comparison_study,
 )
 from code_scientist.concordance import compute_elo_concordance, grade_hypotheses, load_objective_benchmark
+from code_scientist.coordination import SQLiteTaskCoordinator
 from code_scientist.evidence import EvidenceStore
 from code_scientist.evidence import merge_evidence
 from code_scientist.evaluation import (
@@ -34,8 +36,8 @@ from code_scientist.evaluation import (
     record_scaling_curve_point,
     run_prospective_validation_manifest,
 )
-from code_scientist.llm import DEFAULT_ANTHROPIC_MODEL
-from code_scientist.models import UserFeedback, stable_id
+from code_scientist.llm import DEFAULT_ANTHROPIC_MODEL, PROVIDER_CHOICES, WORKER_PROVIDER_CHOICES
+from code_scientist.models import ResearchGoal, ResearchPlanConfig, UserFeedback, stable_id
 from code_scientist.objective_discovery import discover_objectives
 from code_scientist.reporting import (
     render_benchmark_comparison_study_report,
@@ -49,7 +51,14 @@ from code_scientist.safety import (
     summarize_safety_red_team_suite,
 )
 from code_scientist.study_assets import write_paper_study_kit, write_paper_study_materials
-from code_scientist.supervisor import load_state, run_continuous_research, run_research_cycle
+from code_scientist.supervisor import (
+    _apply_pending_goal_commands,
+    _write_state,
+    load_state,
+    run_continuous_research,
+    run_research_cycle,
+)
+from code_scientist.worker import run_packet_worker
 
 
 @dataclass(frozen=True)
@@ -81,6 +90,7 @@ class StudyGoalSpec:
     capability_eval_fixtures: list[str] = field(default_factory=list)
     prospective_eval_fixtures: list[str] = field(default_factory=list)
     prospective_validation_manifests: list[str] = field(default_factory=list)
+    agent_validation_manifests: list[str] = field(default_factory=list)
     feedback_loop_eval_fixtures: list[str] = field(default_factory=list)
     feedback_loop_review_fixtures: list[str] = field(default_factory=list)
     capability_review_fixtures: list[str] = field(default_factory=list)
@@ -90,6 +100,13 @@ class StudyGoalSpec:
     web_search_fetch: bool | None = None
     web_search_crawl_depth: int | None = None
     literature_full_text: bool | None = None
+    generation_methods: list[str] = field(default_factory=list)
+    review_types: list[str] = field(default_factory=list)
+    evolution_strategies: list[str] = field(default_factory=list)
+    scheduler_weights: dict[str, float] = field(default_factory=dict)
+    disabled_agents: list[str] = field(default_factory=list)
+    agent_retrieval_iterations: int | None = None
+    agent_fetch_domains: list[str] = field(default_factory=list)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -101,9 +118,15 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--cycles", type=int, default=1)
     run_parser.add_argument("--max-hypotheses", type=int, default=6)
     run_parser.add_argument("--max-matches", type=int, default=4)
-    run_parser.add_argument("--provider", choices=["deterministic", "anthropic"], default="deterministic")
+    run_parser.add_argument("--provider", choices=list(PROVIDER_CHOICES), default="deterministic")
     run_parser.add_argument("--model", default=DEFAULT_ANTHROPIC_MODEL)
     run_parser.add_argument("--max-tokens", type=int, default=4096)
+    run_parser.add_argument(
+        "--provider-call-budget",
+        type=int,
+        default=100,
+        help="Hard shared provider-request limit for process workers.",
+    )
     run_parser.add_argument("--env-file", default=".env")
     run_parser.add_argument("--benchmark-fixture", action="append", default=[])
     run_parser.add_argument("--benchmark-suite", action="append", default=[])
@@ -119,6 +142,13 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--web-search-crawl-depth", type=int, default=0)
     run_parser.add_argument("--literature-search-query", action="append", default=[])
     run_parser.add_argument("--literature-full-text", action="store_true")
+    run_parser.add_argument(
+        "--pdf-vision",
+        action="store_true",
+        help="Explicitly allow bounded PDF figure crops to be sent to the selected hosted provider.",
+    )
+    run_parser.add_argument("--pdf-vision-max-regions", type=int, default=10)
+    run_parser.add_argument("--pdf-vision-call-budget", type=int, default=10)
     run_parser.add_argument("--capability-eval-fixture", action="append", default=[])
     run_parser.add_argument("--capability-review-fixture", action="append", default=[])
     run_parser.add_argument("--preference-review-fixture", action="append", default=[])
@@ -126,6 +156,22 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--feedback-loop-eval-fixture", action="append", default=[])
     run_parser.add_argument("--feedback-loop-review-fixture", action="append", default=[])
     run_parser.add_argument("--review-concurrency", type=int, default=1)
+    run_parser.add_argument(
+        "--review-processes",
+        type=int,
+        default=0,
+        help="Execute deterministic or selected-provider review packets through durable worker processes.",
+    )
+    run_parser.add_argument("--agent-retrieval", action="store_true")
+    run_parser.add_argument("--tool-budget", type=int, default=0)
+    run_parser.add_argument("--agent-retrieval-iterations", type=int, default=2)
+    run_parser.add_argument(
+        "--agent-fetch-domain",
+        action="append",
+        default=[],
+        help="Restrict reference-bound agent document fetches to this domain (repeatable).",
+    )
+    run_parser.add_argument("--agent-validation-manifest", action="append", default=[])
     run_parser.add_argument("--continuous", action="store_true")
     run_parser.add_argument("--interval-seconds", type=float, default=60)
     run_parser.add_argument("--max-wall-minutes", type=float)
@@ -156,6 +202,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     paper_study_materials_parser.add_argument("study_run_dir")
     paper_study_materials_parser.add_argument("--out", required=True)
+
+    safety_red_team_parser = subparsers.add_parser(
+        "safety-red-team",
+        help="Run the built-in and optional coding-domain adversarial safety corpus.",
+    )
+    safety_red_team_parser.add_argument("--corpus", action="append", default=[])
+    safety_red_team_parser.add_argument("--generate-variants", action="store_true")
+    safety_red_team_parser.add_argument("--out", required=True)
     paper_study_materials_parser.add_argument("--seed", default="")
 
     review_packet_parser = subparsers.add_parser(
@@ -296,9 +350,10 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark_study_run_parser.add_argument("--cycles", type=int, default=1)
     benchmark_study_run_parser.add_argument("--max-hypotheses", type=int, default=6)
     benchmark_study_run_parser.add_argument("--max-matches", type=int, default=4)
-    benchmark_study_run_parser.add_argument("--provider", choices=["deterministic", "anthropic"], default="deterministic")
+    benchmark_study_run_parser.add_argument("--provider", choices=list(PROVIDER_CHOICES), default="deterministic")
     benchmark_study_run_parser.add_argument("--model", default=DEFAULT_ANTHROPIC_MODEL)
     benchmark_study_run_parser.add_argument("--max-tokens", type=int, default=4096)
+    benchmark_study_run_parser.add_argument("--provider-call-budget", type=int, default=100)
     benchmark_study_run_parser.add_argument("--env-file", default=".env")
     benchmark_study_run_parser.add_argument("--benchmark-suite", action="append", default=[])
     benchmark_study_run_parser.add_argument("--external-benchmark-manifest", action="append", default=[])
@@ -317,9 +372,10 @@ def build_parser() -> argparse.ArgumentParser:
     study_run_parser.add_argument("--cycles", type=int, default=1)
     study_run_parser.add_argument("--max-hypotheses", type=int, default=6)
     study_run_parser.add_argument("--max-matches", type=int, default=4)
-    study_run_parser.add_argument("--provider", choices=["deterministic", "anthropic"], default="deterministic")
+    study_run_parser.add_argument("--provider", choices=list(PROVIDER_CHOICES), default="deterministic")
     study_run_parser.add_argument("--model", default=DEFAULT_ANTHROPIC_MODEL)
     study_run_parser.add_argument("--max-tokens", type=int, default=4096)
+    study_run_parser.add_argument("--provider-call-budget", type=int, default=100)
     study_run_parser.add_argument("--env-file", default=".env")
     study_run_parser.add_argument("--benchmark-fixture", action="append", default=[])
     study_run_parser.add_argument("--benchmark-suite", action="append", default=[])
@@ -336,6 +392,9 @@ def build_parser() -> argparse.ArgumentParser:
     study_run_parser.add_argument("--web-search-crawl-depth", type=int, default=0)
     study_run_parser.add_argument("--literature-search-query", action="append", default=[])
     study_run_parser.add_argument("--literature-full-text", action="store_true")
+    study_run_parser.add_argument("--pdf-vision", action="store_true")
+    study_run_parser.add_argument("--pdf-vision-max-regions", type=int, default=10)
+    study_run_parser.add_argument("--pdf-vision-call-budget", type=int, default=10)
     study_run_parser.add_argument("--capability-eval-fixture", action="append", default=[])
     study_run_parser.add_argument("--capability-review-fixture", action="append", default=[])
     study_run_parser.add_argument("--preference-review-fixture", action="append", default=[])
@@ -343,13 +402,111 @@ def build_parser() -> argparse.ArgumentParser:
     study_run_parser.add_argument("--prospective-validation-manifest", action="append", default=[])
     study_run_parser.add_argument("--feedback-loop-eval-fixture", action="append", default=[])
     study_run_parser.add_argument("--feedback-loop-review-fixture", action="append", default=[])
+    study_run_parser.add_argument("--agent-retrieval", action="store_true")
+    study_run_parser.add_argument("--review-processes", type=int, default=0)
+    study_run_parser.add_argument("--tool-budget", type=int, default=0)
+    study_run_parser.add_argument("--agent-retrieval-iterations", type=int, default=2)
+    study_run_parser.add_argument("--agent-fetch-domain", action="append", default=[])
+    study_run_parser.add_argument("--agent-validation-manifest", action="append", default=[])
     study_run_parser.add_argument("--out", required=True)
+
+    worker_parser = subparsers.add_parser(
+        "worker",
+        help="Run a durable lease-based worker for serializable task packets.",
+    )
+    worker_parser.add_argument("run_dir")
+    worker_parser.add_argument("--worker-id", default="")
+    worker_parser.add_argument("--lease-seconds", type=float, default=60)
+    worker_parser.add_argument("--max-attempts", type=int, default=3)
+    worker_parser.add_argument("--max-tasks", type=int)
+    worker_parser.add_argument("--poll-seconds", type=float, default=1)
+    worker_parser.add_argument("--once", action="store_true")
+    worker_parser.add_argument("--task-id", action="append", default=[])
+    worker_parser.add_argument(
+        "--provider",
+        choices=list(WORKER_PROVIDER_CHOICES),
+        default="deterministic",
+    )
+    worker_parser.add_argument("--model", default=DEFAULT_ANTHROPIC_MODEL)
+    worker_parser.add_argument("--max-tokens", type=int, default=4096)
+    worker_parser.add_argument("--env-file", default=".env")
+    worker_parser.add_argument("--provider-call-budget", type=int, default=0)
+
+    status_parser = subparsers.add_parser(
+        "coordination-status",
+        help="Print durable coordinator tasks and events for a run.",
+    )
+    status_parser.add_argument("run_dir")
+
+    goal_revision_parser = subparsers.add_parser(
+        "goal-revision",
+        help="Queue a safety-reviewed structured goal revision for a run.",
+    )
+    goal_revision_parser.add_argument("run_dir")
+    goal_revision_parser.add_argument("--patch-json", required=True)
+    goal_revision_parser.add_argument("--message", default="Goal revision")
+    goal_revision_parser.add_argument("--safety-policy", action="append", default=[])
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "worker":
+        completed = run_packet_worker(
+            args.run_dir,
+            args.worker_id or f"worker-{os.getpid()}",
+            lease_seconds=args.lease_seconds,
+            max_attempts=args.max_attempts,
+            max_tasks=1 if args.once else args.max_tasks,
+            poll_seconds=args.poll_seconds,
+            stop_when_idle=args.once or args.max_tasks is not None,
+            eligible_task_ids=set(args.task_id) if args.task_id else None,
+            provider=args.provider,
+            model=args.model,
+            env_file=args.env_file,
+            max_tokens=args.max_tokens,
+            provider_call_budget=args.provider_call_budget,
+        )
+        print(json.dumps({"completed_tasks": completed}))
+        return 0
+    if args.command == "coordination-status":
+        coordinator = SQLiteTaskCoordinator(Path(args.run_dir) / "coordination.sqlite3")
+        print(
+            json.dumps(
+                {
+                    "tasks": [task.to_dict() for task in coordinator.list_tasks()],
+                    "events": coordinator.events(),
+                },
+                indent=2,
+            )
+        )
+        return 0
+    if args.command == "goal-revision":
+        run_dir = Path(args.run_dir)
+        state_path = run_dir / "state.json"
+        state = load_state(state_path)
+        try:
+            patch = json.loads(args.patch_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("--patch-json must be valid JSON") from exc
+        if not isinstance(patch, dict):
+            raise ValueError("--patch-json must contain a JSON object")
+        coordinator = SQLiteTaskCoordinator(run_dir / "coordination.sqlite3")
+        sequence = coordinator.enqueue_human_command(
+            "goal_revision",
+            {"patch": patch, "message": args.message},
+        )
+        applied = state.run_status in {"completed", "stopped", "blocked"}
+        if applied:
+            state = _apply_pending_goal_commands(
+                run_dir,
+                state,
+                safety_policies=load_safety_policies(args.safety_policy),
+            )
+            _write_state(state_path, state)
+        print(json.dumps({"sequence": sequence, "applied": applied}))
+        return 0
     if args.command == "run":
         out_dir = Path(args.out)
         benchmark_results = [
@@ -367,6 +524,10 @@ def main(argv: list[str] | None = None) -> int:
                 provider=args.provider,
                 model=args.model,
                 max_tokens=args.max_tokens,
+                provider_call_budget=args.provider_call_budget,
+                pdf_vision=args.pdf_vision,
+                pdf_vision_max_regions=args.pdf_vision_max_regions,
+                pdf_vision_call_budget=args.pdf_vision_call_budget,
                 env_file=args.env_file,
                 goal_brief_paths=args.goal_brief,
                 safety_policy_paths=args.safety_policy,
@@ -387,6 +548,12 @@ def main(argv: list[str] | None = None) -> int:
                 max_continuous_cycles=args.max_continuous_cycles,
                 after_cycle=write_report,
                 review_concurrency=args.review_concurrency,
+                review_processes=args.review_processes,
+                agent_retrieval=args.agent_retrieval or bool(args.agent_validation_manifest),
+                tool_budget=args.tool_budget,
+                agent_validation_manifest_paths=args.agent_validation_manifest,
+                agent_retrieval_iterations=args.agent_retrieval_iterations,
+                agent_fetch_domains=args.agent_fetch_domain,
             )
         else:
             state = run_research_cycle(
@@ -398,6 +565,10 @@ def main(argv: list[str] | None = None) -> int:
                 provider=args.provider,
                 model=args.model,
                 max_tokens=args.max_tokens,
+                provider_call_budget=args.provider_call_budget,
+                pdf_vision=args.pdf_vision,
+                pdf_vision_max_regions=args.pdf_vision_max_regions,
+                pdf_vision_call_budget=args.pdf_vision_call_budget,
                 env_file=args.env_file,
                 goal_brief_paths=args.goal_brief,
                 safety_policy_paths=args.safety_policy,
@@ -414,6 +585,12 @@ def main(argv: list[str] | None = None) -> int:
                 literature_full_text=args.literature_full_text,
                 capability_evaluation_paths=args.capability_eval_fixture,
                 review_concurrency=args.review_concurrency,
+                review_processes=args.review_processes,
+                agent_retrieval=args.agent_retrieval or bool(args.agent_validation_manifest),
+                tool_budget=args.tool_budget,
+                agent_validation_manifest_paths=args.agent_validation_manifest,
+                agent_retrieval_iterations=args.agent_retrieval_iterations,
+                agent_fetch_domains=args.agent_fetch_domain,
             )
         state = _append_benchmark_suite_results(state, args.benchmark_suite)
         state = _append_capability_review_evaluations(state, args.capability_review_fixture)
@@ -740,6 +917,7 @@ def main(argv: list[str] | None = None) -> int:
                 provider=args.provider,
                 model=args.model,
                 max_tokens=args.max_tokens,
+                provider_call_budget=args.provider_call_budget,
                 env_file=args.env_file,
                 goal_brief_paths=goal.goal_brief_paths,
                 safety_policy_paths=[*args.safety_policy, *goal.safety_policy_paths],
@@ -801,6 +979,40 @@ def main(argv: list[str] | None = None) -> int:
         report = render_report(load_state(args.state_json))
         print(report)
         return 0
+    if args.command == "safety-red-team":
+        suite = run_safety_red_team_suite(
+            args.corpus,
+            generate_variants=args.generate_variants,
+        )
+        summary = summarize_safety_red_team_suite(suite)
+        output = Path(args.out)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            json.dumps(
+                {
+                    "summary": summary.to_dict(),
+                    "cases": [
+                        {
+                            "id": case.id,
+                            "subject_type": case.subject_type,
+                            "objective": case.objective,
+                            "expected_allowed": case.expected_allowed,
+                            "actual_allowed": case.actual_allowed,
+                            "passed": case.passed,
+                            "flags": case.flags,
+                            "topic": case.topic,
+                            "variant_type": case.variant_type,
+                            "base_case_id": case.base_case_id,
+                        }
+                        for case in suite.cases
+                    ],
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"Wrote {output}")
+        return 0
     if args.command == "study":
         states = [load_state(path) for path in args.state_json]
         report = render_capability_study_report(states)
@@ -819,6 +1031,11 @@ def main(argv: list[str] | None = None) -> int:
         states = []
         for goal in _study_goals_from_manifest(args.manifest_json):
             run_dir = out_dir / goal.id
+            agent_validation_manifest_paths = _agent_validation_manifest_paths_for_goal(
+                Path(args.manifest_json),
+                args.agent_validation_manifest,
+                goal,
+            )
             cycles = goal.cycles if goal.cycles is not None else args.cycles
             max_hypotheses = goal.max_hypotheses if goal.max_hypotheses is not None else args.max_hypotheses
             max_matches = goal.max_matches if goal.max_matches is not None else args.max_matches
@@ -826,6 +1043,7 @@ def main(argv: list[str] | None = None) -> int:
                 *global_benchmark_results,
                 *[load_benchmark_fixture(path) for path in goal.benchmark_fixtures],
             ]
+            plan_override = _study_plan_for_goal(goal)
             state = run_research_cycle(
                 objective=goal.objective,
                 cycles=cycles,
@@ -835,6 +1053,10 @@ def main(argv: list[str] | None = None) -> int:
                 provider=args.provider,
                 model=args.model,
                 max_tokens=args.max_tokens,
+                provider_call_budget=args.provider_call_budget,
+                pdf_vision=args.pdf_vision,
+                pdf_vision_max_regions=args.pdf_vision_max_regions,
+                pdf_vision_call_budget=args.pdf_vision_call_budget,
                 env_file=args.env_file,
                 goal_brief_paths=[*args.goal_brief, *goal.goal_brief_paths],
                 safety_policy_paths=[*args.safety_policy, *goal.safety_policy_paths],
@@ -854,6 +1076,22 @@ def main(argv: list[str] | None = None) -> int:
                 literature_search_queries=[*args.literature_search_query, *goal.literature_search_queries],
                 literature_full_text=args.literature_full_text or bool(goal.literature_full_text),
                 capability_evaluation_paths=[*args.capability_eval_fixture, *goal.capability_eval_fixtures],
+                plan_config=plan_override,
+                review_processes=args.review_processes,
+                agent_retrieval=(
+                    args.agent_retrieval
+                    or bool(goal.tool_budget)
+                    or bool(agent_validation_manifest_paths)
+                ),
+                tool_budget=goal.tool_budget if goal.tool_budget is not None else args.tool_budget,
+                agent_validation_manifest_paths=agent_validation_manifest_paths,
+                disabled_agent_kinds=goal.disabled_agents,
+                agent_retrieval_iterations=(
+                    goal.agent_retrieval_iterations
+                    if goal.agent_retrieval_iterations is not None
+                    else args.agent_retrieval_iterations
+                ),
+                agent_fetch_domains=[*args.agent_fetch_domain, *goal.agent_fetch_domains],
             )
             state = _append_benchmark_suite_results(
                 state,
@@ -1122,6 +1360,10 @@ def _study_goals_from_manifest(path: str | Path) -> list[StudyGoalSpec]:
                     raw_goal.get("prospective_validation_manifests"),
                     f"goals[{index}].prospective_validation_manifests",
                 ),
+                agent_validation_manifests=_string_list(
+                    raw_goal.get("agent_validation_manifests"),
+                    f"goals[{index}].agent_validation_manifests",
+                ),
                 feedback_loop_eval_fixtures=_string_list(
                     raw_goal.get("feedback_loop_eval_fixtures"),
                     f"goals[{index}].feedback_loop_eval_fixtures",
@@ -1140,6 +1382,34 @@ def _study_goals_from_manifest(path: str | Path) -> list[StudyGoalSpec]:
                 literature_full_text=_optional_bool(
                     raw_goal.get("literature_full_text"),
                     f"goals[{index}].literature_full_text",
+                ),
+                generation_methods=_string_list(
+                    raw_goal.get("generation_methods"),
+                    f"goals[{index}].generation_methods",
+                ),
+                review_types=_string_list(
+                    raw_goal.get("review_types"),
+                    f"goals[{index}].review_types",
+                ),
+                evolution_strategies=_string_list(
+                    raw_goal.get("evolution_strategies"),
+                    f"goals[{index}].evolution_strategies",
+                ),
+                scheduler_weights=_float_map(
+                    raw_goal.get("scheduler_weights"),
+                    f"goals[{index}].scheduler_weights",
+                ),
+                disabled_agents=_string_list(
+                    raw_goal.get("disabled_agents"),
+                    f"goals[{index}].disabled_agents",
+                ),
+                agent_retrieval_iterations=_optional_int(
+                    raw_goal.get("agent_retrieval_iterations"),
+                    f"goals[{index}].agent_retrieval_iterations",
+                ),
+                agent_fetch_domains=_string_list(
+                    raw_goal.get("agent_fetch_domains"),
+                    f"goals[{index}].agent_fetch_domains",
                 ),
             )
         )
@@ -1171,6 +1441,41 @@ def _prospective_validation_manifest_paths_for_goal(
         if str(raw_path).strip():
             paths.append(_resolve_manifest_path(manifest_path, raw_path))
     return paths
+
+
+def _agent_validation_manifest_paths_for_goal(
+    manifest_path: Path,
+    global_manifest_paths: list[str],
+    goal: StudyGoalSpec,
+) -> list[Path]:
+    paths = [Path(path) for path in global_manifest_paths if str(path).strip()]
+    paths.extend(
+        _resolve_manifest_path(manifest_path, raw_path)
+        for raw_path in goal.agent_validation_manifests
+        if str(raw_path).strip()
+    )
+    return paths
+
+
+def _study_plan_for_goal(goal: StudyGoalSpec) -> ResearchPlanConfig | None:
+    if not any(
+        [
+            goal.generation_methods,
+            goal.review_types,
+            goal.evolution_strategies,
+            goal.scheduler_weights,
+        ]
+    ):
+        return None
+    research_goal = ResearchGoal.from_objective(goal.objective)
+    plan = ResearchPlanConfig.from_goal(research_goal)
+    return replace(
+        plan,
+        generation_methods=goal.generation_methods or plan.generation_methods,
+        review_types=goal.review_types or plan.review_types,
+        evolution_strategies=goal.evolution_strategies or plan.evolution_strategies,
+        scheduler_weights={**plan.scheduler_weights, **goal.scheduler_weights},
+    )
 
 
 def _append_prospective_validation_results(
@@ -1418,6 +1723,22 @@ def _string_list(value: object, label: str) -> list[str]:
     if not isinstance(value, list):
         raise ValueError(f"{label} must be a string or list of strings.")
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _float_map(value: object, label: str) -> dict[str, float]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object of numeric weights.")
+    result: dict[str, float] = {}
+    for key, raw_value in value.items():
+        if not isinstance(key, str) or not key.strip() or isinstance(raw_value, bool):
+            raise ValueError(f"{label} must contain non-empty string keys and numeric values.")
+        try:
+            result[key.strip()] = float(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{label}.{key} must be numeric.") from exc
+    return result
 
 
 def _optional_bool(value: object, label: str) -> bool | None:

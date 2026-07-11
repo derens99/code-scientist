@@ -53,6 +53,19 @@ describe("HypothesisDetail", () => {
         "Turn 1 evidence: ev-1",
         "Assessment: benchmark evidence missing; revision required: true."
       ],
+      assumption_checks: [
+        {
+          id: "assumption-check-1",
+          assumption: "The critic can identify false premises.",
+          parent_assumption: "",
+          depth: 0,
+          verdict: "contradicted",
+          fundamental: true,
+          invalidates_hypothesis: true,
+          evidence_refs: ["ev-1"],
+          reasoning: "The benchmark reports no improvement."
+        }
+      ],
       confidence: 0.8,
       requires_revision: true
     };
@@ -78,5 +91,7 @@ describe("HypothesisDetail", () => {
     expect(markup).toContain("Proximity decisions");
     expect(markup).toContain("Deduplicated into hyp-keeper");
     expect(markup).toContain("Evidence refs");
+    expect(markup).toContain("Assumption verification");
+    expect(markup).toContain("fundamental, invalidates hypothesis");
   });
 });

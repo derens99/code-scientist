@@ -150,7 +150,92 @@ def render_capability_study_report(states: list[RunState]) -> str:
         for state in states:
             lines.append(f"- {state.goal.objective}")
         lines.append("")
+    ablation_rows = _component_ablation_rows(states)
+    proximity_correlations = [
+        value
+        for state in states
+        if (value := _proximity_quality_difference_correlation(state)) is not None
+    ]
+    lines.extend(["## Component Ablation Readout", ""])
+    if ablation_rows:
+        for component, baseline_label, candidate_label, baseline_score, candidate_score in ablation_rows:
+            lines.append(
+                f"- {component}: {baseline_label} {baseline_score:.3f}; "
+                f"{candidate_label} {candidate_score:.3f}; "
+                f"delta {_format_delta(candidate_score - baseline_score)}"
+            )
+    else:
+        lines.append("- No complete paired ablation arms found.")
+    if proximity_correlations:
+        lines.append(
+            "- Proximity-vs-review-quality-difference correlation: "
+            f"{sum(proximity_correlations) / len(proximity_correlations):.3f} "
+            f"across {len(proximity_correlations)} runs"
+        )
+        lines.append(
+            "  - This is a review-score proxy; replace it with independent expert quality scores "
+            "for a paper-level result."
+        )
+    else:
+        lines.append("- Proximity-vs-quality-difference correlation: not measurable from these runs.")
+    lines.append("")
     return "\n".join(lines)
+
+
+def _component_ablation_rows(
+    states: list[RunState],
+) -> list[tuple[str, str, str, float, float]]:
+    score_by_label = {
+        point.label: point.code_scientist_score
+        for state in states
+        for point in state.scaling_curve
+        if point.label
+    }
+    pairs = [
+        ("generation strategy", "generation-paper-seeded", "generation-assumption"),
+        ("reflection search", "reflection-search-off", "reflection-search-on"),
+        ("ranking debate", "ranking-simple", "ranking-debate"),
+        ("evolution", "evolution-off", "evolution-on"),
+        ("review depth", "review-recurrent", "review-full"),
+        ("proximity", "proximity-off", "proximity-on"),
+    ]
+    return [
+        (component, baseline, candidate, score_by_label[baseline], score_by_label[candidate])
+        for component, baseline, candidate in pairs
+        if baseline in score_by_label and candidate in score_by_label
+    ]
+
+
+def _proximity_quality_difference_correlation(state: RunState) -> float | None:
+    score_values: dict[str, list[float]] = {}
+    for review in state.reviews:
+        if not review.scores:
+            continue
+        score_values.setdefault(review.hypothesis_id, []).append(
+            sum(review.scores.values()) / len(review.scores)
+        )
+    quality = {
+        hypothesis_id: sum(values) / len(values)
+        for hypothesis_id, values in score_values.items()
+        if values
+    }
+    pairs = [
+        (edge.similarity, abs(quality[edge.source] - quality[edge.target]))
+        for edge in state.proximity_edges
+        if edge.source in quality and edge.target in quality
+    ]
+    if len(pairs) < 2:
+        return None
+    xs = [pair[0] for pair in pairs]
+    ys = [pair[1] for pair in pairs]
+    mean_x = sum(xs) / len(xs)
+    mean_y = sum(ys) / len(ys)
+    numerator = sum((x - mean_x) * (y - mean_y) for x, y in pairs)
+    denominator_x = sum((x - mean_x) ** 2 for x in xs) ** 0.5
+    denominator_y = sum((y - mean_y) ** 2 for y in ys) ** 0.5
+    if denominator_x == 0 or denominator_y == 0:
+        return None
+    return round(numerator / (denominator_x * denominator_y), 3)
 
 
 def render_report(state: RunState) -> str:
@@ -167,6 +252,7 @@ def render_report(state: RunState) -> str:
         "## Run Status",
         "",
         f"- Status: {state.run_status}",
+        "- Append-only activity ledger: activity.jsonl",
         "",
         "## Method Summary",
         "",
@@ -190,6 +276,29 @@ def render_report(state: RunState) -> str:
         )
     else:
         lines.extend(["- No research plan configuration recorded.", ""])
+
+    lines.extend(["## Goal Revision History", ""])
+    if state.goal_revisions:
+        for revision in state.goal_revisions:
+            lines.append(
+                f"- Revision {revision.revision}: {revision.approval_status}; "
+                f"{revision.prior_goal_id} -> {revision.new_goal_id}"
+            )
+            lines.append(f"  - Safety allowed: {revision.safety.allowed}")
+            lines.append(f"  - Safety reason: {revision.safety.reason}")
+            if revision.user_message:
+                lines.append(f"  - User message: {_single_line(revision.user_message)}")
+            if revision.structured_changes:
+                lines.append(
+                    "  - Changed fields: "
+                    + ", ".join(sorted(revision.structured_changes))
+                )
+            lines.append(
+                f"  - Superseded queued/deferred tasks: {len(revision.affected_task_ids)}"
+            )
+        lines.append("")
+    else:
+        lines.extend(["- No in-run goal revisions recorded.", ""])
 
     lines.extend(["## Research Overview", ""])
     if state.research_overview:
@@ -269,6 +378,39 @@ def render_report(state: RunState) -> str:
         lines.append("")
     else:
         lines.extend(["- No retrieval memory records persisted.", ""])
+
+    lines.extend(["## Agent Tool Budget", ""])
+    if state.tool_budget is not None:
+        budget = state.tool_budget
+        lines.append(f"- Limit: {budget.limit}")
+        lines.append(f"- Used: {budget.used}")
+        lines.append(f"- Remaining: {budget.remaining}")
+        lines.append(f"- Exhausted: {'yes' if budget.exhausted else 'no'}")
+        tool_counts = Counter(call.tool for call in state.agent_tool_calls)
+        agent_counts = Counter(call.agent for call in state.agent_tool_calls)
+        if tool_counts:
+            lines.append(f"- Calls by tool: {_format_counts(tool_counts)}")
+        if agent_counts:
+            lines.append(f"- Calls by agent: {_format_counts(agent_counts)}")
+        for call in state.agent_tool_calls[-8:]:
+            lines.append(
+                f"- Cycle {call.cycle} {call.agent} {call.tool}: {call.status}; "
+                f"task {call.task_id or 'none'}; budget {call.budget_before}->{call.budget_after}"
+            )
+            lines.append(f"  - Query: {_single_line(call.query)[:240]}")
+            if call.source_ref:
+                lines.append(f"  - Source ref: {call.source_ref}")
+            if call.rationale:
+                lines.append(f"  - Rationale: {call.rationale}")
+            if call.evidence_refs:
+                lines.append(f"  - New evidence refs: {', '.join(call.evidence_refs)}")
+            if call.blocked_reasons:
+                lines.append(f"  - Blocked reasons: {', '.join(call.blocked_reasons)}")
+            if call.error:
+                lines.append(f"  - Error: {call.error}")
+        lines.append("")
+    else:
+        lines.extend(["- Agent-driven retrieval is disabled for this run.", ""])
 
     lines.extend(["## Task Queue", ""])
     if state.task_queue:
@@ -385,6 +527,37 @@ def render_report(state: RunState) -> str:
 
     lines.extend(["## Retrieved Evidence Coverage", ""])
     evidence_by_id = {item.id: item for item in state.evidence}
+    evidence_kind_counts = Counter(item.kind for item in state.evidence)
+    parser_counts = Counter(
+        item.metadata.get("parser", "unspecified") for item in state.evidence
+    )
+    lines.append(f"- Evidence records: {len(state.evidence)}")
+    lines.append(f"- Evidence kinds: {_format_counts(evidence_kind_counts)}")
+    lines.append(f"- Parsers: {_format_counts(parser_counts)}")
+    visual_claims = [item for item in state.evidence if item.kind == "pdf_visual_claim"]
+    lines.append(f"- Machine-interpreted PDF visual claims: {len(visual_claims)}")
+    for claim in visual_claims[:8]:
+        lines.append(
+            f"  - {claim.id}: page {claim.metadata.get('page_number', 'unknown')}; "
+            f"model {claim.metadata.get('model', 'unknown')}; "
+            f"confidence {claim.metadata.get('confidence', 'unknown')}; "
+            f"parent {claim.metadata.get('parent_evidence_id', 'unknown')}"
+        )
+        lines.append(
+            "    - Human verification required: "
+            f"{claim.metadata.get('requires_human_verification', 'true')}"
+        )
+    validation_evidence = [
+        item for item in state.evidence if item.kind == "agent_empirical_validation"
+    ]
+    lines.append(f"- Agent empirical validation records: {len(validation_evidence)}")
+    for record in validation_evidence[:8]:
+        lines.append(
+            f"  - {record.id}: policy {record.metadata.get('execution_policy', 'unknown')}; "
+            f"isolation {record.metadata.get('isolation_level', 'unknown')}; "
+            f"network isolated {record.metadata.get('network_isolated', 'unknown')}; "
+            f"ambient secrets inherited {record.metadata.get('ambient_secrets_inherited', 'unknown')}"
+        )
     used_refs = _used_evidence_refs(state)
     if used_refs:
         for ref in used_refs[:12]:
@@ -599,6 +772,18 @@ def render_report(state: RunState) -> str:
                 f"pass rate {evaluation.pass_rate:.3f}"
             )
             lines.append(f"  - Failed cases: {', '.join(evaluation.failed_case_ids) or 'none'}")
+            if evaluation.topic_results:
+                lines.append(
+                    f"  - Base pass rate: {evaluation.base_pass_rate:.3f}; "
+                    f"variant pass rate: {evaluation.variant_pass_rate:.3f}; "
+                    f"degradation: {evaluation.degradation_rate:.3f}"
+                )
+                for topic, result in sorted(evaluation.topic_results.items()):
+                    lines.append(
+                        f"  - Topic {topic}: {int(result.get('passed_count', 0))}/"
+                        f"{int(result.get('case_count', 0))} passed; "
+                        f"rate {float(result.get('pass_rate', 0.0)):.3f}"
+                    )
             if evaluation.notes:
                 lines.append(f"  - Notes: {', '.join(evaluation.notes)}")
         lines.append("")
@@ -669,6 +854,18 @@ def render_report(state: RunState) -> str:
 
     lines.extend(["", "## Tournament Match Metadata", ""])
     if state.matches:
+        position_audited = [match for match in state.matches if "order_swap" in match.judge_trace]
+        position_disagreements = [
+            match for match in position_audited if "position_stable=false" in match.judge_trace
+        ]
+        lines.append(f"- Position-order audits: {len(position_audited)}")
+        lines.append(f"- Position-order disagreements: {len(position_disagreements)}")
+        lines.append(
+            "- Position-order stability rate: "
+            f"{(len(position_audited) - len(position_disagreements)) / len(position_audited):.3f}"
+            if position_audited
+            else "- Position-order stability rate: not measured"
+        )
         for match in state.matches[:10]:
             lines.append(
                 f"- {match.hypothesis_a} vs {match.hypothesis_b}: {match.comparison_mode}; "
@@ -697,6 +894,18 @@ def render_report(state: RunState) -> str:
             )
             if review.evidence_refs:
                 lines.append(f"  - Evidence: {', '.join(review.evidence_refs)}")
+            if review.assumption_checks:
+                lines.append("  - Assumption verification:")
+                for check in review.assumption_checks:
+                    status = "fundamental" if check.fundamental else "repairable"
+                    if check.invalidates_hypothesis:
+                        status += "; invalidates hypothesis"
+                    parent = f"; parent: {check.parent_assumption}" if check.parent_assumption else ""
+                    refs = f"; evidence: {', '.join(check.evidence_refs)}" if check.evidence_refs else ""
+                    lines.append(
+                        f"    - depth {check.depth}; {check.verdict}; {status}{parent}{refs}: "
+                        f"{check.assumption} - {check.reasoning}"
+                    )
             for finding in review.findings:
                 lines.append(f"  - {finding}")
             if review.review_trace:

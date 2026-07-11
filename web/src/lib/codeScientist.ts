@@ -31,6 +31,16 @@ export type StartRunInput = {
   prospectiveEvaluationPaths?: string[];
   feedbackLoopEvaluationPaths?: string[];
   feedbackLoopReviewPaths?: string[];
+  agentRetrieval?: boolean;
+  toolBudget?: number;
+  agentValidationManifestPaths?: string[];
+  agentRetrievalIterations?: number;
+  agentFetchDomains?: string[];
+  reviewProcesses?: number;
+  providerCallBudget?: number;
+  pdfVision?: boolean;
+  pdfVisionMaxRegions?: number;
+  pdfVisionCallBudget?: number;
 };
 
 export type UserFeedbackInput = {
@@ -65,9 +75,15 @@ export type ManualReviewInput = {
 };
 
 export type RunGuidanceInput = {
+  objective?: string;
   preferences?: string[];
   constraints?: string[];
+  metrics?: string[];
+  safetyNotes?: string[];
   allowedSources?: string[];
+  allowedTools?: string[];
+  outputFormats?: string[];
+  terminationCriteria?: string[];
   followUpDirection?: string;
 };
 
@@ -247,40 +263,34 @@ export async function appendManualReview(runId: string, input: ManualReviewInput
 }
 
 export async function updateRunGuidance(runId: string, input: RunGuidanceInput): Promise<RunState> {
-  return updateRunState(runId, (state) => {
-    const preferences = mergeUnique(state.goal.preferences, cleanList(input.preferences));
-    const constraints = mergeUnique(state.goal.constraints, cleanList(input.constraints));
-    const allowedSources = cleanList(input.allowedSources);
-    const followUpDirection = input.followUpDirection?.trim() ?? "";
-    if (allowedSources.length && !state.plan) {
-      throw new Error("Run plan is required to update source selection.");
-    }
-    const userFeedback = [...(state.user_feedback ?? [])];
-    if (followUpDirection) {
-      userFeedback.push({
-        id: stableId("feedback", `${state.goal.id}:follow-up:${followUpDirection}:${userFeedback.length}`),
-        kind: "follow_up_direction",
-        target_id: state.goal.id,
-        content: followUpDirection,
-        influence: "scheduler_boost"
-      });
-    }
-    return {
-      ...state,
-      goal: {
-        ...state.goal,
-        preferences,
-        constraints
-      },
-      plan: state.plan
-        ? {
-            ...state.plan,
-            allowed_sources: allowedSources.length ? allowedSources : state.plan.allowed_sources
-          }
-        : state.plan,
-      user_feedback: userFeedback
-    };
-  });
+  assertSafeRunId(runId);
+  const patch = {
+    ...(input.objective?.trim() ? { objective: input.objective.trim() } : {}),
+    ...(input.preferences !== undefined ? { preferences: cleanList(input.preferences) } : {}),
+    ...(input.constraints !== undefined ? { constraints: cleanList(input.constraints) } : {}),
+    ...(input.metrics !== undefined ? { metrics: cleanList(input.metrics) } : {}),
+    ...(input.safetyNotes !== undefined ? { safety_notes: cleanList(input.safetyNotes) } : {}),
+    ...(input.allowedSources !== undefined ? { allowed_sources: cleanList(input.allowedSources) } : {}),
+    ...(input.allowedTools !== undefined ? { allowed_tools: cleanList(input.allowedTools) } : {}),
+    ...(input.outputFormats !== undefined ? { output_formats: cleanList(input.outputFormats) } : {}),
+    ...(input.terminationCriteria !== undefined
+      ? { termination_criteria: cleanList(input.terminationCriteria) }
+      : {}),
+    ...(input.followUpDirection?.trim()
+      ? { follow_up_direction: input.followUpDirection.trim() }
+      : {})
+  };
+  await runEngineUv([
+    "run",
+    "code-scientist",
+    "goal-revision",
+    path.join(runsRoot(), runId),
+    "--patch-json",
+    JSON.stringify(patch),
+    "--message",
+    input.followUpDirection?.trim() || "Workbench goal guidance update"
+  ]);
+  return readRunState(runId);
 }
 
 export async function applyProximityOverride(runId: string, input: ProximityOverrideInput): Promise<RunState> {
@@ -602,6 +612,29 @@ export function buildRunArgs(input: StartRunInput) {
     }
   }
 
+  const reviewProcesses = Math.max(0, Math.trunc(Number(input.reviewProcesses ?? 0)));
+  if (reviewProcesses > 0) {
+    args.push("--review-processes", String(reviewProcesses));
+  }
+  if (input.provider === "anthropic") {
+    const providerCallBudget = Math.max(
+      1,
+      Math.trunc(Number(input.providerCallBudget ?? 100))
+    );
+    args.push("--provider-call-budget", String(providerCallBudget));
+    if (input.pdfVision) {
+      args.push("--pdf-vision");
+      args.push(
+        "--pdf-vision-max-regions",
+        String(Math.max(0, Math.min(100, Math.trunc(Number(input.pdfVisionMaxRegions ?? 10)))))
+      );
+      args.push(
+        "--pdf-vision-call-budget",
+        String(Math.max(1, Math.trunc(Number(input.pdfVisionCallBudget ?? 10))))
+      );
+    }
+  }
+
   for (const goalBriefPath of cleanList(input.goalBriefPaths)) {
     args.push("--goal-brief", goalBriefPath);
   }
@@ -650,6 +683,27 @@ export function buildRunArgs(input: StartRunInput) {
 
   if (input.literatureFullText) {
     args.push("--literature-full-text");
+  }
+
+  const agentValidationManifestPaths = cleanList(input.agentValidationManifestPaths);
+  if (input.agentRetrieval || agentValidationManifestPaths.length > 0) {
+    args.push("--agent-retrieval");
+    const retrievalIterations = Math.min(
+      10,
+      Math.max(1, Math.trunc(Number(input.agentRetrievalIterations ?? 2)))
+    );
+    args.push("--agent-retrieval-iterations", String(retrievalIterations));
+    for (const domain of cleanList(input.agentFetchDomains)) {
+      args.push("--agent-fetch-domain", domain);
+    }
+    const toolBudget = Math.max(0, Math.trunc(Number(input.toolBudget ?? 0)));
+    if (toolBudget > 0) {
+      args.push("--tool-budget", String(toolBudget));
+    }
+  }
+
+  for (const manifestPath of agentValidationManifestPaths) {
+    args.push("--agent-validation-manifest", manifestPath);
   }
 
   for (const capabilityEvaluationPath of cleanList(input.capabilityEvaluationPaths)) {
@@ -857,6 +911,30 @@ function runUv(args: string[]) {
         return;
       }
       reject(new Error(stderr.trim() || `uv exited with code ${code}`));
+    });
+  });
+}
+
+function runEngineUv(args: string[]) {
+  const engineRoot = process.env.CODE_SCIENTIST_ENGINE_ROOT
+    ? path.resolve(process.env.CODE_SCIENTIST_ENGINE_ROOT)
+    : path.resolve(process.cwd(), "..");
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn("uv", args, {
+      cwd: engineRoot,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    let stderr = "";
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(stderr.trim() || `uv exited with code ${code}`));
+      }
     });
   });
 }

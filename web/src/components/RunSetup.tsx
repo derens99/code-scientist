@@ -37,6 +37,16 @@ export function RunSetup({ onRunCreated, onError }: RunSetupProps) {
   const [prospectiveEvaluationPaths, setProspectiveEvaluationPaths] = useState("");
   const [feedbackLoopEvaluationPaths, setFeedbackLoopEvaluationPaths] = useState("");
   const [feedbackLoopReviewPaths, setFeedbackLoopReviewPaths] = useState("");
+  const [agentRetrieval, setAgentRetrieval] = useState(false);
+  const [toolBudget, setToolBudget] = useState(8);
+  const [agentValidationManifestPaths, setAgentValidationManifestPaths] = useState("");
+  const [agentRetrievalIterations, setAgentRetrievalIterations] = useState(2);
+  const [agentFetchDomains, setAgentFetchDomains] = useState("");
+  const [reviewProcesses, setReviewProcesses] = useState(0);
+  const [providerCallBudget, setProviderCallBudget] = useState(100);
+  const [pdfVision, setPdfVision] = useState(false);
+  const [pdfVisionMaxRegions, setPdfVisionMaxRegions] = useState(10);
+  const [pdfVisionCallBudget, setPdfVisionCallBudget] = useState(10);
   const [submitting, setSubmitting] = useState(false);
   const sanitizedPreview = useMemo(() => previewRunName(runName), [runName]);
 
@@ -74,6 +84,16 @@ export function RunSetup({ onRunCreated, onError }: RunSetupProps) {
         prospectiveEvaluationPaths: toPathList(prospectiveEvaluationPaths),
         feedbackLoopEvaluationPaths: toPathList(feedbackLoopEvaluationPaths),
         feedbackLoopReviewPaths: toPathList(feedbackLoopReviewPaths),
+        agentRetrieval,
+        toolBudget,
+        agentValidationManifestPaths: toPathList(agentValidationManifestPaths),
+        agentRetrievalIterations,
+        agentFetchDomains: toPathList(agentFetchDomains),
+        reviewProcesses,
+        providerCallBudget,
+        pdfVision,
+        pdfVisionMaxRegions,
+        pdfVisionCallBudget,
         runName
       });
       onRunCreated(run.id);
@@ -144,6 +164,100 @@ export function RunSetup({ onRunCreated, onError }: RunSetupProps) {
         max={20}
         value={maxHypotheses}
         onChange={(value) => setMaxHypotheses(toNumber(value, 6))}
+      />
+
+      <NumberInput
+        label="Review worker processes"
+        description="Optional durable SQLite/WAL process workers for deterministic or explicitly authorized provider review packets. Zero uses the normal in-process scheduler."
+        min={0}
+        max={32}
+        value={reviewProcesses}
+        onChange={(value) => setReviewProcesses(toNumber(value, 0))}
+      />
+
+      <NumberInput
+        label="Provider call budget"
+        description="Hard process-safe request limit. Failed provider requests remain consumed."
+        min={1}
+        max={10000}
+        disabled={provider !== "anthropic"}
+        value={providerCallBudget}
+        onChange={(value) => setProviderCallBudget(toNumber(value, 100))}
+      />
+
+      <Switch
+        label="Hosted PDF figure interpretation"
+        description="Explicit consent to send bounded figure crops from attached PDFs to the selected hosted provider. Outputs remain marked for human verification."
+        disabled={provider !== "anthropic"}
+        checked={pdfVision}
+        onChange={(event) => setPdfVision(event.currentTarget.checked)}
+      />
+
+      <Group grow align="flex-start">
+        <NumberInput
+          label="PDF vision regions"
+          min={0}
+          max={100}
+          disabled={provider !== "anthropic" || !pdfVision}
+          value={pdfVisionMaxRegions}
+          onChange={(value) => setPdfVisionMaxRegions(toNumber(value, 10))}
+        />
+        <NumberInput
+          label="PDF vision call budget"
+          min={1}
+          max={1000}
+          disabled={provider !== "anthropic" || !pdfVision}
+          value={pdfVisionCallBudget}
+          onChange={(value) => setPdfVisionCallBudget(toNumber(value, 10))}
+        />
+      </Group>
+
+      <Switch
+        label="Agent-driven iterative retrieval"
+        description="Lets Generation and Reflection refine explicitly enabled repository, web-search, or literature queries under a hard budget."
+        checked={agentRetrieval}
+        onChange={(event) => setAgentRetrieval(event.currentTarget.checked)}
+      />
+
+      <NumberInput
+        label="Agent tool budget"
+        description="Hard run-wide limit for governed retrieval and empirical validation calls. Failed calls still consume budget."
+        min={0}
+        max={1000}
+        disabled={!agentRetrieval}
+        value={toolBudget}
+        onChange={(value) => setToolBudget(toNumber(value, 8))}
+      />
+
+      <NumberInput
+        label="Retrieval iterations per task"
+        description="Maximum observation-dependent query/refinement turns for Generation and Reflection. The shared tool budget remains the hard run-wide cap."
+        min={1}
+        max={10}
+        disabled={!agentRetrieval}
+        value={agentRetrievalIterations}
+        onChange={(value) => setAgentRetrievalIterations(toNumber(value, 2))}
+      />
+
+      <Textarea
+        label="Agent fetch domains"
+        description="Optional public-domain allowlist for reference-bound document and open-access full-text fetches, one domain per line. Agents select observed evidence refs, never URLs."
+        autosize
+        minRows={2}
+        maxRows={5}
+        disabled={!agentRetrieval}
+        value={agentFetchDomains}
+        onChange={(event) => setAgentFetchDomains(event.currentTarget.value)}
+      />
+
+      <Textarea
+        label="Agent validation manifest paths"
+        description="Researcher-owned no-shell manifests Reflection may execute in-loop. Each execution spends one agent tool call."
+        autosize
+        minRows={2}
+        maxRows={5}
+        value={agentValidationManifestPaths}
+        onChange={(event) => setAgentValidationManifestPaths(event.currentTarget.value)}
       />
 
       <Textarea

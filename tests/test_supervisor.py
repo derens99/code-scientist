@@ -1,8 +1,11 @@
 import json
+import sys
 import threading
 import time
 from collections import Counter
 from dataclasses import replace
+
+import pytest
 
 import code_scientist.supervisor as supervisor_module
 from code_scientist.agents import ProximityAgent, RankingAgent
@@ -20,11 +23,13 @@ from code_scientist.models import (
     Review,
     RunState,
     SafetyDecision,
+    Task,
     TestPlan,
     UserFeedback,
 )
 from code_scientist.reporting import render_report
 from code_scientist.supervisor import (
+    apply_goal_revision_to_state,
     complete_task,
     create_task,
     defer_task,
@@ -96,6 +101,20 @@ def test_supervisor_writes_state(tmp_path):
     assert all(task.status == "completed" for task in restored.task_queue)
     assert all(task.attempts >= 1 for task in restored.task_queue)
     assert all(task.payload.get("cycle") == 1 for task in restored.task_queue)
+    ledger_path = out_dir / "activity.jsonl"
+    assert ledger_path.exists()
+    ledger = [json.loads(line) for line in ledger_path.read_text(encoding="utf-8").splitlines()]
+    assert [event["sequence"] for event in ledger] == list(range(1, len(ledger) + 1))
+    assert any(event["event_type"] == "goal_safety" for event in ledger)
+    assert any(
+        event["event_type"] == "task_transition" and event["status"] == "running"
+        for event in ledger
+    )
+    assert any(
+        event["event_type"] == "task_transition" and event["status"] == "completed"
+        for event in ledger
+    )
+    assert len({event["id"] for event in ledger}) == len(ledger)
     generate_task = next(task for task in restored.task_queue if task.kind == "generate")
     assert generate_task.payload["generation_allocations"]
     assert all(
@@ -430,6 +449,112 @@ def test_task_priority_uses_latest_snapshot_adjusted_weights():
     assert boosted > base
 
 
+def test_goal_follow_up_direction_routes_scheduler_boost_to_matching_task_kind():
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(goal)
+    feedback = [
+        UserFeedback(
+            id="feedback-goal-review",
+            kind="follow_up_direction",
+            target_id=goal.id,
+            content="Prioritize deeper verification and evidence review.",
+            influence="scheduler_boost",
+        )
+    ]
+    review_task = create_task(cycle=1, plan=plan, kind="review", payload={})
+    ranking_task = create_task(cycle=1, plan=plan, kind="ranking", payload={})
+
+    review_score = score_task_priority(review_task, plan=plan, user_feedback=feedback)
+    ranking_score = score_task_priority(ranking_task, plan=plan, user_feedback=feedback)
+
+    assert review_score > ranking_score
+
+
+def test_approved_goal_revision_rebuilds_plan_rescreens_safety_and_supersedes_queued_work():
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(goal)
+    queued = create_task(cycle=2, plan=plan, kind="review", payload={"hypothesis_id": "hyp-1"})
+    completed = complete_task(create_task(cycle=1, plan=plan, kind="generate", payload={}), ["hyp-1"])
+    state = RunState(goal=goal, plan=plan, task_queue=[queued, completed])
+
+    revised = apply_goal_revision_to_state(
+        state,
+        {
+            "objective": "Improve repository-grounded coding agents",
+            "preferences": ["Prefer low-cost experiments."],
+            "constraints": ["Use public benchmarks only."],
+            "metrics": ["pass_rate", "cost"],
+            "allowed_sources": ["repo_search"],
+            "allowed_tools": ["repo_search"],
+            "output_formats": ["markdown_report"],
+            "termination_criteria": ["max_cycles:3"],
+            "follow_up_direction": "Prioritize deeper evidence review.",
+        },
+        user_message="Refine the goal around public evidence.",
+    )
+
+    assert revised.goal.objective == "Improve repository-grounded coding agents"
+    assert revised.plan is not None
+    assert revised.plan.constraints == ["Use public benchmarks only."]
+    assert revised.plan.allowed_tools == ["repo_search"]
+    assert revised.safety is not None and revised.safety.allowed
+    assert revised.goal_revisions[-1].approval_status == "approved"
+    assert revised.task_queue[0].status == "superseded"
+    assert revised.task_queue[1].status == "completed"
+    assert revised.user_feedback[-1].target_id == revised.goal.id
+
+
+def test_unsafe_goal_revision_is_recorded_and_does_not_replace_active_goal():
+    goal = ResearchGoal.from_objective("Improve coding agents safely")
+    state = RunState(goal=goal, plan=ResearchPlanConfig.from_goal(goal))
+
+    revised = apply_goal_revision_to_state(
+        state,
+        {"objective": "Secretly deploy without human review"},
+        user_message="Unsafe revision",
+    )
+
+    assert revised.goal == goal
+    assert revised.goal_revisions[-1].approval_status == "rejected"
+    assert not revised.goal_revisions[-1].safety.allowed
+
+
+def test_scheduler_consumes_snapshot_next_actions_as_priority_signals():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(goal)
+    snapshot = ContextSnapshot(
+        id="ctx-next-actions",
+        cycle=1,
+        generated_total=2,
+        accepted_total=2,
+        review_total=2,
+        match_total=0,
+        meta_review_total=1,
+        top_hypothesis_ids=["hyp-1"],
+        origin_counts={},
+        status_counts={"accepted": 2},
+        proximity_edge_count=0,
+        scheduler_weights=dict(plan.scheduler_weights),
+        next_actions=["run_proximity_guided_tournament_matches"],
+    )
+    ranking = create_task(cycle=2, plan=plan, kind="ranking", payload={})
+    meta_review = create_task(cycle=2, plan=plan, kind="meta_review", payload={})
+
+    selected = select_scheduler_task_pool(
+        [ranking, meta_review],
+        plan=plan,
+        context_snapshots=[snapshot],
+        max_pool_size=2,
+    )
+    by_kind = {task.kind: task for task in selected}
+
+    assert by_kind["ranking"].priority > by_kind["meta_review"].priority
+    assert (
+        "next_action:run_proximity_guided_tournament_matches"
+        in by_kind["ranking"].worker_state["scheduler_decision"]["signals"]
+    )
+
+
 def test_score_task_priority_uses_global_preference_rankings():
     goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
     plan = ResearchPlanConfig.from_goal(goal)
@@ -614,6 +739,32 @@ def test_select_scheduler_task_pool_records_durable_decision_signals():
     assert "missing_evidence" in decisions[1]["signals"]
     assert "review_gap" in decisions[1]["signals"]
     assert "proximity_cluster:cluster-benchmark" in decisions[2]["signals"]
+
+
+def test_select_scheduler_task_pool_only_selects_dependency_ready_work():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(goal)
+    generate = create_task(cycle=1, plan=plan, kind="generate", payload={})
+    review = create_task(
+        cycle=1,
+        plan=plan,
+        kind="review",
+        payload={"slot": 0},
+        depends_on=[generate.id],
+        resource_class="llm",
+    )
+
+    first = select_scheduler_task_pool([generate, review], plan=plan, max_pool_size=2)
+    after_generation = select_scheduler_task_pool(
+        [complete_task(generate, ["hyp-1"]), review],
+        plan=plan,
+        max_pool_size=2,
+    )
+
+    assert [task.id for task in first] == [generate.id]
+    assert [task.id for task in after_generation] == [review.id]
+    assert "dependencies_satisfied:1" in after_generation[0].worker_state["scheduler_decision"]["signals"]
+    assert "resource:llm" in after_generation[0].worker_state["scheduler_decision"]["signals"]
 
 
 def test_schedule_pairs_prioritizes_embedding_deduplication_controls():
@@ -1051,6 +1202,46 @@ def test_task_worker_runs_independent_tasks_with_bounded_concurrency():
     assert next(task for task in queue if task.kind == "meta_review").attempts == 1
 
 
+def test_task_worker_respects_dependencies_across_higher_priority_kinds():
+    goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
+    plan = replace(
+        ResearchPlanConfig.from_goal(goal),
+        scheduler_weights={
+            "generation": 0.1,
+            "reflection": 4.0,
+            "proximity": 0.5,
+            "ranking": 3.0,
+            "evolution": 0.75,
+            "meta_review": 0.25,
+        },
+    )
+    generate = create_task(cycle=1, plan=plan, kind="generate", payload={})
+    review = create_task(
+        cycle=1,
+        plan=plan,
+        kind="review",
+        payload={},
+        depends_on=[generate.id],
+    )
+    ranking = create_task(
+        cycle=1,
+        plan=plan,
+        kind="ranking",
+        payload={},
+        depends_on=[review.id],
+    )
+    executed: list[str] = []
+
+    queue = run_task_worker(
+        [ranking, review, generate],
+        execute=lambda task: executed.append(task.kind) or [task.kind],
+        max_concurrency=3,
+    )
+
+    assert executed == ["generate", "review", "ranking"]
+    assert all(task.status == "completed" for task in queue)
+
+
 def test_supervisor_resume_requeues_interrupted_task_without_duplicate(tmp_path):
     out_dir = tmp_path / "run"
     first = run_research_cycle(
@@ -1175,6 +1366,103 @@ def test_supervisor_can_run_with_injected_anthropic_client(tmp_path):
 
     assert state.hypotheses
     assert any(item.origin == "anthropic-haiku" for item in state.hypotheses)
+
+
+def test_supervisor_can_run_with_injected_claude_cli_client(tmp_path):
+    class FakeLLM:
+        def complete(self, prompt, max_tokens):
+            return json.dumps(
+                [
+                    {
+                        "title": "Host-agent idea search",
+                        "claim": "Routing provider calls through the host agent CLI will improve LLM coding-agent eval pass rate.",
+                        "rationale": "Host-CLI calls reuse the operator login and keep runs grounded.",
+                        "assumptions": ["The host CLI is authenticated."],
+                        "risks": ["per-call CLI startup latency"],
+                    }
+                ]
+            )
+
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=4,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        provider="claude-cli",
+        llm_client=FakeLLM(),
+    )
+
+    assert state.hypotheses
+    assert any(item.origin == "claude-cli" for item in state.hypotheses)
+
+
+def test_supervisor_host_agent_bridge_uses_session_answers(tmp_path, monkeypatch):
+    monkeypatch.setattr("code_scientist.llm.DEFAULT_BRIDGE_POLL_SECONDS", 0.01)
+    out_dir = tmp_path / "run"
+    bridge_dir = out_dir / "llm-bridge"
+    generation_response = json.dumps(
+        [
+            {
+                "title": "Session-answered idea",
+                "claim": "Letting the host session answer engine calls improves coding-agent research.",
+                "rationale": "The session grounds ideas in live repository context.",
+                "assumptions": ["The session stays attentive."],
+                "risks": ["per-request handshake latency"],
+            }
+        ]
+    )
+    stop = threading.Event()
+
+    def responder():
+        while not stop.is_set():
+            requests_dir = bridge_dir / "requests"
+            if requests_dir.exists():
+                for request_path in sorted(requests_dir.glob("*.json")):
+                    try:
+                        payload = json.loads(request_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        continue
+                    responses_dir = bridge_dir / "responses"
+                    responses_dir.mkdir(parents=True, exist_ok=True)
+                    (responses_dir / f"{payload['id']}.json").write_text(
+                        json.dumps({"id": payload["id"], "response": generation_response}),
+                        encoding="utf-8",
+                    )
+            time.sleep(0.01)
+
+    thread = threading.Thread(target=responder, daemon=True)
+    thread.start()
+    try:
+        state = run_research_cycle(
+            objective="Find testable ideas to improve LLM coding agents",
+            cycles=1,
+            max_hypotheses=4,
+            max_matches=1,
+            out_dir=out_dir,
+            provider="host-agent",
+        )
+    finally:
+        stop.set()
+        thread.join(timeout=2)
+
+    assert state.hypotheses
+    assert any(item.origin == "host-agent" for item in state.hypotheses)
+    assert (bridge_dir / "responses").exists()
+    assert list((bridge_dir / "requests").glob("*.json")) == []
+
+
+def test_supervisor_host_agent_rejects_review_worker_processes(tmp_path):
+    with pytest.raises(ValueError, match="in-process"):
+        run_research_cycle(
+            objective="Find testable ideas to improve LLM coding agents",
+            cycles=1,
+            max_hypotheses=2,
+            max_matches=1,
+            out_dir=tmp_path / "run",
+            provider="host-agent",
+            review_processes=2,
+        )
 
 
 def test_supervisor_anthropic_provider_drives_plan_and_all_agent_roles(tmp_path):
@@ -1359,6 +1647,8 @@ def test_supervisor_anthropic_provider_drives_plan_and_all_agent_roles(tmp_path)
     # Two active hypotheses means both sit in the top Elo tier, so the rank-tiered
     # scheduler runs the LLM multi-round debate path for this pair.
     assert state.matches[0].comparison_mode == "llm_multi_round_debate_judge"
+    assert state.matches[0].winner == "tie"
+    assert "position_stable=false" in state.matches[0].judge_trace
     assert state.meta_reviews[0].common_weaknesses == ["needs prospective validation"]
     assert state.research_overview is not None
     assert state.research_overview.generated_by == "llm_meta_review"
@@ -2399,6 +2689,7 @@ def test_supervisor_uses_plan_selected_evidence_grounding_evolution(tmp_path):
         for trace in state.agent_traces
     )
     assert any(item.origin == "evolution:evidence_grounding" for item in state.hypotheses)
+    assert any(item.origin == "evolution:evidence_grounding" for item in state.hypotheses)
 
 
 def test_supervisor_prefers_evidence_grounding_evolution_when_plan_allows_tools(tmp_path):
@@ -2432,7 +2723,23 @@ def test_supervisor_prefers_evidence_grounding_evolution_when_plan_allows_tools(
         trace.agent == "evolution" and trace.action == "evidence_grounding"
         for trace in state.agent_traces
     )
-    assert any(item.origin == "evolution:evidence_grounding" for item in state.hypotheses)
+
+
+def test_supervisor_supports_explicit_agent_ablation_while_preserving_task_graph(tmp_path):
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=6,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        disabled_agent_kinds=["evolution"],
+    )
+
+    evolution_task = next(task for task in state.task_queue if task.kind == "evolution")
+    assert evolution_task.status == "completed"
+    assert evolution_task.result_refs == []
+    assert not any(trace.agent == "evolution" for trace in state.agent_traces)
+    assert state.research_overview is not None
 
 
 def test_supervisor_adds_observation_review_when_plan_allows_tools(tmp_path):
@@ -2667,6 +2974,298 @@ def test_supervisor_uses_observation_and_simulation_review_modes(tmp_path):
         if review.review_type == "simulation_review"
         for finding in review.findings
     )
+
+
+def test_supervisor_filters_hypotheses_with_fundamental_assumption_failures(tmp_path):
+    evidence = tmp_path / "contradictory-assumption.md"
+    evidence.write_text(
+        "The critic cannot identify false premises cheaply and did not improve pass_rate in the benchmark.",
+        encoding="utf-8",
+    )
+    goal = ResearchGoal.from_objective("Improve LLM coding agents with deep verification")
+    plan = ResearchPlanConfig.from_goal(goal)
+    plan = ResearchPlanConfig.from_dict(
+        {
+            **plan.to_dict(),
+            "review_types": ["deep_verification"],
+            "allowed_sources": ["local_evidence_paths", "benchmark_validation"],
+            "allowed_tools": ["deterministic_agents", "benchmark_evaluation"],
+        }
+    )
+
+    state = run_research_cycle(
+        objective=goal.objective,
+        cycles=1,
+        max_hypotheses=3,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        evidence_paths=[evidence],
+        plan_config=plan,
+    )
+
+    rejected_ids = {
+        review.hypothesis_id
+        for review in state.reviews
+        if review.decision == "reject"
+        and any(check.invalidates_hypothesis for check in review.assumption_checks)
+    }
+    assert rejected_ids
+    assert rejected_ids.isdisjoint({item.id for item in state.hypotheses})
+    assert all(
+        match.hypothesis_a not in rejected_ids and match.hypothesis_b not in rejected_ids
+        for match in state.matches
+    )
+
+
+def test_supervisor_runs_agent_driven_repo_retrieval_with_persisted_hard_budget(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "failure-notes.md").write_text(
+        "Critic before edit benchmark failure traces reveal false premises, latency, and regressions.\n"
+        "Prior work on LLM coding agents reports unresolved benchmark transfer limitations.\n",
+        encoding="utf-8",
+    )
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    plan = ResearchPlanConfig.from_goal(
+        goal,
+        allowed_sources=["repo_search"],
+        allowed_tools=["repo_search", "deterministic_agents"],
+    )
+
+    state = run_research_cycle(
+        objective=goal.objective,
+        cycles=1,
+        max_hypotheses=3,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        repo_search_paths=[repo],
+        plan_config=plan,
+        agent_retrieval=True,
+        tool_budget=2,
+    )
+
+    assert state.tool_budget is not None
+    assert state.tool_budget.limit == 2
+    assert state.tool_budget.used == 2
+    assert state.tool_budget.remaining == 0
+    executed = [call for call in state.agent_tool_calls if call.status == "completed"]
+    assert executed
+    assert all(call.tool == "repo_search" for call in state.agent_tool_calls)
+    assert all(call.budget_after >= 0 for call in state.agent_tool_calls)
+    assert any(item.kind == "tool_result_repo_search" for item in state.evidence)
+    assert any(
+        trace.action == "agent_driven_iterative_retrieval"
+        and trace.tool_calls
+        and trace.agent in {"generation", "reflection"}
+        for trace in state.agent_traces
+    )
+
+    resumed = run_research_cycle(
+        objective=goal.objective,
+        cycles=1,
+        max_hypotheses=4,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        repo_search_paths=[repo],
+        plan_config=plan,
+        resume=True,
+        agent_retrieval=True,
+        tool_budget=2,
+    )
+
+    assert resumed.tool_budget is not None
+    assert resumed.tool_budget.used == 2
+    assert resumed.tool_budget.remaining == 0
+
+
+def test_supervisor_can_execute_review_tasks_in_durable_worker_processes(tmp_path):
+    state = run_research_cycle(
+        objective="Improve coding-agent recovery reliability",
+        cycles=1,
+        max_hypotheses=3,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        review_processes=2,
+    )
+
+    review_tasks = [task for task in state.task_queue if task.kind == "review"]
+    assert review_tasks
+    assert all(task.status == "completed" for task in review_tasks)
+    assert state.reviews
+    assert any(
+        trace.action == "multiprocess_review_packets" for trace in state.agent_traces
+    )
+    coordinator = supervisor_module.SQLiteTaskCoordinator(
+        tmp_path / "run" / "coordination.sqlite3"
+    )
+    review_claims = [
+        event
+        for event in coordinator.events()
+        if event["event_type"] == "task_claimed"
+        and event["task_id"] in {task.id for task in review_tasks}
+    ]
+    assert review_claims
+    assert all(event["worker_id"].startswith("review-process-") for event in review_claims)
+
+
+def test_supervisor_agent_retrieval_searches_then_fetches_observed_full_text(tmp_path, monkeypatch):
+    class FakeResponse:
+        def __init__(self, payload: bytes, content_type: str, url: str):
+            self.payload = payload
+            self.headers = {"content-type": content_type}
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def read(self, _limit):
+            return self.payload
+
+        def geturl(self):
+            return self.url
+
+    def fake_urlopen(request, timeout):
+        assert timeout == 10
+        assert request.full_url.startswith("https://api.openalex.org/works?")
+        return FakeResponse(
+            (
+                b'{"results":[{'
+                b'"id":"https://openalex.org/W123",'
+                b'"display_name":"Coding-agent benchmark study",'
+                b'"doi":"https://doi.org/10.1000/example",'
+                b'"abstract_inverted_index":{"benchmark":[0],"agents":[1]},'
+                b'"open_access":{"oa_url":"https://papers.example.org/full.html"}'
+                b'}]}'
+            ),
+            "application/json",
+            request.full_url,
+        )
+
+    def fake_public_open(request, timeout_seconds, allowed_domains):
+        assert timeout_seconds == 10
+        assert allowed_domains == ["example.org"]
+        assert request.full_url == "https://papers.example.org/full.html"
+        return FakeResponse(
+            b"<article><h1>Measured benchmark</h1><p>Pass rate and regressions were evaluated.</p></article>",
+            "text/html; charset=utf-8",
+            request.full_url,
+        )
+
+    monkeypatch.setattr("code_scientist.tools.urlopen", fake_urlopen)
+    monkeypatch.setattr("code_scientist.tools._open_public_url", fake_public_open)
+    goal = ResearchGoal.from_objective("Improve coding-agent benchmark reliability")
+    plan = ResearchPlanConfig.from_goal(
+        goal,
+        allowed_sources=["literature_search", "literature_full_text"],
+        allowed_tools=["literature_search", "literature_full_text_fetch"],
+    )
+
+    state = run_research_cycle(
+        objective=goal.objective,
+        cycles=1,
+        max_hypotheses=2,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        plan_config=plan,
+        literature_search_queries=["enable governed literature retrieval"],
+        agent_retrieval=True,
+        agent_retrieval_iterations=2,
+        agent_fetch_domains=["example.org"],
+        tool_budget=2,
+    )
+
+    assert [call.tool for call in state.agent_tool_calls[:2]] == [
+        "literature_search",
+        "literature_full_text_fetch",
+    ]
+    assert state.agent_tool_calls[1].source_ref == state.agent_tool_calls[0].evidence_refs[0]
+    assert any(item.kind == "literature_full_text" for item in state.evidence)
+    assert any(item.kind == "literature_full_text_span" for item in state.evidence)
+
+
+def test_supervisor_runs_researcher_manifest_as_budgeted_reflection_evidence(tmp_path):
+    manifest = tmp_path / "agent-validation.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "baseline_metrics": {"pass_rate": 0.4},
+                "success_metric": "pass_rate",
+                "command": [
+                    sys.executable,
+                    "-c",
+                    (
+                        "import json, os; from pathlib import Path; "
+                        "payload=json.loads(Path(os.environ['CODE_SCIENTIST_HYPOTHESIS_PATH']).read_text()); "
+                        "assert payload['hypothesis']['id']; "
+                        "Path(os.environ['CODE_SCIENTIST_METRICS_PATH']).write_text("
+                        "json.dumps({'metrics': {'pass_rate': 0.81}, 'notes': ['measured in loop']}))"
+                    ),
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    goal = ResearchGoal.from_objective("Improve LLM coding agents with empirical checks")
+    plan = ResearchPlanConfig.from_goal(
+        goal,
+        allowed_sources=["benchmark_validation"],
+        allowed_tools=["empirical_validation"],
+    )
+
+    state = run_research_cycle(
+        objective=goal.objective,
+        cycles=1,
+        max_hypotheses=3,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        plan_config=plan,
+        agent_retrieval=True,
+        tool_budget=1,
+        agent_validation_manifest_paths=[manifest],
+    )
+
+    assert state.tool_budget is not None
+    assert state.tool_budget.limit == 1
+    assert state.tool_budget.used == 1
+    completed = [
+        call
+        for call in state.agent_tool_calls
+        if call.tool == "empirical_validation" and call.status == "completed"
+    ]
+    assert len(completed) == 1
+    assert any(item.kind == "agent_empirical_validation" for item in state.evidence)
+    assert any(
+        trace.action == "agent_driven_empirical_validation" and trace.tool_calls
+        for trace in state.agent_traces
+    )
+    assert (tmp_path / "run" / "agent-validations").is_dir()
+
+
+def test_agent_retrieval_without_budget_preserves_static_source_collection(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "evidence.md").write_text(
+        "LLM coding agent benchmark evidence reports critic workflow limitations.",
+        encoding="utf-8",
+    )
+
+    state = run_research_cycle(
+        objective="Improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=3,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        repo_search_paths=[repo],
+        agent_retrieval=True,
+        tool_budget=0,
+    )
+
+    assert state.tool_budget is None
+    assert state.agent_tool_calls == []
+    assert any(item.kind == "tool_result_repo_search" for item in state.evidence)
 
 
 def test_supervisor_records_embedding_proximity_and_debate_matches(tmp_path):
@@ -2956,7 +3555,43 @@ def test_scheduler_runs_ready_tasks_by_priority_instead_of_fixed_phase_order(tmp
     assert ranking_task.worker_state["scheduler_decision"]["rank"] == 1
     assert ranking_task.worker_state["scheduler_decision"]["candidate_count"] == 2
     assert "weight:ranking" in ranking_task.worker_state["scheduler_decision"]["signals"]
-    assert proximity_task.worker_state["scheduler_decision"]["rank"] == 2
+    assert proximity_task.worker_state["scheduler_decision"]["rank"] == 1
+    assert proximity_task.worker_state["scheduler_decision"]["candidate_count"] == 1
+
+
+def test_supervisor_persists_dependency_aware_cross_kind_task_graph(tmp_path):
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=4,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        review_concurrency=2,
+    )
+    tasks_by_kind: dict[str, list[Task]] = {}
+    for task in state.task_queue:
+        tasks_by_kind.setdefault(task.kind, []).append(task)
+
+    generation_id = tasks_by_kind["generate"][0].id
+    review_ids = {task.id for task in tasks_by_kind["review"]}
+    proximity = tasks_by_kind["proximity"][0]
+    ranking = tasks_by_kind["ranking"][0]
+    evolution = tasks_by_kind["evolution"][0]
+    meta_review = tasks_by_kind["meta_review"][0]
+    overview = tasks_by_kind["overview"][0]
+    research_outputs = tasks_by_kind["research_outputs"][0]
+
+    assert review_ids
+    assert all(task.depends_on == [generation_id] for task in tasks_by_kind["review"])
+    assert set(proximity.depends_on) == review_ids
+    assert set(ranking.depends_on) == review_ids
+    assert set(evolution.depends_on) == {ranking.id, proximity.id}
+    assert meta_review.depends_on == [ranking.id]
+    assert set(overview.depends_on) == {meta_review.id, evolution.id, proximity.id}
+    assert research_outputs.depends_on == [overview.id]
+    assert all(task.status == "completed" for task in state.task_queue)
+    assert {task.resource_class for task in tasks_by_kind["review"]} == {"review"}
+    assert ranking.resource_class == "state_mutation"
 
 
 def test_scheduler_prioritizes_feedback_targeted_review_tasks(tmp_path, monkeypatch):
@@ -3004,7 +3639,9 @@ def test_scheduler_prioritizes_feedback_targeted_review_tasks(tmp_path, monkeypa
     targeted_decision = by_hypothesis_id[targeted.id].worker_state["scheduler_decision"]
     other_decision = by_hypothesis_id[other.id].worker_state["scheduler_decision"]
     assert targeted_decision["rank"] == 1
-    assert other_decision["rank"] == 2
+    assert other_decision["rank"] == 1
+    assert targeted_decision["candidate_count"] == 2
+    assert other_decision["candidate_count"] == 1
     assert targeted_decision["candidate_count"] == 2
     assert "user_feedback:feedback-review-priority" in targeted_decision["signals"]
 
@@ -3105,7 +3742,8 @@ def test_scheduler_runs_resumed_feedback_review_before_new_generation(tmp_path, 
     assert review_task.status == "completed"
     assert review_task.worker_state["scheduler_decision"]["rank"] == 1
     assert "user_feedback:feedback-resumed-review" in review_task.worker_state["scheduler_decision"]["signals"]
-    assert generate_task.worker_state["scheduler_decision"]["rank"] > review_task.worker_state["scheduler_decision"]["rank"]
+    assert generate_task.worker_state["scheduler_decision"]["rank"] == 1
+    assert generate_task.worker_state["scheduler_decision"]["candidate_count"] == 1
 
 
 def test_scheduler_can_run_meta_review_before_evolution_when_weighted_higher(tmp_path):
@@ -3139,7 +3777,8 @@ def test_scheduler_can_run_meta_review_before_evolution_when_weighted_higher(tmp
     meta_task = next(task for task in state.task_queue if task.kind == "meta_review")
     evolution_task = next(task for task in state.task_queue if task.kind == "evolution")
     assert meta_task.worker_state["scheduler_decision"]["rank"] == 1
-    assert evolution_task.worker_state["scheduler_decision"]["rank"] == 2
+    assert evolution_task.worker_state["scheduler_decision"]["rank"] == 1
+    assert evolution_task.worker_state["scheduler_decision"]["candidate_count"] == 1
     assert meta_task.worker_state["scheduler_decision"]["candidate_count"] == 2
     assert "weight:meta_review" in meta_task.worker_state["scheduler_decision"]["signals"]
 

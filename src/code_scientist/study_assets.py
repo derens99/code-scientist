@@ -32,6 +32,7 @@ def write_paper_study_kit(out_dir: str | Path) -> list[Path]:
         files.append(_write_json(benchmarks_dir / filename, payload))
 
     files.append(_write_json(output / "study-manifest.json", _study_manifest()))
+    files.append(_write_json(output / "ablation-manifest.json", _ablation_manifest()))
     files.append(_write_json(review_dir / "capability-review-spec.json", _capability_review_spec()))
     files.append(_write_json(review_dir / "preference-review-spec.json", _preference_review_spec()))
     files.append(_write_json(review_dir / "feedback-loop-review-spec.json", _feedback_loop_review_spec()))
@@ -163,6 +164,58 @@ def _study_manifest() -> dict[str, Any]:
                 "tool_budget": 16,
                 "safety_red_team": True,
             },
+        ],
+    }
+
+
+def _ablation_manifest() -> dict[str, Any]:
+    objective = (
+        "Find coding-agent hypotheses that improve critic-before-edit review, assumption "
+        "decomposition, retrieval grounding, and benchmark reliability."
+    )
+    common: dict[str, Any] = {
+        "objective": objective,
+        "cycles": 1,
+        "max_hypotheses": 6,
+        "max_matches": 4,
+        "benchmark_suites": ["benchmarks/review-grounding-suite.json"],
+        "auto_capability_eval": True,
+        "baseline_name": "single_shot_llm",
+        "baseline_score": 0.37,
+        "scaling_baseline_score": 0.37,
+        "tool_budget": 8,
+    }
+    arms = [
+        ("generation-paper-seeded", {"generation_methods": ["paper_seeded_idea_generation"]}),
+        ("generation-assumption", {"generation_methods": ["assumption_decomposition"]}),
+        ("reflection-search-off", {"review_types": ["initial_review", "safety_review"]}),
+        (
+            "reflection-search-on",
+            {"review_types": ["full_review", "deep_verification", "observation_review"]},
+        ),
+        ("ranking-simple", {"review_types": ["initial_review", "single_turn_debate"]}),
+        ("ranking-debate", {"generation_methods": ["simulated_debate"]}),
+        ("evolution-off", {"disabled_agents": ["evolution"]}),
+        ("evolution-on", {}),
+        ("review-full", {"review_types": ["full_review", "deep_verification"]}),
+        ("review-recurrent", {"review_types": ["recurrent_tournament_review"]}),
+        ("proximity-off", {"disabled_agents": ["proximity"]}),
+        ("proximity-on", {}),
+    ]
+    return {
+        "name": "Code Scientist v2 component ablation study",
+        "description": (
+            "Paired runnable arms for generation strategy, reflection search, simple versus "
+            "debate ranking, evolution, full versus recurrent review, and proximity controls."
+        ),
+        "goals": [
+            {
+                **common,
+                "id": arm_id,
+                "scaling_label": arm_id,
+                **overrides,
+            }
+            for arm_id, overrides in arms
         ],
     }
 
@@ -526,6 +579,16 @@ Run the local study:
 ```bash
 uv run code-scientist study-run study-manifest.json --out runs/paper-study-local
 ```
+
+Run the paired component-ablation arms:
+
+```bash
+uv run code-scientist study-run ablation-manifest.json --out runs/paper-ablation-local
+```
+
+The ablation manifest exercises generation strategy, reflection search,
+simple versus debate ranking, evolution on/off, full versus recurrent review,
+and proximity on/off through explicit plan overrides and disabled-agent arms.
 
 Then aggregate the generated run states:
 

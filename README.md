@@ -13,6 +13,40 @@ uv run code-scientist run "Find testable ideas to improve LLM coding agents" --c
 uv run code-scientist report runs/demo/state.json
 ```
 
+## Web Workbench
+
+`web/` contains a Next.js workbench for configuring and starting runs, watching progress, inspecting hypotheses, reviews, evidence, and the proximity graph, and sending human guidance (goal revisions, safety approvals, source attachments, evaluation returns) to a running supervisor:
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+The workbench shells out to `uv run code-scientist` in the repository root (override with `CODE_SCIENTIST_ROOT`) and lists run directories under `runs/`.
+
+## Providers
+
+`--provider` selects who answers the engine's LLM calls:
+
+- `deterministic` (default): offline blueprint scaffolding; no network and no key, but never a source of novel hypotheses.
+- `anthropic`: the Anthropic API. Requires `ANTHROPIC_API_KEY` in the environment or the `--env-file` file.
+- `claude-cli`: shells each provider call out to headless Claude Code (`claude -p --model <model> --output-format text`). Reuses the local `claude` login, so research-grade runs work with no API key — this is what `/code-scientist` uses inside Claude Code when no key is configured.
+- `codex-cli`: shells each provider call out to `codex exec` in a read-only sandbox, reading the reply from `--output-last-message`. Reuses the local `codex` login. `--model` keeps its Anthropic default, which this provider treats as "use the codex CLI's configured model"; pass an explicit Codex model id to override.
+- `host-agent`: blocks each provider call on a file handshake with the agent session that launched the run — the built-in Claude Code/Codex agents are the model, with no API key or separate login. The engine writes `runs/<run-id>/llm-bridge/requests/<id>.json` (`{"id", "prompt", "max_tokens", "created_at"}`) and waits up to 600 seconds for `runs/<run-id>/llm-bridge/responses/<id>.json` containing `{"id", "response"}` (or `{"id", "error"}` to fail that call). Answered request files are removed, so `requests/` always lists exactly the pending calls; wrapping code fences in responses are stripped. This is the `/code-scientist` skill's default for research-grade runs.
+
+Host-CLI providers spawn one headless agent per call, so runs are slower than API runs; `--provider-call-budget` still caps the total number of calls. Neither host-CLI nor host-agent providers accept image payloads, so `--pdf-vision` remains `anthropic`-only, and `host-agent` runs execute reviews in-process (`--review-processes` is rejected because detached workers cannot reach the answering session).
+
+```bash
+uv run code-scientist run "Find testable ideas to improve coding-agent subagent orchestration" \
+  --provider host-agent \
+  --review-concurrency 3 \
+  --cycles 2 \
+  --max-hypotheses 8 \
+  --repo-search-path src \
+  --out runs/host-agent-demo
+```
+
 ## Claude Code And Codex Agent Workflow
 
 This repository includes project-scoped agent entry points:
@@ -20,7 +54,7 @@ This repository includes project-scoped agent entry points:
 - Claude Code: `.claude/skills/code-scientist/SKILL.md`, invoked as `/code-scientist`.
 - Codex: `.agents/skills/code-scientist/SKILL.md`, invoked with `$code-scientist` or the skills picker.
 
-The shared workflow runs Code Scientist, writes a normal `state.json` and `report.md`, converts top hypotheses into bounded subagent packets, then asks one independent read-only reviewer subagent to review each packet.
+The shared workflow runs Code Scientist, writes a normal `state.json` and `report.md`, converts top hypotheses into bounded subagent packets, then asks one independent read-only reviewer subagent to review each packet. Research-grade runs default to `--provider host-agent`: the skill starts the engine in the background and the host session answers the run's `llm-bridge` requests itself (fanning out to subagents for parallel batches), so no API key is involved. `--provider anthropic` is used only when the operator explicitly asks for the API, and `claude-cli`/`codex-cli` remain for detached headless automation.
 
 When the operator has no objective yet, discovery mode mines the repository for candidates first — prior run overviews (`runs/*/state.json` next experiments and limitations), gap language in markdown docs, and TODO/FIXME comments, ranked strongest signal first:
 
@@ -117,6 +151,23 @@ uv run code-scientist run "Find testable ideas to improve LLM coding agents" \
 
 Use `--repo-search-path` for cited local repository search evidence, `--web-evidence-url` for explicit HTTP(S) documents that should be fetched and cited as web evidence with capped `web_document_span` citations, `--web-crawl-depth` to follow same-origin links from explicit web evidence URLs, `--web-search-query` for cited Bing RSS search-result evidence, and `--literature-search-query` for gated OpenAlex literature search results. Add `--web-search-fetch` to fetch the result pages from web search as cited `web_search_document` evidence plus screened `web_search_document_span` citations, add `--web-search-crawl-depth` to follow same-origin links from those fetched search-result pages, and add `--literature-full-text` to follow OpenAlex open-access URLs and attach cited `literature_full_text` evidence plus capped `literature_full_text_span` citations. Retrieved evidence is screened before agents can cite it.
 
+Add `--agent-retrieval --tool-budget N` when Generation and Reflection should formulate and refine their own queries instead of collecting only the researcher-supplied seed queries before the run. Agent retrieval is limited to explicitly configured repository paths and enabled web/literature channels. After observing a web or OpenAlex result, an agent may request its document/full text by evidence `source_ref`; it never supplies a URL. The executor enforces public HTTP(S), safe ports and redirects, blocks private/link-local targets, and accepts repeatable `--agent-fetch-domain` allowlist entries. The budget is a hard run-wide limit for the current supervisor process: failed calls consume it, concurrent in-process retrieval tasks cannot overspend it, and usage is persisted for resume. Retrieval calls are not yet coordinated across independently launched processes. `--agent-retrieval-iterations N` sets the per-task observation/refinement ceiling from one to ten; duplicate or unproductive iterations stop early and the shared budget still wins. Agents cannot select filesystem roots, arbitrary URLs, domains, crawling, full-text settings, or shell commands.
+
+Add one or more `--agent-validation-manifest path.json` arguments when Reflection should execute researcher-owned empirical checks in-loop. These manifests use the same command-list, no-shell contract as prospective validation, receive the current hypothesis through `CODE_SCIENTIST_HYPOTHESIS_PATH`, and return measured metrics through `CODE_SCIENTIST_METRICS_PATH` or JSON stdout. Every attempted execution reserves one unit from the same hard tool budget before the process starts. The agent selects neither the command nor its working directory. Study manifests can provide per-goal `agent_validation_manifests` paths, resolved relative to the study manifest. Host execution uses a minimal environment, blocks secret-like manifest variables, constrains the working directory, applies resource limits, captures bounded output, and terminates the process group on timeout. It is explicitly attested as `host_restricted_not_sandboxed`: network isolation requires an external container or VM runner, and `execution_policy: hardened` fails closed until one is configured.
+
+Each run persists a dependency-aware cross-kind task graph in both atomic `state.json` and a SQLite WAL coordinator. Transactional claims enforce dependencies and resource-class capacity; leases, heartbeats, expired-worker recovery, named SQLite budgets, and append-only coordinator events are process-safe. The default scheduler stays in-process. Add `--review-processes N` to execute portable review packets in separate lease-based processes for deterministic or explicitly selected Anthropic runs. Provider packets contain digests and bounded review inputs, never credentials or environment-file authority; workers receive provider authority from operator-owned runtime flags and consume an atomic `--provider-call-budget` before every request. Expired provider packets fail for manual review rather than replaying a potentially billable call. `code-scientist worker RUN_DIR` runs a packet worker and `code-scientist coordination-status RUN_DIR` prints the durable task/event view.
+
+Every state write also appends newly observable events to `activity.jsonl`. The ledger uses stable event ids and monotonic sequence numbers to preserve task transitions, agent tool calls, goal/evidence safety decisions, source ingestions, run-status changes, and human feedback without rewriting prior history. Tournament ranking performs an order-swap audit for each A/B pair; A/B versus B/A disagreement is recorded and converted to an Elo-preserving abstention.
+
+Run the built-in safety suite together with loadable coding-domain corpora using `safety-red-team`. Corpus files contain a `cases` list with `id`, `topic`, `subject_type` (`goal`, `hypothesis`, or `evidence`), `objective`, `expected_allowed`, and optional `paraphrases` / `obfuscations`. `--generate-variants` creates one deterministic paraphrase and obfuscation per base case and reports per-topic pass rates plus base-to-variant degradation instead of hiding weak robustness behind a single aggregate.
+
+```bash
+uv run code-scientist safety-red-team \
+  --corpus evaluation/safety-corpus.json \
+  --generate-variants \
+  --out runs/safety-red-team.json
+```
+
 ```bash
 uv run code-scientist run "Find web-grounded ideas for LLM coding agents" \
   --web-evidence-url https://example.com/research-note \
@@ -127,6 +178,53 @@ uv run code-scientist run "Find web-grounded ideas for LLM coding agents" \
   --literature-search-query "coding agent benchmark" \
   --literature-full-text \
   --out runs/web-grounded-demo
+```
+
+```bash
+uv run code-scientist run "Find iteratively grounded ideas for LLM coding agents" \
+  --repo-search-path . \
+  --web-search-query "coding agent benchmark reliability" \
+  --literature-search-query "LLM coding agent evaluation" \
+  --agent-retrieval \
+  --agent-fetch-domain arxiv.org \
+  --tool-budget 12 \
+  --out runs/agent-retrieval-demo
+```
+
+PDF attachments use native page text first, then real RapidOCR/ONNX extraction for scanned pages. OCR evidence records page numbers, confidence, and PDF-coordinate text boxes. PyMuPDF table and image inspection also records cited table cells, figure/page-scan bounding boxes, image references, and nearby captions. By default, figure regions remain provenance-only records. With an explicitly selected Anthropic provider and `--pdf-vision`, the supervisor renders only bounded figure crops, spends from `--pdf-vision-call-budget`, validates a structured interpretation, and creates claim-level `pdf_visual_claim` evidence linked to the source page, bounding box, crop hash, and model. These claims are always marked machine-interpreted and require human verification.
+
+```bash
+uv run code-scientist run "Find robust coding-agent recovery ideas" \
+  --evidence-path papers/scanned-study.pdf \
+  --review-processes 3 \
+  --out runs/process-review-demo
+
+uv run code-scientist coordination-status runs/process-review-demo
+```
+
+```bash
+uv run code-scientist run "Interpret attached coding-agent study figures" \
+  --provider anthropic \
+  --evidence-path papers/study.pdf \
+  --pdf-vision \
+  --pdf-vision-max-regions 6 \
+  --pdf-vision-call-budget 6 \
+  --out runs/vision-grounded-demo
+```
+
+Goal guidance can revise the objective, constraints, metrics, source/tool allowlists, output formats, and termination criteria. Revisions are safety-reviewed, get new goal/plan identities, supersede only queued/deferred work, and preserve completed artifacts. The workbench exposes this form. The CLI queues revisions for a running supervisor to consume at a cycle boundary and applies them immediately to completed/stopped runs:
+
+```bash
+uv run code-scientist goal-revision runs/demo \
+  --patch-json '{"constraints":["Use public benchmarks only"],"metrics":["pass_rate","cost"]}' \
+  --message "Narrow the next research cycle"
+```
+
+```bash
+uv run code-scientist run "Find empirically testable coding-agent improvements" \
+  --agent-validation-manifest validation/benchmark-probe.json \
+  --tool-budget 8 \
+  --out runs/agent-validation-demo
 ```
 
 Build reusable local corpus indexes with `code-scientist index`, then attach them to later runs with `--evidence-index`. Local and indexed evidence retrieval uses BM25-style term-frequency ranking plus a deterministic local embedding fallback for hybrid private-corpus retrieval. Citations include markdown section paths and PDF page numbers when available:
@@ -218,3 +316,22 @@ uv run code-scientist report runs/demo/state.json
 ```
 
 The generated report separates hypotheses from verified improvements and labels Elo as an auto-evaluation proxy.
+
+## Development
+
+```bash
+uv sync                  # install the engine and dev dependencies
+uv run pytest -q         # Python test suite
+uvx ruff check src tests # lint
+
+cd web
+npm install
+npm test                 # web test suite
+npm run typecheck
+```
+
+Design notes and implementation plans live in `docs/`, including the paper-alignment audits that track how closely the engine reproduces the co-scientist paper's mechanisms.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

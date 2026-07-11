@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import json
+import ipaddress
+import socket
+import threading
 import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from code_scientist.evidence import SKIP_DIRS, TEXT_EXTENSIONS, _read_text, _tokens
-from code_scientist.models import Evidence, stable_id
+from code_scientist.models import AgentToolCall, Evidence, ToolBudgetState, stable_id
 from code_scientist.safety import SafetyPolicy, review_evidence_safety
 
 
@@ -28,6 +32,338 @@ class ToolSearchResult:
     @property
     def evidence_refs(self) -> list[str]:
         return [item.id for item in self.evidence]
+
+
+@dataclass(frozen=True)
+class AgentRetrievalRequest:
+    tool: str
+    query: str
+    rationale: str
+    source_ref: str = ""
+
+
+class AgentRetrievalSession:
+    """Thread-safe governed executor for agent-originated retrieval requests."""
+
+    def __init__(
+        self,
+        evidence_store,
+        budget_limit: int,
+        executors: dict[str, Callable[[str], ToolSearchResult]],
+        *,
+        budget_used: int = 0,
+        safety_policies: list[SafetyPolicy] | None = None,
+        seen_requests: list[tuple[str, str]] | None = None,
+    ) -> None:
+        self.evidence_store = evidence_store
+        self.executors = dict(executors)
+        self.safety_policies = list(safety_policies or [])
+        self._limit = max(int(budget_limit), 0)
+        self._used = min(max(int(budget_used), 0), self._limit)
+        self._lock = threading.Lock()
+        self._seen_requests: set[tuple[str, str]] = {
+            (tool, _normalize_agent_query(query).lower())
+            for tool, query in (seen_requests or [])
+            if tool and _normalize_agent_query(query)
+        }
+
+    @property
+    def available_tools(self) -> list[str]:
+        return sorted(self.executors)
+
+    def budget_state(self) -> ToolBudgetState:
+        with self._lock:
+            return ToolBudgetState(limit=self._limit, used=self._used)
+
+    def execute(
+        self,
+        requests: list[AgentRetrievalRequest],
+        *,
+        cycle: int,
+        agent: str,
+        task_id: str,
+        executor_overrides: dict[str, Callable[[str], ToolSearchResult]] | None = None,
+    ) -> tuple[list[Evidence], list[AgentToolCall]]:
+        gathered: list[Evidence] = []
+        calls: list[AgentToolCall] = []
+        for index, request in enumerate(requests):
+            cleaned_query = _normalize_agent_query(request.query)
+            cleaned_source_ref = _normalize_source_ref(request.source_ref)
+            executor = (executor_overrides or {}).get(request.tool) or self.executors.get(request.tool)
+            is_reference_fetch = request.tool in {
+                "web_document_fetch",
+                "literature_full_text_fetch",
+            }
+            executor_input = cleaned_source_ref if is_reference_fetch else cleaned_query
+            request_key = (request.tool, executor_input.lower())
+            with self._lock:
+                remaining = max(self._limit - self._used, 0)
+                if executor is None:
+                    calls.append(
+                        self._call_record(
+                            request,
+                            cleaned_query,
+                            cycle,
+                            agent,
+                            task_id,
+                            index,
+                            status="tool_unavailable",
+                            budget_before=remaining,
+                            budget_after=remaining,
+                            error=f"Tool is not enabled for this run: {request.tool}",
+                        )
+                    )
+                    continue
+                if is_reference_fetch and not cleaned_source_ref:
+                    calls.append(
+                        self._call_record(
+                            request,
+                            cleaned_query,
+                            cycle,
+                            agent,
+                            task_id,
+                            index,
+                            status="invalid_source_ref",
+                            budget_before=remaining,
+                            budget_after=remaining,
+                            error="Reference-bound fetch requires an observed evidence source_ref.",
+                        )
+                    )
+                    continue
+                if not is_reference_fetch and not cleaned_query:
+                    calls.append(
+                        self._call_record(
+                            request,
+                            cleaned_query,
+                            cycle,
+                            agent,
+                            task_id,
+                            index,
+                            status="invalid_query",
+                            budget_before=remaining,
+                            budget_after=remaining,
+                            error="Agent retrieval query was blank after normalization.",
+                        )
+                    )
+                    continue
+                if request_key in self._seen_requests:
+                    calls.append(
+                        self._call_record(
+                            request,
+                            cleaned_query,
+                            cycle,
+                            agent,
+                            task_id,
+                            index,
+                            status="duplicate_query",
+                            budget_before=remaining,
+                            budget_after=remaining,
+                        )
+                    )
+                    continue
+                if remaining <= 0:
+                    calls.append(
+                        self._call_record(
+                            request,
+                            cleaned_query,
+                            cycle,
+                            agent,
+                            task_id,
+                            index,
+                            status="budget_exhausted",
+                            budget_before=0,
+                            budget_after=0,
+                        )
+                    )
+                    continue
+                self._seen_requests.add(request_key)
+                self._used += 1
+                budget_before = remaining
+                budget_after = max(self._limit - self._used, 0)
+
+            try:
+                result = executor(executor_input)
+            except Exception as exc:
+                calls.append(
+                    self._call_record(
+                        request,
+                        cleaned_query,
+                        cycle,
+                        agent,
+                        task_id,
+                        index,
+                        status="failed",
+                        budget_before=budget_before,
+                        budget_after=budget_after,
+                        error=str(exc),
+                    )
+                )
+                continue
+
+            safe_evidence: list[Evidence] = []
+            blocked_reasons = list(result.blocked_reasons or [])
+            for item in result.evidence:
+                decision = review_evidence_safety(item, safety_policies=self.safety_policies)
+                if decision.allowed:
+                    safe_evidence.append(item)
+                else:
+                    blocked_reasons.extend(decision.flags)
+            safe_evidence = _unique_evidence_by_id(safe_evidence)
+            with self._lock:
+                new_evidence = self.evidence_store.add_many(safe_evidence)
+            gathered.extend(new_evidence)
+            status = "completed" if new_evidence else ("blocked" if blocked_reasons else "no_results")
+            calls.append(
+                self._call_record(
+                    request,
+                    cleaned_query,
+                    cycle,
+                    agent,
+                    task_id,
+                    index,
+                    status=status,
+                    budget_before=budget_before,
+                    budget_after=budget_after,
+                    evidence_refs=[item.id for item in new_evidence],
+                    blocked_reasons=_unique(blocked_reasons),
+                )
+            )
+        return _unique_evidence_by_id(gathered), calls
+
+    @staticmethod
+    def _call_record(
+        request: AgentRetrievalRequest,
+        cleaned_query: str,
+        cycle: int,
+        agent: str,
+        task_id: str,
+        index: int,
+        *,
+        status: str,
+        budget_before: int,
+        budget_after: int,
+        evidence_refs: list[str] | None = None,
+        blocked_reasons: list[str] | None = None,
+        error: str = "",
+    ) -> AgentToolCall:
+        source_ref = _normalize_source_ref(request.source_ref)
+        identity = (
+            f"{cycle}:{task_id}:{agent}:{request.tool}:{cleaned_query}:"
+            f"{source_ref}:{index}:{status}"
+        )
+        return AgentToolCall(
+            id=stable_id("tool-call", identity),
+            cycle=cycle,
+            task_id=task_id,
+            agent=agent,
+            tool=request.tool,
+            query=cleaned_query,
+            rationale=request.rationale,
+            status=status,
+            source_ref=source_ref,
+            evidence_refs=list(evidence_refs or []),
+            blocked_reasons=list(blocked_reasons or []),
+            budget_before=budget_before,
+            budget_after=budget_after,
+            error=error,
+        )
+
+
+def _normalize_agent_query(value: str, max_chars: int = 400) -> str:
+    cleaned = " ".join(
+        "".join(character if character.isprintable() else " " for character in str(value)).split()
+    )
+    return cleaned[:max_chars].strip()
+
+
+def _normalize_source_ref(value: str, max_chars: int = 160) -> str:
+    cleaned = "".join(character for character in str(value).strip() if character.isalnum() or character in "-_")
+    return cleaned[:max_chars]
+
+
+def _open_url(request: Request, timeout_seconds: float, _allowed_domains: list[str] | None):
+    return urlopen(request, timeout=timeout_seconds)
+
+
+class _PublicOnlyRedirectHandler(HTTPRedirectHandler):
+    def __init__(self, allowed_domains: list[str] | None) -> None:
+        super().__init__()
+        self.allowed_domains = allowed_domains
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _assert_public_http_url(newurl, self.allowed_domains)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _open_public_url(
+    request: Request,
+    timeout_seconds: float,
+    allowed_domains: list[str] | None,
+):
+    _assert_public_http_url(request.full_url, allowed_domains)
+    response = build_opener(_PublicOnlyRedirectHandler(allowed_domains)).open(
+        request,
+        timeout=timeout_seconds,
+    )
+    _assert_public_http_url(response.geturl(), allowed_domains)
+    return response
+
+
+def _assert_public_http_url(url: str, allowed_domains: list[str] | None = None) -> None:
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ToolSafetyError("Agent fetch URL must use public HTTP or HTTPS.")
+    if parsed.username or parsed.password:
+        raise ToolSafetyError("Agent fetch URLs cannot contain credentials.")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ToolSafetyError("Agent fetch URL has an invalid port.") from exc
+    if port not in {None, 80, 443}:
+        raise ToolSafetyError("Agent fetch URL port is not allowed.")
+
+    hostname = parsed.hostname.rstrip(".").lower()
+    normalized_domains = [
+        domain.strip().rstrip(".").lower()
+        for domain in (allowed_domains or [])
+        if domain.strip()
+    ]
+    if normalized_domains and not any(
+        hostname == domain or hostname.endswith(f".{domain}")
+        for domain in normalized_domains
+    ):
+        raise ToolSafetyError(f"Agent fetch domain is not researcher-approved: {hostname}")
+
+    try:
+        addresses = {
+            record[4][0]
+            for record in socket.getaddrinfo(
+                hostname,
+                port or (443 if parsed.scheme == "https" else 80),
+                type=socket.SOCK_STREAM,
+            )
+        }
+    except socket.gaierror as exc:
+        raise ToolSafetyError(f"Agent fetch domain could not be resolved: {hostname}") from exc
+    if not addresses:
+        raise ToolSafetyError(f"Agent fetch domain did not resolve: {hostname}")
+    for address in addresses:
+        ip = ipaddress.ip_address(address)
+        if not ip.is_global:
+            raise ToolSafetyError(
+                f"Agent fetch resolved to a non-public address: {hostname} -> {address}"
+            )
+
+
+def _unique_evidence_by_id(evidence: list[Evidence]) -> list[Evidence]:
+    unique: list[Evidence] = []
+    seen: set[str] = set()
+    for item in evidence:
+        if item.id in seen:
+            continue
+        seen.add(item.id)
+        unique.append(item)
+    return unique
 
 
 @dataclass(frozen=True)
@@ -504,6 +840,142 @@ def collect_web_evidence(
     return evidence
 
 
+def build_agent_retrieval_executors(
+    *,
+    evidence_store=None,
+    repo_roots: list[str | Path] | None = None,
+    enable_web_search: bool = False,
+    enable_literature_search: bool = False,
+    fetch_allowed_domains: list[str] | None = None,
+    safety_policies: list[SafetyPolicy] | None = None,
+) -> dict[str, Callable[[str], ToolSearchResult]]:
+    """Build the closed, researcher-enabled tool set available to agent planners.
+
+    Planner-selected arbitrary URLs, roots, crawling, full text, and shell commands
+    are intentionally excluded. Those high-cost parameters remain researcher-owned.
+    """
+    executors: dict[str, Callable[[str], ToolSearchResult]] = {}
+    roots = [Path(root) for root in (repo_roots or [])]
+    if roots:
+        repo_tool = LocalRepositorySearchTool(allowed_roots=roots)
+
+        def search_repositories(query: str) -> ToolSearchResult:
+            evidence: list[Evidence] = []
+            blocked_reasons: list[str] = []
+            for root in roots:
+                result = repo_tool.search(root, query, limit=5)
+                evidence.extend(result.evidence)
+                blocked_reasons.extend(result.blocked_reasons or [])
+            return ToolSearchResult(
+                query=query,
+                evidence=_unique_evidence_by_id(evidence),
+                blocked_count=len(blocked_reasons),
+                blocked_reasons=_unique(blocked_reasons),
+            )
+
+        executors["repo_search"] = search_repositories
+    if enable_web_search:
+        web_tool = WebSearchTool()
+        executors["web_search"] = lambda query: web_tool.search(
+            query,
+            limit=5,
+            fetch_documents=False,
+            fetch_crawl_depth=0,
+        )
+        if evidence_store is not None:
+
+            def fetch_web_document(source_ref: str) -> ToolSearchResult:
+                search_result = evidence_store.get(source_ref)
+                if search_result is None or search_result.kind != "web_search_result":
+                    raise ToolSafetyError(
+                        "web_document_fetch source_ref must identify an observed web search result."
+                    )
+                fetched = _fetch_web_search_document_with_links(
+                    search_result=search_result,
+                    timeout_seconds=web_tool.timeout_seconds,
+                    max_bytes=web_tool.max_bytes,
+                    public_only=True,
+                    allowed_domains=fetch_allowed_domains,
+                )
+                if fetched is None:
+                    return ToolSearchResult(query=source_ref, evidence=[])
+                decision = review_evidence_safety(
+                    fetched.evidence,
+                    safety_policies=safety_policies,
+                )
+                if not decision.allowed:
+                    return ToolSearchResult(
+                        query=source_ref,
+                        evidence=[],
+                        blocked_count=1,
+                        blocked_reasons=decision.flags,
+                    )
+                return ToolSearchResult(
+                    query=source_ref,
+                    evidence=[
+                        fetched.evidence,
+                        *_web_document_spans(
+                            fetched.evidence,
+                            kind="web_search_document_span",
+                            tool="web_search_document_span",
+                        ),
+                    ],
+                )
+
+            executors["web_document_fetch"] = fetch_web_document
+    if enable_literature_search:
+        literature_tool = OpenAlexLiteratureSearchTool()
+        executors["literature_search"] = lambda query: literature_tool.search(
+            query,
+            limit=5,
+            include_full_text=False,
+            safety_policies=safety_policies,
+        )
+        if evidence_store is not None:
+
+            def fetch_literature_full_text(source_ref: str) -> ToolSearchResult:
+                search_result = evidence_store.get(source_ref)
+                if search_result is None or search_result.kind != "literature_search_result":
+                    raise ToolSafetyError(
+                        "literature_full_text_fetch source_ref must identify an observed "
+                        "literature search result."
+                    )
+                full_text_url = search_result.metadata.get("full_text_url", "").strip()
+                if not full_text_url:
+                    return ToolSearchResult(query=source_ref, evidence=[])
+                work = {
+                    "id": search_result.metadata.get("openalex_id", ""),
+                    "display_name": search_result.metadata.get("title", ""),
+                    "doi": search_result.metadata.get("doi", ""),
+                }
+                full_text = _fetch_openalex_full_text(
+                    query=search_result.metadata.get("query", ""),
+                    work=work,
+                    url=full_text_url,
+                    timeout_seconds=literature_tool.timeout_seconds,
+                    max_bytes=literature_tool.max_bytes,
+                    public_only=True,
+                    allowed_domains=fetch_allowed_domains,
+                )
+                if full_text is None:
+                    return ToolSearchResult(query=source_ref, evidence=[])
+                decision = review_evidence_safety(full_text, safety_policies=safety_policies)
+                if not decision.allowed:
+                    return ToolSearchResult(
+                        query=source_ref,
+                        evidence=[],
+                        blocked_count=1,
+                        blocked_reasons=decision.flags,
+                    )
+                return ToolSearchResult(
+                    query=source_ref,
+                    evidence=[full_text, *_openalex_full_text_spans(full_text)],
+                )
+
+            executors["literature_full_text_fetch"] = fetch_literature_full_text
+    return executors
+
+
 def _is_within_allowed_roots(path: Path, allowed_roots: list[Path]) -> bool:
     return any(path == root or root in path.parents for root in allowed_roots)
 
@@ -566,6 +1038,7 @@ def _evidence_for_openalex_work(query: str, work: dict) -> Evidence:
     abstract = _openalex_abstract_text(work.get("abstract_inverted_index"))
     source = landing_page_url or doi or openalex_id or "openalex:unknown-work"
     citation = doi or landing_page_url or openalex_id or source
+    full_text_url = _openalex_full_text_url(work)
     content_parts = [title]
     if publication_year:
         content_parts.append(f"Publication year: {publication_year}")
@@ -585,6 +1058,7 @@ def _evidence_for_openalex_work(query: str, work: dict) -> Evidence:
             "publication_year": publication_year,
             "doi": doi,
             "openalex_id": openalex_id,
+            "full_text_url": full_text_url,
             "citation": citation,
         },
     )
@@ -644,6 +1118,8 @@ def _fetch_web_search_document_with_links(
     parent_document: Evidence | None = None,
     crawl_root_url: str = "",
     crawl_depth: int = 0,
+    public_only: bool = False,
+    allowed_domains: list[str] | None = None,
 ) -> _FetchedWebDocument | None:
     cleaned_url = (url or search_result.source).strip()
     parsed = urlparse(cleaned_url)
@@ -654,7 +1130,8 @@ def _fetch_web_search_document_with_links(
         cleaned_url,
         headers={"User-Agent": "code-scientist/0.1 web-search-document-fetch"},
     )
-    with urlopen(request, timeout=timeout_seconds) as response:
+    opener = _open_public_url if public_only else _open_url
+    with opener(request, timeout_seconds, allowed_domains) as response:
         raw = response.read(max_bytes)
         content_type = response.headers.get("content-type", "")
 
@@ -1040,6 +1517,8 @@ def _fetch_openalex_full_text(
     url: str,
     timeout_seconds: float,
     max_bytes: int,
+    public_only: bool = False,
+    allowed_domains: list[str] | None = None,
 ) -> Evidence | None:
     cleaned_url = url.strip()
     parsed = urlparse(cleaned_url)
@@ -1050,7 +1529,8 @@ def _fetch_openalex_full_text(
         cleaned_url,
         headers={"User-Agent": "code-scientist/0.1 literature-full-text-fetch"},
     )
-    with urlopen(request, timeout=timeout_seconds) as response:
+    opener = _open_public_url if public_only else _open_url
+    with opener(request, timeout_seconds, allowed_domains) as response:
         raw = response.read(max_bytes)
         content_type = response.headers.get("content-type", "")
 
@@ -1513,9 +1993,43 @@ def _pdf_bytes_to_text(raw: bytes) -> str:
         from pypdf import PdfReader  # type: ignore[import-not-found]
 
         reader = PdfReader(BytesIO(raw))
-        return "\n".join(page.extract_text() or "" for page in reader.pages)
+        extracted = "\n".join(page.extract_text() or "" for page in reader.pages)
+        if extracted.strip():
+            return extracted
     except Exception:
-        return raw.decode("utf-8", errors="ignore")
+        pass
+    try:
+        import pymupdf  # type: ignore[import-not-found]
+
+        from code_scientist.evidence import (
+            PDF_MAX_PAGES,
+            PDF_MAX_RENDER_PIXELS,
+            PDF_OCR_DPI,
+            _rapidocr_engine,
+        )
+
+        document = pymupdf.open(stream=raw, filetype="pdf")
+        texts: list[str] = []
+        try:
+            for page in list(document)[:PDF_MAX_PAGES]:
+                estimated_pixels = (
+                    float(page.rect.width) / 72 * PDF_OCR_DPI
+                    * float(page.rect.height) / 72 * PDF_OCR_DPI
+                )
+                if estimated_pixels > PDF_MAX_RENDER_PIXELS:
+                    continue
+                pixmap = page.get_pixmap(
+                    dpi=PDF_OCR_DPI,
+                    colorspace=pymupdf.csRGB,
+                    alpha=False,
+                )
+                output = _rapidocr_engine()(pixmap.tobytes("png"))
+                texts.extend(str(text).strip() for text in (output.txts or ()) if str(text).strip())
+        finally:
+            document.close()
+        return "\n".join(texts)
+    except Exception:
+        return ""
 
 
 def _normalize_space(text: str) -> str:

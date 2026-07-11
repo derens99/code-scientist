@@ -2,9 +2,16 @@
 name = "code-scientist"
 version = "0.1.0"
 description = "A local research engine for AI, LLM, and coding-agent improvement hypotheses."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Deren Singh" }]
 requires-python = ">=3.11"
 dependencies = [
+    "onnxruntime>=1.22,<2",
+    "pymupdf>=1.26,<2",
     "pypdf>=6.14.2",
+    "rapidocr>=3.9,<4",
 ]
 
 [project.scripts]

@@ -1,5 +1,7 @@
 # Code Scientist Paper Implementation Gap Analysis
 
+> Historical v1 roadmap. Its counts, percentages, present-tense gaps, and completion claims are intentionally frozen and are not current project status. For the authoritative assessment against the revised 2026-06-29 paper, see `docs/paper-alignment-audit-2026-07-09-v2.md`.
+
 Date: 2026-06-25
 
 ## Source And Scope

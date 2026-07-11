@@ -24,6 +24,9 @@ export function SourceAttachmentPanel({
     [evidenceIndexPaths, evidencePaths]
   );
   const rejectedFindings = evidenceSafetyFindings.filter((finding) => !finding.allowed);
+  const manualReviewFindings = evidenceSafetyFindings.filter((finding) =>
+    finding.flags.includes("manual-review-required")
+  );
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -65,6 +68,32 @@ export function SourceAttachmentPanel({
                 <Text size="xs" c="dimmed">
                   {item.kind}; {item.id}
                 </Text>
+                {item.metadata ? (
+                  <Text size="xs" c="dimmed">
+                    {[
+                      item.metadata.parser ? `parser ${item.metadata.parser}` : "",
+                      item.metadata.page_number ? `page ${item.metadata.page_number}` : "",
+                      item.metadata.caption ? `caption ${item.metadata.caption}` : "",
+                      item.metadata.bbox ? `bbox ${item.metadata.bbox}` : "",
+                      item.metadata.citation ? `citation ${item.metadata.citation}` : "",
+                      item.metadata.model ? `model ${item.metadata.model}` : "",
+                      item.metadata.confidence ? `confidence ${item.metadata.confidence}` : "",
+                      item.metadata.parent_evidence_id ? `parent ${item.metadata.parent_evidence_id}` : "",
+                      item.metadata.isolation_level ? `isolation ${item.metadata.isolation_level}` : "",
+                      item.metadata.network_isolated ? `network isolated ${item.metadata.network_isolated}` : "",
+                      item.metadata.ambient_secrets_inherited
+                        ? `ambient secrets inherited ${item.metadata.ambient_secrets_inherited}`
+                        : ""
+                    ]
+                      .filter(Boolean)
+                      .join("; ")}
+                  </Text>
+                ) : null}
+                {item.kind === "pdf_visual_claim" ? (
+                  <Text size="xs" c="orange">
+                    Machine-interpreted figure claim; inspect the bounded source crop before relying on it.
+                  </Text>
+                ) : null}
               </Stack>
             ))}
             {rejectedFindings.length ? (
@@ -77,6 +106,26 @@ export function SourceAttachmentPanel({
                     <Text size="sm">{finding.source}</Text>
                     <Text size="xs" c="dimmed">
                       {finding.flags.join(", ") || "no flags"}; {finding.reason}
+                    </Text>
+                  </Stack>
+                ))}
+              </Stack>
+            ) : null}
+            {manualReviewFindings.length ? (
+              <Stack gap={4}>
+                <Group justify="space-between">
+                  <Text size="sm" fw={700}>
+                    Manual safety review queue
+                  </Text>
+                  <Badge color="yellow" variant="light">
+                    {manualReviewFindings.length} pending
+                  </Badge>
+                </Group>
+                {manualReviewFindings.slice(0, 8).map((finding) => (
+                  <Stack key={`manual-${finding.id}`} gap={2}>
+                    <Text size="sm">{finding.source}</Text>
+                    <Text size="xs" c="dimmed">
+                      {finding.reason}; evidence {finding.evidence_id}
                     </Text>
                   </Stack>
                 ))}
