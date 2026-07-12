@@ -6,7 +6,7 @@ import threading
 from collections import Counter
 from dataclasses import replace
 from itertools import combinations
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from code_scientist.evidence import EvidenceStore
 from code_scientist.elo import update_elo
@@ -3768,8 +3768,14 @@ def _assumption_decomposition_hypotheses(
             ["over-filtering useful memory", "missed stale facts"],
         ),
     ]
+    relevant = [
+        blueprint
+        for blueprint in blueprints
+        if objective_relevance_score(f"{blueprint[0]} {blueprint[1]}", goal.objective)
+        >= SEED_RELEVANCE_THRESHOLD
+    ]
     hypotheses: list[Hypothesis] = []
-    for title, claim, assumptions, risks in blueprints[:limit]:
+    for title, claim, assumptions, risks in relevant[:limit]:
         hypotheses.append(
             Hypothesis(
                 id=stable_id("hyp", f"{goal.id}:assumption_decomposition:{title}:{claim}"),
@@ -3863,19 +3869,25 @@ def _tool_augmented_hypotheses(
     selected = _select_tool_generation_evidence(goal, evidence_store, limit)
     hypotheses: list[Hypothesis] = []
     for index, item in enumerate(selected[:limit], start=1):
+        if not _wrappable_evidence_content(item.content):
+            continue
         tool_name = str(item.metadata.get("tool") or item.kind or "retrieval_tool")
         query = str(item.metadata.get("query") or goal.objective)
         title = f"Tool-grounded {_title_from_evidence(item.content)}"
         evidence_refs = [item.id]
         content_preview = _truncate(item.content, 220)
+        claim = (
+            f"A workflow step synthesized from {tool_name} evidence "
+            f"('{_truncate(_title_from_evidence(item.content), 90)}') will improve pass rate "
+            f"or reduce regression count for {goal.objective}."
+        )
+        if hypothesis_structure_issues(title, claim, metrics=goal.metrics):
+            continue
         hypotheses.append(
             Hypothesis(
                 id=stable_id("hyp", f"{goal.id}:tool_augmented_generation:{item.id}:{item.content}"),
                 title=title,
-                claim=(
-                    f"A workflow synthesized from {tool_name} evidence can improve "
-                    f"{goal.domain} reliability for {goal.objective}."
-                ),
+                claim=claim,
                 rationale=(
                     f"Tool-augmented generation used {tool_name} evidence {item.id} "
                     f"from {item.source}: {content_preview}"
@@ -3927,15 +3939,21 @@ def _grounded_mode_hypotheses(
         return []
     hypotheses: list[Hypothesis] = []
     for item in selected:
+        if not _wrappable_evidence_content(item.content):
+            continue
         title = _title_from_evidence(item.content)
+        claim = (
+            f"Adopting the practice '{_truncate(title, 90)}' from {item.source} as an "
+            "explicit coding-agent workflow step will reduce regression count or improve "
+            "pass rate without unacceptable cost increase."
+        )
+        if hypothesis_structure_issues(title, claim, metrics=goal.metrics):
+            continue
         hypotheses.append(
             Hypothesis(
                 id=stable_id("hyp", f"{goal.id}:literature_grounded:{item.id}:{item.content}"),
                 title=title,
-                claim=(
-                    f"A workflow derived from retrieved evidence in {item.source} can improve "
-                    "LLM coding-agent reliability."
-                ),
+                claim=claim,
                 rationale=(
                     f"Literature-grounded generation used retrieved evidence {item.id}: {item.content}"
                 ),
@@ -4213,9 +4231,94 @@ def _evidence_prompt_text(evidence: list[Any], limit: int = 5) -> str:
 
 
 def _title_from_evidence(content: str) -> str:
-    words = [word.strip(".,:;()[]{}'\"") for word in content.split() if word.strip(".,:;()[]{}'\"")]
+    words = [word.strip(".,:;()[]{}'\"`") for word in content.split()]
+    words = [word for word in words if any(char.isalnum() for char in word)]
     title = " ".join(words[:6]) if words else "Retrieved evidence hypothesis"
     return title[:1].upper() + title[1:]
+
+
+SEED_RELEVANCE_THRESHOLD = 0.05
+_SELECTIVE_OBJECTIVE_MIN_STEMS = 4
+
+_FRAGMENT_TITLE_ENDINGS = {
+    "a", "an", "the", "as", "of", "to", "and", "or", "in", "on", "at", "for",
+    "with", "by", "from", "into", "is", "are", "was", "were", "be", "been",
+    "can", "could", "will", "would", "should", "that", "which", "than", "then",
+}
+
+_ENDPOINT_DIRECTION_RE = re.compile(
+    r"\b(reduce[sd]?|improve[sd]?|increase[sd]?|decrease[sd]?|lowers?|lowered|"
+    r"raise[sd]?|cuts?|fewer|drops?|dropped|exceed[s]?|shorten[s]?)\b"
+)
+_ENDPOINT_MEASURE_RE = re.compile(
+    r"\b(rates?|counts?|time|latency|costs?|errors?|regressions?|throughput|"
+    r"calls|flips|scores?|accuracy|precision|recall|coverage|duplication|failures)\b"
+)
+
+
+def objective_relevance_score(text: str, objective: str) -> float:
+    """Share of the objective's specific terms that a candidate text touches.
+
+    Short generic objectives carry too few specific terms to be selective, so
+    they score 1.0 and never filter; selective objectives score candidates by
+    stem overlap so off-objective seed material stays out of generation.
+    """
+    objective_stems = _relevance_stems(objective)
+    if len(objective_stems) < _SELECTIVE_OBJECTIVE_MIN_STEMS:
+        return 1.0
+    overlap = objective_stems & _relevance_stems(text)
+    return len(overlap) / len(objective_stems)
+
+
+def _relevance_stems(text: str) -> set[str]:
+    return {term[:5] for term in _meaningful_terms(text)}
+
+
+def hypothesis_structure_issues(
+    title: str,
+    claim: str | None = None,
+    *,
+    metrics: Sequence[str] = (),
+) -> list[str]:
+    """Minimum-structure gate for generated hypotheses.
+
+    Title checks apply everywhere; claim checks only when a claim is supplied,
+    because deterministic wrap templates are held to the full standard while
+    model-authored claims are judged by the review stages instead.
+    """
+    issues: list[str] = []
+    cleaned_title = " ".join(title.split())
+    words = cleaned_title.split()
+    if not cleaned_title or not cleaned_title[0].isalnum():
+        issues.append("title must start with a letter or digit")
+    if len(words) < 2 or len(cleaned_title) < 8:
+        issues.append("title is too short to describe a hypothesis")
+    elif words[-1].lower().strip(".,:;!?") in _FRAGMENT_TITLE_ENDINGS:
+        issues.append("title ends in a truncated fragment")
+    if claim is None:
+        return issues
+    cleaned_claim = " ".join(claim.split())
+    if len(cleaned_claim) < 40:
+        issues.append("claim is too short to name an intervention and a measurable endpoint")
+    elif not _claim_names_measurable_endpoint(cleaned_claim, metrics):
+        issues.append("claim does not name a measurable endpoint")
+    return issues
+
+
+def _claim_names_measurable_endpoint(claim: str, metrics: Sequence[str]) -> bool:
+    lowered = claim.lower()
+    for metric in metrics:
+        term = str(metric).strip().lower()
+        if term and re.search(rf"\b{re.escape(term)}\b", lowered):
+            return True
+    return bool(_ENDPOINT_DIRECTION_RE.search(lowered) and _ENDPOINT_MEASURE_RE.search(lowered))
+
+
+def _wrappable_evidence_content(content: str) -> bool:
+    stripped = content.strip()
+    if not stripped or not stripped[0].isalnum():
+        return False
+    return len(stripped.split()) >= 6
 
 
 def _is_tool_evidence(item: Evidence) -> bool:
@@ -4687,6 +4790,8 @@ def _parse_llm_hypotheses(
         title = _required_text(raw_item, "title")
         claim = _required_text(raw_item, "claim")
         rationale = _required_text(raw_item, "rationale")
+        if hypothesis_structure_issues(title):
+            continue
         identity = f"{goal.id}:{origin}:{title}:{claim}"
         hypotheses.append(
             Hypothesis(

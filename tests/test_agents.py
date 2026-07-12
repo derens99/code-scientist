@@ -3,12 +3,15 @@ import threading
 from dataclasses import replace
 
 from code_scientist.agents import (
+    SEED_RELEVANCE_THRESHOLD,
     EvolutionAgent,
     GenerationAgent,
     MetaReviewAgent,
     ProximityAgent,
     RankingAgent,
     ReflectionAgent,
+    hypothesis_structure_issues,
+    objective_relevance_score,
 )
 from code_scientist.evidence import EvidenceStore
 from code_scientist.models import Evidence, Match, ResearchGoal, Review
@@ -2436,3 +2439,208 @@ def test_llm_interactions_are_isolated_per_thread():
     assert len(main_interactions) == 1
     assert "worker-thread objective" in worker_interactions[0]["prompt"]
     assert "main-thread objective" in main_interactions[0]["prompt"]
+
+
+REVIEW_DIFFERENTIATION_OBJECTIVE = (
+    "How should the full review stage of an automated coding-agent research pipeline "
+    "differ from the initial review so it adds independent scrutiny - warranted decision "
+    "flips, score changes, new findings - instead of duplicating the first pass?"
+)
+
+CODE_FRAGMENT_EVIDENCE_CONTENT = (
+    '"- Review the hypothesis as an independent coding-agent research reviewer.",'
+)
+
+
+def test_objective_relevance_score_passes_generic_and_filters_specific_objectives():
+    blueprint_text = (
+        "Assumption audit before repo mutation "
+        "A pre-edit assumption audit that names call-path, invariant, and test-scope "
+        "assumptions will reduce bad coding-agent patches."
+    )
+
+    generic = objective_relevance_score(blueprint_text, "Improve LLM coding agents")
+    explicit = objective_relevance_score(
+        blueprint_text,
+        "Find testable ideas to advance the experiment: Test Assumption audit before "
+        "repo mutation with metrics: pass_rate, regression_count, tool_calls, wall_time, cost",
+    )
+    off_objective = objective_relevance_score(blueprint_text, REVIEW_DIFFERENTIATION_OBJECTIVE)
+
+    assert generic == 1.0
+    assert explicit >= SEED_RELEVANCE_THRESHOLD
+    assert off_objective < SEED_RELEVANCE_THRESHOLD
+    assert objective_relevance_score("anything", "") == 1.0
+
+
+def test_hypothesis_structure_issues_flags_fragment_titles_and_template_claims():
+    template_claim = (
+        "A workflow derived from retrieved evidence in src/code_scientist/agent_packets.py "
+        "can improve LLM coding-agent reliability."
+    )
+    metrics = ["pass_rate", "regression_count", "tool_calls", "wall_time", "cost"]
+
+    punctuation_title = hypothesis_structure_issues("- Review the hypothesis as an", template_claim, metrics=metrics)
+    assert any("title" in issue for issue in punctuation_title)
+    assert any("endpoint" in issue for issue in punctuation_title)
+
+    truncated_title = hypothesis_structure_issues("Review the hypothesis as an", template_claim, metrics=metrics)
+    assert any("truncated" in issue for issue in truncated_title)
+
+    assert (
+        hypothesis_structure_issues(
+            "Critique-conditioned full review audits the initial review",
+            "If the full review consumes the initial review and must cite amendments, "
+            "warranted decision flips will exceed the baseline without raising tool_calls.",
+            metrics=metrics,
+        )
+        == []
+    )
+
+    assert hypothesis_structure_issues("Failing-test-first patch loop") == []
+    assert hypothesis_structure_issues("- fragment") != []
+
+
+def test_assumption_decomposition_filters_off_objective_blueprints():
+    specific_goal = ResearchGoal.from_objective(REVIEW_DIFFERENTIATION_OBJECTIVE)
+    filtered = GenerationAgent().generate_with_mode(
+        specific_goal,
+        seed_paper_evidence(),
+        mode="assumption_decomposition",
+        limit=2,
+    )
+    assert filtered == []
+
+    generic_goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    kept = GenerationAgent().generate_with_mode(
+        generic_goal,
+        seed_paper_evidence(),
+        mode="assumption_decomposition",
+        limit=2,
+    )
+    assert kept
+    assert all(item.origin == "generation:assumption_decomposition" for item in kept)
+
+
+def test_literature_grounded_generation_skips_code_fragment_evidence():
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    store = EvidenceStore(
+        [
+            Evidence(
+                id="ev-junk",
+                kind="tool_result_repo_search",
+                source="src/code_scientist/agent_packets.py",
+                content=CODE_FRAGMENT_EVIDENCE_CONTENT,
+            ),
+            Evidence(
+                id="ev-prose",
+                kind="markdown_source",
+                source="survey.md",
+                content=(
+                    "Literature shows agent memory freshness checks reduce repeated coding errors."
+                ),
+            ),
+        ]
+    )
+
+    hypotheses = GenerationAgent().generate_with_mode(
+        goal,
+        store,
+        mode="literature_grounded_generation",
+        limit=2,
+    )
+
+    assert [item.evidence_refs for item in hypotheses] == [["ev-prose"]]
+    for item in hypotheses:
+        assert hypothesis_structure_issues(item.title, item.claim, metrics=goal.metrics) == []
+
+
+def test_tool_augmented_generation_skips_code_fragment_evidence():
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    store = EvidenceStore(
+        [
+            Evidence(
+                id="ev-junk",
+                kind="tool_result_repo_search",
+                source="src/code_scientist/study_assets.py",
+                content='"Find coding-agent hypotheses that improve critic-before-edit review, "',
+                metadata={"tool": "local_repository_search", "query": "review"},
+            ),
+            Evidence(
+                id="ev-web",
+                kind="tool_result_web_search",
+                source="https://example.com/agents",
+                content=(
+                    "Agents that replay failing tests before editing produce fewer regressions "
+                    "on long-horizon tasks."
+                ),
+                metadata={"tool": "web_search", "query": "coding agent regressions"},
+            ),
+        ]
+    )
+
+    hypotheses = GenerationAgent().generate_with_mode(
+        goal,
+        store,
+        mode="tool_augmented_generation",
+        limit=2,
+    )
+
+    assert [item.evidence_refs for item in hypotheses] == [["ev-web"]]
+    for item in hypotheses:
+        assert hypothesis_structure_issues(item.title, item.claim, metrics=goal.metrics) == []
+
+
+def test_llm_generation_drops_fragment_titled_hypotheses():
+    malformed = {
+        "title": "- Review the hypothesis as an",
+        "claim": "A workflow derived from retrieved evidence can improve reliability.",
+        "rationale": "Template wrap of a source-code instruction string.",
+        "assumptions": [],
+        "risks": [],
+    }
+    valid = {
+        "title": "Failing-test-first patch loop for coding agents",
+        "claim": (
+            "Running the failing test before each edit will reduce regression_count "
+            "without raising tool_calls."
+        ),
+        "rationale": "Grounded in failure-replay evidence.",
+        "assumptions": ["Failing tests are cheap to select."],
+        "risks": ["extra wall_time per edit"],
+    }
+
+    class MixedLLM:
+        def complete(self, prompt, max_tokens):
+            return json.dumps({"hypotheses": [malformed, valid]})
+
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    hypotheses = GenerationAgent(llm_client=MixedLLM()).generate(goal, seed_paper_evidence(), limit=2)
+
+    titles = [item.title for item in hypotheses]
+    assert "Failing-test-first patch loop for coding agents" in titles
+    assert all(not title.startswith("-") for title in titles)
+
+
+def test_llm_generation_falls_back_when_every_hypothesis_is_malformed():
+    malformed = {
+        "title": "- Review the hypothesis as an",
+        "claim": "A workflow derived from retrieved evidence can improve reliability.",
+        "rationale": "Template wrap of a source-code instruction string.",
+    }
+
+    class AllMalformedLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, prompt, max_tokens):
+            self.calls += 1
+            return json.dumps({"hypotheses": [malformed]})
+
+    goal = ResearchGoal.from_objective("Improve LLM coding agents")
+    client = AllMalformedLLM()
+    hypotheses = GenerationAgent(llm_client=client).generate(goal, seed_paper_evidence(), limit=2)
+
+    assert client.calls >= 2
+    assert hypotheses
+    assert all(not item.title.startswith("-") for item in hypotheses)
