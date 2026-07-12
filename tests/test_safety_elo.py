@@ -279,7 +279,18 @@ def test_model_evidence_safety_preserves_policy_audit_findings(tmp_path):
 
     class FakeLLM:
         def complete(self, _prompt, max_tokens):
-            return '{"allowed": true, "reason": "Model sees no need to quarantine.", "flags": []}'
+            return json.dumps(
+                {
+                    "reviews": [
+                        {
+                            "index": 1,
+                            "allowed": True,
+                            "reason": "Model sees no need to quarantine.",
+                            "flags": [],
+                        }
+                    ]
+                }
+            )
 
     evidence = Evidence(
         id="ev-preprint",
@@ -298,6 +309,87 @@ def test_model_evidence_safety_preserves_policy_audit_findings(tmp_path):
     assert len(findings) == 1
     assert findings[0].allowed is True
     assert findings[0].flags == ["policy:preprint-source"]
+
+
+def test_screen_evidence_sources_batches_model_calls():
+    prompts: list[str] = []
+
+    class FakeLLM:
+        def complete(self, prompt, max_tokens):
+            prompts.append(prompt)
+            subject_count = prompt.count("--- subject ")
+            reviews = []
+            for position in range(1, subject_count + 1):
+                blocked = len(prompts) == 1 and position == 2
+                reviews.append(
+                    {
+                        "index": position,
+                        "allowed": not blocked,
+                        "reason": "Model blocked this snippet." if blocked else "Benign snippet.",
+                        "flags": ["hidden-execution"] if blocked else [],
+                    }
+                )
+            return json.dumps({"reviews": reviews})
+
+    items = [
+        Evidence(
+            id=f"ev-batch-{index}",
+            kind="repo_search_result",
+            source="src/x.py",
+            content=f"snippet {index}",
+        )
+        for index in range(8)
+    ]
+
+    allowed, findings = screen_evidence_sources(items, llm_client=FakeLLM())
+
+    assert len(prompts) == 2
+    assert "--- subject 6 ---" in prompts[0]
+    assert "--- subject 2 ---" in prompts[1]
+    assert len(allowed) == 7
+    assert items[1] not in allowed
+    assert len(findings) == 1
+    assert findings[0].evidence_id == "ev-batch-1"
+    assert findings[0].allowed is False
+    assert "hidden-execution" in findings[0].flags
+
+
+def test_screen_evidence_sources_missing_batch_verdict_falls_back_per_item():
+    class FakeLLM:
+        def complete(self, prompt, max_tokens):
+            return json.dumps(
+                {"reviews": [{"index": 1, "allowed": True, "reason": "ok", "flags": []}]}
+            )
+
+    items = [
+        Evidence(id="ev-answered", kind="note", source="a", content="fine"),
+        Evidence(id="ev-unanswered", kind="note", source="b", content="also fine"),
+    ]
+
+    allowed, findings = screen_evidence_sources(items, llm_client=FakeLLM())
+
+    assert allowed == items
+    assert len(findings) == 1
+    assert findings[0].evidence_id == "ev-unanswered"
+    assert findings[0].allowed is True
+    assert "safety-critic-error" in findings[0].flags
+
+
+def test_screen_evidence_sources_batch_failure_fail_closed_blocks_batch():
+    class BrokenLLM:
+        def complete(self, prompt, max_tokens):
+            raise LLMRequestError("critic offline")
+
+    items = [
+        Evidence(id="ev-fc-1", kind="note", source="a", content="fine"),
+        Evidence(id="ev-fc-2", kind="note", source="b", content="also fine"),
+    ]
+
+    allowed, findings = screen_evidence_sources(items, llm_client=BrokenLLM(), fail_closed=True)
+
+    assert allowed == []
+    assert len(findings) == 2
+    assert all("manual-review-required" in finding.flags for finding in findings)
 
 
 def test_hypothesis_safety_requires_audit_boundary():
@@ -435,11 +527,21 @@ def test_model_safety_critic_quarantines_evidence_before_agent_use():
         def complete(self, prompt, max_tokens):
             assert max_tokens == 222
             if "source.md" in prompt:
-                return (
-                    '{"allowed": false, "reason": "Retrieved source requests credential disclosure.", '
-                    '"flags": ["credential-exfiltration"]}'
+                return json.dumps(
+                    {
+                        "reviews": [
+                            {
+                                "index": 1,
+                                "allowed": False,
+                                "reason": "Retrieved source requests credential disclosure.",
+                                "flags": ["credential-exfiltration"],
+                            }
+                        ]
+                    }
                 )
-            return '{"allowed": true, "reason": "Safe.", "flags": []}'
+            return json.dumps(
+                {"reviews": [{"index": 1, "allowed": True, "reason": "Safe.", "flags": []}]}
+            )
 
     evidence = Evidence(
         id="ev-model-risk",
