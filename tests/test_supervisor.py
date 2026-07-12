@@ -3098,7 +3098,9 @@ def test_supervisor_filters_hypotheses_with_fundamental_assumption_failures(tmp_
         and any(check.invalidates_hypothesis for check in review.assumption_checks)
     }
     assert rejected_ids
-    assert rejected_ids.isdisjoint({item.id for item in state.hypotheses})
+    retained = {item.id: item for item in state.hypotheses}
+    for hypothesis_id in rejected_ids:
+        assert retained[hypothesis_id].status == "rejected"
     assert all(
         match.hypothesis_a not in rejected_ids and match.hypothesis_b not in rejected_ids
         for match in state.matches
@@ -3749,7 +3751,12 @@ def test_scheduler_runs_resumed_feedback_review_before_new_generation(tmp_path, 
             "meta_review": 0.1,
         },
     )
-    targeted = _hypothesis("hyp-resumed-review").with_status("accepted")
+    # A safety-clean risk string: the shared fixture's "May overfit the benchmark."
+    # is quarantined at ingestion, and quarantined targets no longer resume reviews.
+    targeted = replace(
+        _hypothesis("hyp-resumed-review"),
+        risks=["review latency may grow"],
+    ).with_status("accepted")
     generated = _hypothesis("hyp-new-generated")
     queued_review = create_task(
         cycle=1,
@@ -4859,3 +4866,208 @@ def test_run_terminates_early_when_min_hypotheses_criterion_met(tmp_path):
     )
     assert len(state.context_snapshots) < 5
     assert state.context_snapshots[-1].termination_reason.startswith("min_hypotheses")
+
+
+def _terminal_check(*, fundamental: bool = True, invalidates: bool = True, verdict: str = "contradicted"):
+    from code_scientist.models import AssumptionCheck
+
+    return AssumptionCheck(
+        id="check-terminal",
+        assumption="The claim names a real intervention.",
+        parent_assumption="implicit: claim structure",
+        depth=1,
+        verdict=verdict,
+        fundamental=fundamental,
+        invalidates_hypothesis=invalidates,
+    )
+
+
+def _terminal_review(hypothesis_id: str, *, decision: str, checks) -> Review:
+    return Review(
+        id=f"rev-{hypothesis_id}-{decision}",
+        hypothesis_id=hypothesis_id,
+        decision=decision,
+        scores={"alignment": 2, "plausibility": 2, "novelty": 1, "testability": 1, "safety": 5},
+        strengths=[],
+        weaknesses=["unfalsifiable"],
+        safety_notes=[],
+        review_type="llm_deep_verification",
+        findings=["terminal"],
+        confidence=0.9,
+        requires_revision=True,
+        assumption_checks=list(checks),
+    )
+
+
+def test_terminally_rejected_hypothesis_ids_requires_invalidating_fundamental_contradiction():
+    from code_scientist.supervisor import terminally_rejected_hypothesis_ids
+
+    terminal = _terminal_review("hyp-doomed", decision="reject", checks=[_terminal_check()])
+    plain_reject = _terminal_review("hyp-plain", decision="reject", checks=[])
+    non_fundamental = _terminal_review(
+        "hyp-repairable",
+        decision="reject",
+        checks=[_terminal_check(fundamental=False)],
+    )
+    non_invalidating = _terminal_review(
+        "hyp-flagged",
+        decision="reject",
+        checks=[_terminal_check(invalidates=False)],
+    )
+    revise_with_check = _terminal_review("hyp-revise", decision="revise", checks=[_terminal_check()])
+    uncertain_check = _terminal_review(
+        "hyp-uncertain",
+        decision="reject",
+        checks=[_terminal_check(verdict="uncertain")],
+    )
+
+    terminal_ids = terminally_rejected_hypothesis_ids(
+        [terminal, plain_reject, non_fundamental, non_invalidating, revise_with_check, uncertain_check]
+    )
+
+    assert terminal_ids == {"hyp-doomed"}
+
+
+def test_terminally_rejected_candidates_stay_in_state_and_skip_later_review_cycles(tmp_path):
+    from code_scientist.llm import LLMRequestError
+
+    doomed_title = "Doomed unfalsifiable template candidate"
+    good_title = "Failing-test-first repair loop for coding agents"
+
+    accept_review = {
+        "decision": "accept",
+        "scores": {"alignment": 5, "plausibility": 4, "novelty": 4, "testability": 4, "safety": 5},
+        "strengths": ["testable"],
+        "weaknesses": [],
+        "safety_notes": [],
+        "findings": ["fine"],
+        "confidence": 0.8,
+        "requires_revision": False,
+        "evidence_refs": [],
+    }
+    reject_review = {
+        "decision": "reject",
+        "scores": {"alignment": 2, "plausibility": 2, "novelty": 1, "testability": 1, "safety": 5},
+        "strengths": [],
+        "weaknesses": ["unfalsifiable"],
+        "safety_notes": [],
+        "findings": ["terminal"],
+        "confidence": 0.9,
+        "requires_revision": True,
+        "evidence_refs": [],
+    }
+    invalidating_checks = {
+        "assumption_checks": [
+            {
+                "assumption": "The claim names a real intervention.",
+                "parent_assumption": "implicit: claim structure",
+                "depth": 1,
+                "verdict": "contradicted",
+                "fundamental": True,
+                "invalidates_hypothesis": True,
+                "evidence_refs": [],
+                "reasoning": "The claim quantifies over an unnamed workflow.",
+            }
+        ]
+    }
+    supported_checks = {
+        "assumption_checks": [
+            {
+                "assumption": "Failing tests are cheap to select.",
+                "parent_assumption": "Failing tests are cheap to select.",
+                "depth": 1,
+                "verdict": "supported",
+                "fundamental": False,
+                "invalidates_hypothesis": False,
+                "evidence_refs": [],
+                "reasoning": "Test selection is deterministic.",
+            }
+        ]
+    }
+
+    class DispatchLLM:
+        def __init__(self):
+            self.generation_calls = 0
+
+        def complete(self, prompt, max_tokens):
+            if "research scientist" in prompt and "Generate" in prompt:
+                self.generation_calls += 1
+                return json.dumps(
+                    {
+                        "hypotheses": [
+                            {
+                                "title": doomed_title,
+                                "claim": "This candidate will improve outcomes somehow on repo tasks.",
+                                "rationale": "Template wrap.",
+                                "assumptions": ["none"],
+                                "risks": ["none"],
+                            },
+                            {
+                                "title": good_title,
+                                "claim": (
+                                    "Running the failing test before each edit will reduce "
+                                    "regression count without raising tool calls."
+                                ),
+                                "rationale": "Grounded in failure-replay evidence.",
+                                "assumptions": ["Failing tests are cheap to select."],
+                                "risks": ["extra wall time"],
+                            },
+                        ]
+                    }
+                )
+            if "safety critic" in prompt:
+                return json.dumps({"allowed": True, "reason": "ok", "flags": []})
+            doomed = doomed_title in prompt
+            if "Reflection turn 1 claim mechanism" in prompt:
+                return "Mechanism analysis." if not doomed else "No mechanism exists."
+            if "Reflection turn 2 assumption risk audit" in prompt:
+                return json.dumps(invalidating_checks if doomed else supported_checks)
+            if "Reflection turn 3 benchmark validation synthesis" in prompt:
+                return json.dumps(reject_review if doomed else accept_review)
+            if "Review type:" in prompt:
+                return json.dumps(reject_review if doomed else accept_review)
+            raise LLMRequestError("deterministic fallback")
+
+    objective = "Find testable ideas to improve LLM coding agents"
+    goal = ResearchGoal.from_objective(objective)
+    plan = replace(
+        ResearchPlanConfig.from_goal(goal),
+        generation_methods=["paper_seeded_idea_generation"],
+        review_types=["initial_review", "deep_verification"],
+    )
+    client = DispatchLLM()
+
+    state = run_research_cycle(
+        objective=objective,
+        cycles=2,
+        max_hypotheses=4,
+        max_matches=1,
+        out_dir=tmp_path / "run",
+        provider="anthropic",
+        llm_client=client,
+        plan_config=plan,
+    )
+
+    by_title = {item.title: item for item in state.hypotheses}
+    assert doomed_title in by_title, "terminally rejected candidate must stay in state for audit"
+    doomed = by_title[doomed_title]
+    assert doomed.status == "rejected"
+    good_family = [item for item in state.hypotheses if good_title in item.title]
+    assert good_family
+    assert any(item.status == "accepted" for item in good_family), (
+        "the accepted lineage must stay active: "
+        f"{[(item.title, item.status) for item in good_family]}"
+    )
+
+    doomed_reviews = [review for review in state.reviews if review.hypothesis_id == doomed.id]
+    review_types = sorted(review.review_type for review in doomed_reviews)
+    assert review_types == ["llm_deep_verification", "llm_initial_review"], (
+        "the terminal candidate must be reviewed exactly once, not re-reviewed in cycle 2: "
+        f"{review_types}"
+    )
+    assert client.generation_calls >= 2, "cycle 2 generation must run and be deduplicated by id"
+
+    persisted = json.loads((tmp_path / "run" / "state.json").read_text(encoding="utf-8"))
+    persisted_statuses = {item["title"]: item["status"] for item in persisted["hypotheses"]}
+    assert persisted_statuses[doomed_title] == "rejected"
+    assert RunState.from_dict(persisted).hypotheses

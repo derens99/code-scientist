@@ -91,7 +91,7 @@ from code_scientist.tools import (
 from code_scientist.vision import interpret_pdf_visual_evidence
 
 
-_INACTIVE_STATUSES = {"merged_duplicate", "quarantined"}
+_INACTIVE_STATUSES = {"merged_duplicate", "quarantined", "rejected"}
 
 
 def _active_hypotheses(hypotheses: list[Hypothesis]) -> list[Hypothesis]:
@@ -914,9 +914,10 @@ def run_research_cycle(
                     )
                     with state_lock:
                         reviewed.extend(task_reviews)
-                        accepted_ids = _accepted_hypothesis_ids([target], task_reviews)
-                        accepted = [target.with_status("accepted")] if target.id in accepted_ids else []
-                        hypotheses = _merge_hypotheses(hypotheses, accepted)
+                        hypotheses = _merge_hypotheses(
+                            hypotheses,
+                            _pool_additions_after_review([target], task_reviews),
+                        )
                         reviews.extend(task_reviews)
                     return [item.id for item in task_reviews]
 
@@ -930,7 +931,7 @@ def run_research_cycle(
                         continue
                     target_id = str(task.payload.get("hypothesis_id", ""))
                     target = target_by_id.get(target_id)
-                    if target is None:
+                    if target is None or target.status in _INACTIVE_STATUSES:
                         continue
                     task_handlers[task.id] = make_execute_review(target)
                     registered.append(task)
@@ -1283,10 +1284,9 @@ def run_research_cycle(
                     matches=matches,
                     prior_reviews=reviews,
                 )
-                accepted_child_ids = _accepted_hypothesis_ids(children, child_reviews)
                 hypotheses = _merge_hypotheses(
                     hypotheses,
-                    [item.with_status("accepted") for item in children if item.id in accepted_child_ids],
+                    _pool_additions_after_review(children, child_reviews),
                 )
                 reviews.extend(child_reviews)
                 proximity_edges = proximity.compute_goal_aware(
@@ -1505,14 +1505,9 @@ def run_research_cycle(
                 reviews = reconciled.reviews
                 agent_traces = reconciled.agent_traces
                 reviewed = [review for review in reviews if review.id not in prior_review_ids]
-                accepted_ids = _accepted_hypothesis_ids(generated, reviewed)
                 hypotheses = _merge_hypotheses(
                     hypotheses,
-                    [
-                        item.with_status("accepted")
-                        for item in generated
-                        if item.id in accepted_ids
-                    ],
+                    _pool_additions_after_review(generated, reviewed),
                 )
                 agent_traces.append(
                     _build_agent_trace(
@@ -3172,9 +3167,10 @@ def _allocate_generation_methods(
 
     for hypothesis in hypotheses or []:
         # Cannot use _INACTIVE_STATUSES here: merged_duplicate is still counted in
-        # allocation stats (as merged_counts) to gauge mode saturation, whereas a
-        # quarantined hypothesis is unsafe and must not influence allocation at all.
-        if hypothesis.status == "quarantined":
+        # allocation stats (as merged_counts) to gauge mode saturation, whereas
+        # quarantined and terminally rejected hypotheses must not influence
+        # allocation at all.
+        if hypothesis.status in {"quarantined", "rejected"}:
             continue
         mode = _generation_method_for_origin(hypothesis.origin, unique_modes)
         if not mode:
@@ -3489,6 +3485,44 @@ def _accepted_hypothesis_ids(hypotheses: list[Hypothesis], reviews: list[Review]
         for hypothesis_id, hypothesis_reviews in reviews_by_hypothesis.items()
         if hypothesis_reviews and all(review.decision == "accept" for review in hypothesis_reviews)
     }
+
+
+def terminally_rejected_hypothesis_ids(reviews: list[Review]) -> set[str]:
+    """Hypotheses whose rejection cannot be revised away.
+
+    A rejection is terminal when the rejecting review recorded a contradicted
+    fundamental assumption that invalidates the hypothesis. Retaining these in
+    state (like quarantine) keeps deterministic regeneration from resurrecting
+    them for another full review battery in later cycles.
+    """
+    terminal: set[str] = set()
+    for review in reviews:
+        if review.decision != "reject":
+            continue
+        for check in review.assumption_checks:
+            if (
+                check.verdict == "contradicted"
+                and check.fundamental
+                and check.invalidates_hypothesis
+            ):
+                terminal.add(review.hypothesis_id)
+                break
+    return terminal
+
+
+def _pool_additions_after_review(
+    candidates: list[Hypothesis],
+    reviews: list[Review],
+) -> list[Hypothesis]:
+    accepted_ids = _accepted_hypothesis_ids(candidates, reviews)
+    terminal_ids = terminally_rejected_hypothesis_ids(reviews)
+    additions: list[Hypothesis] = []
+    for item in candidates:
+        if item.id in accepted_ids:
+            additions.append(item.with_status("accepted"))
+        elif item.id in terminal_ids:
+            additions.append(item.with_status("rejected"))
+    return additions
 
 
 def _replace_hypotheses(existing: list[Hypothesis], replacements: list[Hypothesis]) -> list[Hypothesis]:
