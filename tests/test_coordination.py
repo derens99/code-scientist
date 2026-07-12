@@ -95,6 +95,22 @@ def test_sqlite_coordinator_budget_is_atomic_and_fail_closed(tmp_path):
     assert coordinator.budget_state("agent_tools") == (2, 2)
 
 
+def test_sync_tasks_never_regresses_terminal_coordinator_state(tmp_path):
+    coordinator = SQLiteTaskCoordinator(tmp_path / "coordination.sqlite3")
+    task = _packet_task("task-terminal")
+    coordinator.sync_tasks([task])
+    claimed = coordinator.claim("worker-a")
+    assert claimed is not None
+    coordinator.complete(claimed.id, "worker-a", ["result-ref"])
+
+    coordinator.sync_tasks([task])
+
+    restored = coordinator.get_task(task.id)
+    assert restored is not None
+    assert restored.status == "completed"
+    assert restored.result_refs == ["result-ref"]
+
+
 def test_cli_workers_claim_each_packet_once_across_processes(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()

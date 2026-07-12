@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { clampInteger, sanitizeRunName, startRun } from "@/lib/codeScientist";
+import { assertTrustedMutationRequest, mutationErrorStatus } from "@/lib/requestSecurity";
 
 export const runtime = "nodejs";
 
@@ -8,6 +9,7 @@ type WorkbenchProvider = (typeof WORKBENCH_PROVIDERS)[number];
 
 export async function POST(request: Request) {
   try {
+    assertTrustedMutationRequest(request);
     const body = await request.json();
     const requestedProvider = String(body.provider ?? "deterministic");
     if (requestedProvider === "host-agent") {
@@ -66,7 +68,7 @@ export async function POST(request: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unable to start run" },
-      { status: 400 }
+      { status: mutationErrorStatus(error) }
     );
   }
 }

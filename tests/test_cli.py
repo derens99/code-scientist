@@ -19,6 +19,7 @@ from code_scientist.models import (
     Evidence,
     FeedbackLoopEvaluation,
     Hypothesis,
+    INACTIVE_STATUSES,
     MetaReview,
     ProspectiveEvaluation,
     ResearchGoal,
@@ -3797,7 +3798,14 @@ def test_cli_elo_concordance_grades_state_and_saves_result(tmp_path):
         "answer": "backoff",
     }), encoding="utf-8")
     grades_path = tmp_path / "grades.json"
-    grades_path.write_text(json.dumps({state.hypotheses[0].id: True, state.hypotheses[1].id: False}), encoding="utf-8")
+    graded_hypotheses = [
+        hypothesis for hypothesis in state.hypotheses
+        if hypothesis.status not in INACTIVE_STATUSES
+    ][:2]
+    grades_path.write_text(
+        json.dumps({graded_hypotheses[0].id: True, graded_hypotheses[1].id: False}),
+        encoding="utf-8",
+    )
 
     exit_code = main([
         "elo-concordance", str(out_dir / "state.json"),

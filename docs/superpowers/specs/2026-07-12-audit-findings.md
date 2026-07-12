@@ -1,10 +1,10 @@
 # Codebase Audit — 2026-07-12
 
 Seven parallel read-only subsystem reviewers plus an owner hazard sweep, every
-reported finding personally verified at the cited code before action. Fixed set
-committed with regression tests (520 Python + 34 web tests green). Remaining
-items are ranked recommendations with fix sketches — not yet actioned because
-each needs a design decision or a larger, separately-tested change.
+reported finding personally verified at the cited code before action. The fixed
+set includes the v0.1.0 hardening release with regression tests (524 Python +
+38 web tests green). Remaining items are ranked recommendations that still need
+a design decision or a larger, separately-tested change.
 
 ## Fixed (committed, tested)
 
@@ -21,33 +21,16 @@ each needs a design decision or a larger, separately-tested change.
 | F9 | Medium | llm bridge | Fence stripper ate single-line ` ```json{...}``` ` payloads whole and kept trailing prose. Rewritten. | 8a5dfba |
 | F10 | Low | reporting | `_reviewer_verdict` read the packet's option-enumeration template line as verdict "keep". Now ignores enumeration lines. | dccf09d |
 | F11 | Low | experiments | Task-authored timeout silently clamped by protocol default (bundles 360→300). Now warns. | 8a5dfba |
+| F12 | High | state persistence | CLI and workbench mutations could tear or clobber `state.json`. Python and Node now share an exclusive lock-file protocol, reload after locking, and atomically replace state. | v0.1.0 hardening |
+| F13 | High | scheduler | Ranking could run before proximity deduplication. Ranking now has an explicit dependency on the cycle's proximity task. | v0.1.0 hardening |
+| F14 | High | task lifecycle | A terminal single-concurrency task failure could escape before persistence. The failed queue is now persisted before re-raising. | v0.1.0 hardening |
+| F15 | Medium | provider coordination | Stale snapshots could regress terminal coordinator rows and interrupted provider reviews could replay. Terminal rows now win reconciliation, provider interruptions fail closed, and worker processes are reaped in `finally`. | v0.1.0 hardening |
+| F16 | Med-High | workbench | Path and direct-fetch inputs were unconfined. Paths now require configured roots and fetches require HTTPS plus an explicit domain allowlist. | v0.1.0 hardening |
+| F17 | Medium | workbench | Mutating routes lacked browser-origin checks. They now reject cross-site/mismatched-origin requests and the server binds to loopback by default. | v0.1.0 hardening |
 
-## High-priority recommendations (verified real; not yet fixed)
+## Remaining recommendations
 
 These need a design decision or a larger change with its own test plan.
-
-- **R1 [High] Non-atomic `state.json` writes + lost-update races across CLI.**
-  Every CLI handler (`validate`, `evaluation-return`, `source-attachment`,
-  `elo-concordance`) does load → long work → `Path.write_text`, bypassing the
-  repo's own `coordination.atomic_write_json` (fsync + `os.replace`) that
-  `supervisor._write_state` already uses. Two sessions on one run dir (the
-  documented workflow) can tear a read or clobber each other's appended
-  results. Fix: route all CLI state writes through `atomic_write_json`, and
-  re-`load_state` immediately before append-and-write. The web workbench has
-  the same uncoordinated-writer issue via `updateRunState`.
-
-- **R2 [High] Proximity dedup runs after ranking each cycle.** `proximity_task`
-  and `ranking_task` are unordered siblings; default weights make ranking win,
-  so near-duplicates burn match budget and inflate Elo before being merged —
-  inverting the designed `merge_or_contrast_before_ranking` ordering. Fix: add
-  `proximity_task.id` to `ranking_task.depends_on`.
-
-- **R3 [High] Terminal task failure not persisted in the single-concurrency
-  path.** `run_task_worker`'s `max_concurrency=1` branch re-raises out of
-  `_execute_running_task` before the caller persists, leaving `state.json` and
-  the coordination DB showing the task `running`; each resume re-queues and
-  re-crashes. Fix: persist the failed queue before re-raising, mirroring the
-  multi-task branch.
 
 - **R4 [Medium] Forward-compat loads crash with a context-free `TypeError`.**
   Every `cls(**data)` `from_dict` breaks on a state written by a newer build
@@ -57,15 +40,6 @@ These need a design decision or a larger change with its own test plan.
   re-raise as a clear `ValueError` naming the field/record); add the scaffold to
   the three unguarded models. (All 49 committed states currently round-trip
   losslessly — this is forward/latent, not an active break.)
-
-- **R5 [Medium] Provider-review resume/coordination replay.** Interrupted
-  `provider_review` leases can be silently dropped (post-expiry, finding
-  skipped on resume) or replayed (pre-expiry, `sync_tasks` lets a stale
-  supervisor snapshot regress a `completed`/`failed` DB row to `queued`),
-  re-running paid provider work; `_run_review_packet_processes` has no
-  try/finally so an interrupt orphans workers that then race the resumed
-  supervisor. Fix: respect terminal coordinator statuses in `sync_tasks`/
-  `_resume_task`; wrap worker spawn-to-reap in try/finally.
 
 - **R6 [Medium] Env leakage into CLI children.** `ClaudeCLIClient` denylists
   only 3 Anthropic vars, inheriting all other host secrets into the spawned
@@ -84,19 +58,10 @@ These need a design decision or a larger change with its own test plan.
 
 ## Web workbench (separate surface)
 
-- **R8 [Med-High] Path args unconfined → arbitrary file read + SSRF.** API
-  routes forward `evidencePaths` / `goalBriefPaths` / `repoSearchPaths` / fetch
-  URLs to the engine with trim-only cleaning; absolute paths and `../` reach the
-  engine's file/network I/O, and the content returns via the run view. The
-  careful `runs/` `runId` containment is bypassed by these path args. Fix:
-  resolve and confine to repo/allowlist roots; restrict fetch to an allowlist.
-- **R9 [Medium] No CSRF protection.** Mutating routes parse `request.json()`
-  with no Origin/CSRF check; a cross-site simple POST can start runs (spending
-  provider budget) and drive R8. Fix: verify `Origin`/`Sec-Fetch-Site`; bind dev
-  server to loopback.
-- Lower: error responses leak absolute host paths / engine tracebacks; objective
-  passed as a bare positional (objectives starting with `-` silently break —
-  add `--`); unbounded `state.json` reads; fixed-rate polling with no backoff.
+R8 and R9 are resolved in the v0.1.0 hardening release. Remaining lower-priority
+items: error responses leak absolute host paths / engine tracebacks; objective
+passed as a bare positional (objectives starting with `-` silently break — add
+`--`); unbounded `state.json` reads; fixed-rate polling with no backoff.
 
 ## Structural / cleanup (low urgency)
 
