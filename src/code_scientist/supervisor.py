@@ -51,6 +51,7 @@ from code_scientist.models import (
     FeedbackLoopEvaluation,
     GoalRevision,
     Hypothesis,
+    INACTIVE_STATUSES,
     Match,
     MetaReview,
     ProximityEdge,
@@ -91,7 +92,9 @@ from code_scientist.tools import (
 from code_scientist.vision import interpret_pdf_visual_evidence
 
 
-_INACTIVE_STATUSES = {"merged_duplicate", "quarantined", "rejected"}
+# Local alias preserved for the many in-module references; canonical set lives
+# in models so top-hypothesis selection and subagent packets agree with the loop.
+_INACTIVE_STATUSES = INACTIVE_STATUSES
 
 
 def _active_hypotheses(hypotheses: list[Hypothesis]) -> list[Hypothesis]:
@@ -1102,7 +1105,17 @@ def run_research_cycle(
                 cycle_match_evidence_refs: list[str] = []
                 multi_round_count = 0
                 single_turn_count = 0
-                for first, second in _schedule_pairs(hypotheses, proximity_edges, matches, max_matches, reviews):
+                for scheduled_first, scheduled_second in _schedule_pairs(
+                    hypotheses, proximity_edges, matches, max_matches, reviews
+                ):
+                    # The pair schedule is frozen up front, but a hypothesis can appear
+                    # in several pairs; re-resolve each competitor by id against the
+                    # current list so an earlier match's Elo update in this same loop
+                    # feeds the next match instead of being computed from — and then
+                    # overwritten by — the stale schedule-time snapshot.
+                    by_id = {item.id: item for item in hypotheses}
+                    first = by_id.get(scheduled_first.id, scheduled_first)
+                    second = by_id.get(scheduled_second.id, scheduled_second)
                     # Per-pair depth decision (paper's compute optimization): top-tier
                     # pairs get multi-round debates, others single-turn. Tier membership
                     # uses Elo at match time, so earlier matches in this loop count.

@@ -144,6 +144,45 @@ def test_supervisor_writes_state(tmp_path):
     assert all(trace.task_id in task_ids for trace in restored.agent_traces)
 
 
+def test_ranking_elo_accounting_chains_across_repeated_matches(tmp_path):
+    # Regression: a hypothesis that appears in more than one scheduled pair in
+    # one ranking pass must carry its running Elo from match to match. Before the
+    # fix the loop compared stale schedule-time snapshots, so a competitor's
+    # second match was scored from — and its state overwritten by — its
+    # pre-loop rating, discarding the first match's delta.
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=5,
+        max_matches=5,
+        out_dir=tmp_path / "run",
+    )
+
+    # Reconstruct per-hypothesis match order from the trajectory (match_index is
+    # the authoritative ordering within the cycle).
+    ordered = [
+        match
+        for point in sorted(state.elo_trajectory, key=lambda p: p.match_index)
+        for match in state.matches
+        if match.id == point.match_id
+    ]
+    assert len(ordered) >= 2
+
+    running: dict[str, float] = {}
+    chained = 0
+    for match in ordered:
+        for hid, before in match.elo_before.items():
+            if hid in running:
+                # The competitor's recorded pre-match rating must equal the Elo
+                # it left its previous match with — the property the bug broke.
+                assert running[hid] == pytest.approx(before), (
+                    f"{hid}: elo_before {before} != running {running[hid]}"
+                )
+                chained += 1
+            running[hid] = match.elo_after.get(hid, before)
+    assert chained >= 1, "no hypothesis competed twice; test did not exercise the fix"
+
+
 def test_supervisor_applies_goal_brief_to_goal_and_plan(tmp_path):
     brief = tmp_path / "goal-brief.md"
     brief.write_text(

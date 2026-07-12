@@ -405,12 +405,22 @@ def load_packet_review_notes(directory: str | Path) -> dict[str, str]:
 
 
 def _reviewer_verdict(note: str) -> str:
-    match = re.search(
-        r"verdict[:*\s]+[*_`\s]*(keep|revise|verify|reject)",
+    # The packet template ends with the literal line
+    # "- Verdict: keep, revise, verify, or reject." — the enumeration of options,
+    # not a decision. Ignore any match whose keyword is immediately followed by a
+    # comma-or-"or"-separated sibling option (the template), and take the last
+    # genuine verdict, since reviewers conclude with their decision.
+    genuine: list[str] = []
+    for match in re.finditer(
+        r"verdict[:*\s]+[*_`\s]*(keep|revise|verify|reject)\b\s*(,|\bor\b)?\s*"
+        r"(keep|revise|verify|reject)?",
         note,
         flags=re.IGNORECASE,
-    )
-    return match.group(1).lower() if match else ""
+    ):
+        if match.group(2) and match.group(3):
+            continue  # enumeration line, e.g. "keep, revise" / "verify or reject"
+        genuine.append(match.group(1).lower())
+    return genuine[-1] if genuine else ""
 
 
 def _unique_ordered(items: list[str]) -> list[str]:

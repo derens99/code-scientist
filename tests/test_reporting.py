@@ -7,6 +7,7 @@ from code_scientist.reporting import (
     render_findings,
     render_report,
 )
+from code_scientist.reporting import _reviewer_verdict
 from code_scientist.models import (
     AgentToolCall,
     AgentTrace,
@@ -31,6 +32,24 @@ from code_scientist.models import (
     ToolBudgetState,
 )
 from code_scientist.supervisor import run_research_cycle
+
+
+def test_reviewer_verdict_ignores_packet_template_enumeration():
+    # The packet template ends with the option enumeration; a note that echoes it
+    # before stating the real verdict must not be read as the first option.
+    note = (
+        "## Response Format\n"
+        "- Verdict: keep, revise, verify, or reject.\n\n"
+        "## My Review\n"
+        "Verdict: revise\n"
+        "Main risk: the checklist step is unverified.\n"
+    )
+    assert _reviewer_verdict(note) == "revise"
+    # Enumeration only (no real verdict) yields no verdict, not "keep".
+    assert _reviewer_verdict("- Verdict: keep, revise, verify, or reject.") == ""
+    # A plain single verdict still parses.
+    assert _reviewer_verdict("**Verdict:** keep\nLooks solid.") == "keep"
+    assert _reviewer_verdict("no verdict here") == ""
 
 
 def test_render_report_includes_leaderboard_and_limitations(tmp_path):

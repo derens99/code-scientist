@@ -5,7 +5,13 @@ import re
 from pathlib import Path
 from typing import Any
 
-from code_scientist.models import Evidence, Hypothesis, Review, RunState
+from code_scientist.models import (
+    Evidence,
+    Hypothesis,
+    INACTIVE_STATUSES,
+    Review,
+    RunState,
+)
 
 
 def write_agent_packets(
@@ -169,7 +175,10 @@ def render_agent_packet(
 
 
 def select_top_hypotheses(state: RunState, *, limit: int) -> list[Hypothesis]:
-    active = [item for item in state.hypotheses if item.status != "merged_duplicate"]
+    # Exclude every dead candidate, not just merged duplicates: a
+    # safety-quarantined or review-rejected hypothesis must never be handed to a
+    # subagent as work to advance.
+    active = [item for item in state.hypotheses if item.status not in INACTIVE_STATUSES]
     if not active or limit <= 0:
         return []
     overview_order = {

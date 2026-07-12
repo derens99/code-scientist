@@ -10,6 +10,17 @@ def stable_id(prefix: str, text: str) -> str:
     return f"{prefix}-{digest}"
 
 
+# Statuses that mean a hypothesis is no longer a live candidate: merged into
+# another, safety-quarantined, or rejected in review. Canonical home so callers
+# that must exclude dead candidates (top-hypothesis selection, subagent packets,
+# active-count math) agree. Concordance deliberately keeps its own narrower set
+# because a rejected hypothesis still carries a correctness signal worth grading
+# against its Elo.
+INACTIVE_STATUSES: frozenset[str] = frozenset(
+    {"merged_duplicate", "quarantined", "rejected"}
+)
+
+
 _GOAL_BRIEF_SECTION_ALIASES = {
     "preference": "preferences",
     "preferences": "preferences",
