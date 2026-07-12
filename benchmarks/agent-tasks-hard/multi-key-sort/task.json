@@ -1,0 +1,6 @@
+{
+  "id": "multi-key-sort",
+  "title": "Implement a stable multi-key record sorter",
+  "prompt": "You are working in the current directory. There is a file `record_sort.py` containing a function `sort_records(records, keys)` that raises `NotImplementedError`. Implement it exactly according to the docstring already written in the file. Do not change the function's name or signature. The docstring specifies the full set of rules for multi-key ordering, ascending/descending direction per key, how missing fields and null placement are handled, stability guarantees, and the exact error conditions.",
+  "timeout_seconds": 300
+}

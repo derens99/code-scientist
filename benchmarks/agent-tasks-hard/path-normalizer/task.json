@@ -1,0 +1,6 @@
+{
+  "id": "path-normalizer",
+  "title": "Implement a POSIX-style path normalizer",
+  "prompt": "You are working in the current directory. There is a file `path_normalize.py` containing a function `normalize_path(path)` that raises `NotImplementedError`. Implement it exactly according to the docstring already written in the file. Do not change the function's name or signature. The docstring specifies how `.` and `..` segments are resolved differently for absolute vs. relative paths, how duplicate slashes and trailing slashes are handled, the empty-result rule, and the exact error conditions (including rejecting any backslash in the input).",
+  "timeout_seconds": 300
+}

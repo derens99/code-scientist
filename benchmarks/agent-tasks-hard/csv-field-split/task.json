@@ -1,0 +1,6 @@
+{
+  "id": "csv-field-split",
+  "title": "Implement a quoted-field record splitter",
+  "prompt": "You are working in the current directory. There is a file `record_split.py` containing a function `split_record(line, sep=\",\")` that raises `NotImplementedError`. Implement it exactly according to the docstring already written in the file. Do not change the function's name, signature, or default argument. The docstring specifies the full set of rules for quoted fields, escaped quote characters, separator handling, empty fields, trailing separators, empty input, and the custom `sep` parameter, including several error conditions that must raise `ValueError`.",
+  "timeout_seconds": 300
+}

@@ -928,6 +928,7 @@ class TrialArmResult:
     num_turns: float
     cost_usd: float
     grader_tail: str = ""
+    overtime: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -936,6 +937,7 @@ class TrialArmResult:
     def from_dict(cls, data: dict[str, Any]) -> TrialArmResult:
         copied = dict(data)
         copied.setdefault("grader_tail", "")
+        copied.setdefault("overtime", False)
         return cls(**copied)
 
 
@@ -1148,16 +1150,22 @@ def _record_arm(
     passed, grader_tail = grade_workspace(workspace, task.grader_dir(), timeout=grading_timeout)
     (arm_dir / "grader-output.txt").write_text(grader_tail, encoding="utf-8")
 
+    # Overtime rule: an arm that reports more wall time than the trial budget
+    # fails even if the graders pass. Executors that cannot hard-kill an agent
+    # (the host-agent bridge) still get enforced timeout semantics this way,
+    # deterministically and identically for both arms.
+    overtime = invocation.duration_seconds > spec.timeout_seconds
     return TrialArmResult(
         task_id=spec.task_id,
         trial=spec.trial,
         arm=spec.arm,
-        passed=passed,
+        passed=passed and not overtime,
         agent_status=invocation.status,
         duration_seconds=round(invocation.duration_seconds, 3),
         num_turns=invocation.num_turns,
         cost_usd=round(invocation.cost_usd, 6),
         grader_tail=grader_tail[-400:],
+        overtime=overtime,
     )
 
 

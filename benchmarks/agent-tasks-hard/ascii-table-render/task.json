@@ -1,0 +1,6 @@
+{
+  "id": "ascii-table-render",
+  "title": "Implement a bordered ASCII table renderer",
+  "prompt": "You are working in the current directory. There is a file `table_render.py` containing a function `render_table(headers, rows, alignments=None, max_col_width=None)` that raises `NotImplementedError`. Implement it exactly according to the docstring already written in the file. Do not change the function's name or signature. The docstring specifies exact column-width computation, border and padding formatting, per-column alignment, truncation-with-ellipsis behavior, and the exact error conditions.",
+  "timeout_seconds": 300
+}

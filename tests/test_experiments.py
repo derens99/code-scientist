@@ -559,6 +559,45 @@ def test_run_experiment_with_host_agent_prewritten_responses(tmp_path):
     assert result.verdict == "inconclusive"
 
 
+class _SlowFixingExecutor:
+    """Fixes the task but reports more wall time than the trial budget."""
+
+    def __init__(self, script):
+        self._inner = DeterministicAgentExecutor(script=script)
+
+    def run_batch(self, specs):
+        return [
+            AgentInvocation(
+                status="completed",
+                duration_seconds=spec.timeout_seconds + 30.0,
+                num_turns=3.0,
+                cost_usd=0.0,
+                raw_output="{}",
+            )
+            for spec in specs
+            if self._inner.run_trial(spec)
+        ]
+
+
+def test_overtime_arm_fails_even_when_graders_pass(tmp_path):
+    task_ids = ["task-a"]
+    suite = _make_suite(tmp_path, task_ids)
+    tasks = load_agent_tasks(suite)
+    protocol = _protocol(suite, tasks, trials_per_task=1)
+    out_dir = tmp_path / "experiment"
+    protocol = pre_register_protocol(protocol, out_dir)
+
+    result = run_experiment(
+        protocol, tasks, _SlowFixingExecutor(_fixing_script(task_ids, arm="candidate")), out_dir
+    )
+
+    candidate = next(item for item in result.trial_arms if item.arm == "candidate")
+    assert candidate.overtime is True
+    assert candidate.passed is False  # graders passed, but the budget rule flips it
+    baseline = next(item for item in result.trial_arms if item.arm == "baseline")
+    assert baseline.overtime is True
+
+
 def test_protocol_preregistration_conflict(tmp_path):
     suite = _make_suite(tmp_path, ["task-a"])
     tasks = load_agent_tasks(suite)

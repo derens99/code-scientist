@@ -1,0 +1,6 @@
+{
+  "id": "glob-matcher",
+  "title": "Implement a mini glob pattern matcher without using the regex module",
+  "prompt": "You are working in the current directory. There is a file `glob_match.py` containing a function `match_glob(pattern, text)` that raises `NotImplementedError`. Implement it exactly according to the docstring already written in the file. Do not change the function's name or signature, and do not use the `re` module (or any other regex engine) anywhere in your implementation. The docstring specifies the full behavior of `*`, `?`, character classes with ranges and negation, backslash escaping, and the exact error conditions.",
+  "timeout_seconds": 300
+}

@@ -1,0 +1,6 @@
+{
+  "id": "number-formatter",
+  "title": "Implement a configurable numeric string formatter",
+  "prompt": "You are working in the current directory. There is a file `num_format.py` containing a function `format_number(value, *, decimals=2, thousands_sep=False, percent=False, width=None)` that raises `NotImplementedError`. Implement it exactly according to the docstring already written in the file. Do not change the function's name or signature or any default argument. The docstring specifies the exact rounding rule, the order in which percent conversion, rounding, thousands-grouping, sign handling, and width padding are applied, the negative-zero rule, and the exact error conditions.",
+  "timeout_seconds": 300
+}

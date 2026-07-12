@@ -1,0 +1,6 @@
+{
+  "id": "event-window-aggregate",
+  "title": "Implement tumbling-window event aggregation",
+  "prompt": "You are working in the current directory. There is a file `event_windows.py` containing a function `aggregate_windows(events, window_size, *, agg=\"sum\")` that raises `NotImplementedError`. Implement it exactly according to the docstring already written in the file. Do not change the function's name or signature or any default argument. The docstring specifies the exact tumbling-window boundary rule, which windows are emitted, how duplicate and out-of-order timestamps are handled, the behavior of each supported `agg` mode, and the exact error conditions.",
+  "timeout_seconds": 300
+}
