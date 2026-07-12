@@ -30,15 +30,19 @@ from pathlib import Path
 from typing import Any
 
 from code_scientist.llm import (
+    BRIDGE_STOP_FILENAME,
     CLAUDE_CLI_SANITIZED_ENV_VARS,
+    DEFAULT_BRIDGE_POLL_SECONDS,
     DEFAULT_CLAUDE_CLI_BINARY,
     read_dotenv,
+    _atomic_write_json,
+    _read_json_object,
     _resolve_claude_binary,
 )
 from code_scientist.models import BenchmarkResult, Hypothesis, stable_id
 
 
-EXECUTOR_CHOICES = ("deterministic", "claude-cli")
+EXECUTOR_CHOICES = ("deterministic", "claude-cli", "host-agent")
 AGENT_AUTH_CHOICES = ("login", "api-key")
 MEASURED_PROVENANCE = "measured:agent-experiment"
 
@@ -200,6 +204,7 @@ class ExperimentProtocol:
     cost_budget_usd: float
     execution_policy: str = "trusted_local"
     direction: str = "candidate_gt_baseline"
+    trial_concurrency: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -209,6 +214,7 @@ class ExperimentProtocol:
         copied = dict(data)
         copied.setdefault("execution_policy", "trusted_local")
         copied.setdefault("direction", "candidate_gt_baseline")
+        copied.setdefault("trial_concurrency", 1)
         return cls(**copied)
 
     def content_hash(self) -> str:
@@ -235,6 +241,7 @@ def build_protocol(
     alpha: float = DEFAULT_ALPHA,
     min_discordant_pairs: int = DEFAULT_MIN_DISCORDANT_PAIRS,
     cost_budget_usd: float = DEFAULT_COST_BUDGET_USD,
+    trial_concurrency: int = 1,
 ) -> ExperimentProtocol:
     cleaned_intervention = intervention.strip()
     if not cleaned_intervention:
@@ -277,6 +284,7 @@ def build_protocol(
         alpha=float(alpha),
         min_discordant_pairs=int(min_discordant_pairs),
         cost_budget_usd=float(cost_budget_usd),
+        trial_concurrency=max(1, int(trial_concurrency)),
     )
 
 
@@ -324,6 +332,24 @@ class AgentInvocation:
     detail: str = ""
 
 
+@dataclass(frozen=True)
+class TrialSpec:
+    """One arm of one paired trial, as handed to an executor."""
+
+    request_id: str
+    task_id: str
+    trial: int
+    arm: str
+    prompt: str
+    system_append: str
+    workspace: str
+    timeout_seconds: float
+
+
+def _sequential_run_batch(executor: Any, specs: list[TrialSpec]) -> list[AgentInvocation]:
+    return [executor.run_trial(spec) for spec in specs]
+
+
 class DeterministicAgentExecutor:
     """Scripted executor for tests and offline demos.
 
@@ -337,24 +363,14 @@ class DeterministicAgentExecutor:
     def __init__(self, script: dict[str, Any] | None = None) -> None:
         self.script = script or {}
 
-    def run_trial(
-        self,
-        *,
-        task_id: str,
-        arm: str,
-        prompt: str,
-        system_append: str,
-        workspace: Path,
-        timeout: float,
-    ) -> AgentInvocation:
-        del prompt, system_append, timeout
-        entry = self.script.get(task_id, {}).get(arm)
+    def run_trial(self, spec: TrialSpec) -> AgentInvocation:
+        entry = self.script.get(spec.task_id, {}).get(spec.arm)
         written: list[str] = []
         if isinstance(entry, dict):
             files = entry.get("files")
             if isinstance(files, dict):
                 for relative, content in files.items():
-                    target = workspace / str(relative)
+                    target = Path(spec.workspace) / str(relative)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_text(str(content), encoding="utf-8")
                     written.append(str(relative))
@@ -365,6 +381,9 @@ class DeterministicAgentExecutor:
             cost_usd=0.0,
             raw_output=json.dumps({"deterministic": True, "files_written": written}),
         )
+
+    def run_batch(self, specs: list[TrialSpec]) -> list[AgentInvocation]:
+        return _sequential_run_batch(self, specs)
 
 
 class ClaudeCliAgentExecutor:
@@ -419,17 +438,7 @@ class ClaudeCliAgentExecutor:
             env["ANTHROPIC_API_KEY"] = self._api_key
         return env
 
-    def run_trial(
-        self,
-        *,
-        task_id: str,
-        arm: str,
-        prompt: str,
-        system_append: str,
-        workspace: Path,
-        timeout: float,
-    ) -> AgentInvocation:
-        del task_id, arm
+    def run_trial(self, spec: TrialSpec) -> AgentInvocation:
         argv = [
             self.binary,
             "-p",
@@ -444,12 +453,14 @@ class ClaudeCliAgentExecutor:
             argv.extend(["--allowedTools", self.allowed_tools])
         if self.disallowed_tools:
             argv.extend(["--disallowedTools", self.disallowed_tools])
-        if system_append:
-            argv.extend(["--append-system-prompt", system_append])
+        if spec.system_append:
+            argv.extend(["--append-system-prompt", spec.system_append])
 
         started = time.monotonic()
         try:
-            result = self._runner(argv, prompt, timeout, self._child_env(), str(workspace))
+            result = self._runner(
+                argv, spec.prompt, spec.timeout_seconds, self._child_env(), spec.workspace
+            )
         except subprocess.TimeoutExpired:
             return AgentInvocation(
                 status="timeout",
@@ -457,7 +468,7 @@ class ClaudeCliAgentExecutor:
                 num_turns=0.0,
                 cost_usd=0.0,
                 raw_output="",
-                detail=f"agent timed out after {timeout:.0f}s",
+                detail=f"agent timed out after {spec.timeout_seconds:.0f}s",
             )
         except FileNotFoundError as exc:
             raise ExperimentConfigError(
@@ -473,6 +484,146 @@ class ClaudeCliAgentExecutor:
                 )
 
         return _parse_agent_json(result, duration)
+
+    def run_batch(self, specs: list[TrialSpec]) -> list[AgentInvocation]:
+        return _sequential_run_batch(self, specs)
+
+
+class HostAgentTrialExecutor:
+    """Runs trials through a file handshake with the launching agent session.
+
+    The same contract as the llm-bridge provider, extended from "the session
+    answers LLM calls" to "the session runs agent trials": for each trial arm
+    the engine writes ``<bridge_dir>/requests/<request-id>.json`` containing
+    the complete trial input (prompt, appended system prompt, workspace path,
+    timeout) and waits for ``<bridge_dir>/responses/<request-id>.json`` with
+    ``{"id", "status", "duration_seconds"?, "num_turns"?, "cost_usd"?,
+    "detail"?}``. The host session spawns one fresh subagent per request from
+    a fixed template, so no API key or CLI login is involved.
+
+    Whole batches are posted at once so the host can run trials in parallel.
+    Answered request files are removed (``requests/`` lists exactly the
+    pending trials), a ``stop`` file cancels the experiment, and two
+    consecutive fully-unanswered batches abandon it.
+    """
+
+    def __init__(
+        self,
+        bridge_dir: str | Path,
+        *,
+        response_margin_seconds: float = 300.0,
+        poll_seconds: float = DEFAULT_BRIDGE_POLL_SECONDS,
+        abandon_after_batches: int = 2,
+    ) -> None:
+        if not str(bridge_dir).strip():
+            raise ExperimentConfigError("The host-agent executor requires a bridge directory.")
+        self.bridge_dir = Path(bridge_dir)
+        self.requests_dir = self.bridge_dir / "requests"
+        self.responses_dir = self.bridge_dir / "responses"
+        self.stop_path = self.bridge_dir / BRIDGE_STOP_FILENAME
+        self.response_margin_seconds = float(response_margin_seconds)
+        self.poll_seconds = max(float(poll_seconds), 0.01)
+        self.abandon_after_batches = max(int(abandon_after_batches), 1)
+        self._consecutive_unanswered_batches = 0
+
+    def run_batch(self, specs: list[TrialSpec]) -> list[AgentInvocation]:
+        if not specs:
+            return []
+        self._raise_if_stopped(specs=[])
+        self.requests_dir.mkdir(parents=True, exist_ok=True)
+        self.responses_dir.mkdir(parents=True, exist_ok=True)
+        for spec in specs:
+            _atomic_write_json(
+                self.requests_dir / f"{spec.request_id}.json",
+                {
+                    "id": spec.request_id,
+                    "task_id": spec.task_id,
+                    "trial": spec.trial,
+                    "prompt": spec.prompt,
+                    "system_append": spec.system_append,
+                    "workspace": spec.workspace,
+                    "timeout_seconds": spec.timeout_seconds,
+                    "created_at": time.time(),
+                },
+            )
+
+        pending = {spec.request_id: spec for spec in specs}
+        answered: dict[str, AgentInvocation] = {}
+        deadline = time.monotonic() + max(spec.timeout_seconds for spec in specs) + (
+            self.response_margin_seconds
+        )
+        while pending and time.monotonic() < deadline:
+            self._raise_if_stopped(specs=list(pending.values()))
+            for request_id in list(pending):
+                parsed = _read_json_object(self.responses_dir / f"{request_id}.json")
+                if parsed is None:
+                    continue
+                (self.requests_dir / f"{request_id}.json").unlink(missing_ok=True)
+                answered[request_id] = _invocation_from_bridge_response(parsed)
+                del pending[request_id]
+            if pending:
+                time.sleep(self.poll_seconds)
+
+        for request_id, spec in pending.items():
+            (self.requests_dir / f"{request_id}.json").unlink(missing_ok=True)
+            answered[request_id] = AgentInvocation(
+                status="timeout",
+                duration_seconds=spec.timeout_seconds,
+                num_turns=0.0,
+                cost_usd=0.0,
+                raw_output="",
+                detail="bridge request was not answered before the deadline",
+            )
+        if pending and len(pending) == len(specs):
+            self._consecutive_unanswered_batches += 1
+            if self._consecutive_unanswered_batches >= self.abandon_after_batches:
+                raise ExperimentAbort(
+                    f"{self._consecutive_unanswered_batches} consecutive trial batches went "
+                    "unanswered; the host session appears to have abandoned the bridge."
+                )
+        elif not pending:
+            self._consecutive_unanswered_batches = 0
+        return [answered[spec.request_id] for spec in specs]
+
+    def _raise_if_stopped(self, specs: list[TrialSpec]) -> None:
+        if not self.stop_path.exists():
+            return
+        for spec in specs:
+            (self.requests_dir / f"{spec.request_id}.json").unlink(missing_ok=True)
+        raise ExperimentAbort(f"Experiment bridge stop was requested ({self.stop_path}).")
+
+
+def _invocation_from_bridge_response(parsed: dict[str, Any]) -> AgentInvocation:
+    error = str(parsed.get("error", "") or "").strip()
+    if error:
+        return AgentInvocation(
+            status="error",
+            duration_seconds=_float_or_zero(parsed.get("duration_seconds")),
+            num_turns=0.0,
+            cost_usd=_float_or_zero(parsed.get("cost_usd")),
+            raw_output=json.dumps(parsed),
+            detail=error[:500],
+        )
+    status = str(parsed.get("status") or "").strip().lower()
+    detail = str(parsed.get("detail") or "")[:500]
+    if status not in {"completed", "max-turns", "timeout", "error"}:
+        detail = f"unrecognized bridge status {status!r}; {detail}".strip("; ")
+        status = "error"
+    return AgentInvocation(
+        status=status,
+        duration_seconds=_float_or_zero(parsed.get("duration_seconds")),
+        num_turns=_float_or_zero(parsed.get("num_turns")),
+        cost_usd=_float_or_zero(parsed.get("cost_usd")),
+        raw_output=json.dumps(parsed),
+        detail=detail,
+    )
+
+
+def _float_or_zero(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _parse_agent_json(
@@ -816,15 +967,27 @@ class ExperimentResult:
         return cls(**copied)
 
 
+TrialExecutor = (
+    DeterministicAgentExecutor | ClaudeCliAgentExecutor | HostAgentTrialExecutor
+)
+
+
 def create_executor(
     protocol: ExperimentProtocol,
     *,
+    out_dir: str | Path = "",
     env_file: str | Path = ".env",
     script: dict[str, Any] | None = None,
     runner: AgentCommandRunner | None = None,
-) -> DeterministicAgentExecutor | ClaudeCliAgentExecutor:
+) -> TrialExecutor:
     if protocol.executor == "deterministic":
         return DeterministicAgentExecutor(script=script)
+    if protocol.executor == "host-agent":
+        if not str(out_dir).strip():
+            raise ExperimentConfigError(
+                "The host-agent executor requires the experiment output directory."
+            )
+        return HostAgentTrialExecutor(Path(out_dir) / "agent-bridge")
     return ClaudeCliAgentExecutor(
         model=protocol.model,
         max_turns=protocol.max_turns,
@@ -839,7 +1002,7 @@ def create_executor(
 def run_experiment(
     protocol: ExperimentProtocol,
     tasks: list[AgentTask],
-    executor: DeterministicAgentExecutor | ClaudeCliAgentExecutor,
+    executor: TrialExecutor,
     out_dir: str | Path,
     *,
     grading_timeout: float = DEFAULT_GRADING_TIMEOUT_SECONDS,
@@ -868,26 +1031,29 @@ def run_experiment(
     notes: list[str] = []
     total_cost = 0.0
     status = "complete"
+    chunk_size = max(1, protocol.trial_concurrency)
 
     try:
-        for task_id, trial, arms in schedule:
-            task = tasks_by_id[task_id]
-            for arm in arms:
-                if total_cost > protocol.cost_budget_usd:
-                    raise _BudgetExceeded()
-                arm_result = _run_single_arm(
-                    protocol,
-                    task,
-                    trial,
-                    arm,
-                    executor,
-                    trials_root,
-                    grading_timeout=grading_timeout,
+        for chunk_start in range(0, len(schedule), chunk_size):
+            # The budget is checked between chunks, so the worst overshoot is
+            # one chunk of trials; that trade is what buys parallel batches.
+            if total_cost > protocol.cost_budget_usd:
+                raise _BudgetExceeded()
+            chunk = schedule[chunk_start : chunk_start + chunk_size]
+            prepared: list[tuple[TrialSpec, AgentTask, Path]] = []
+            for task_id, trial, arms in chunk:
+                task = tasks_by_id[task_id]
+                for arm in arms:
+                    prepared.append(_prepare_arm(protocol, task, trial, arm, trials_root))
+            invocations = executor.run_batch([spec for spec, _, _ in prepared])
+            for (spec, task, arm_dir), invocation in zip(prepared, invocations):
+                arm_result = _record_arm(
+                    spec, task, arm_dir, invocation, grading_timeout=grading_timeout
                 )
                 arm_results.append(arm_result)
                 total_cost += arm_result.cost_usd
                 emit(
-                    f"{task_id} trial {trial} {arm}: "
+                    f"{spec.task_id} trial {spec.trial} {spec.arm}: "
                     f"{'pass' if arm_result.passed else 'fail'} "
                     f"({arm_result.agent_status}, ${total_cost:.2f} spent)"
                 )
@@ -936,29 +1102,38 @@ class _BudgetExceeded(Exception):
     pass
 
 
-def _run_single_arm(
+def _prepare_arm(
     protocol: ExperimentProtocol,
     task: AgentTask,
     trial: int,
     arm: str,
-    executor: DeterministicAgentExecutor | ClaudeCliAgentExecutor,
     trials_root: Path,
-    *,
-    grading_timeout: float,
-) -> TrialArmResult:
+) -> tuple[TrialSpec, AgentTask, Path]:
     arm_dir = trials_root / task.id / f"trial-{trial}" / arm
     arm_dir.mkdir(parents=True, exist_ok=True)
     workspace = _prepare_workspace(task, arm_dir)
-    system_append = protocol.intervention if arm == _ARM_CANDIDATE else ""
-
-    invocation = executor.run_trial(
+    spec = TrialSpec(
+        request_id=f"{task.id}-trial{trial}-{arm}",
         task_id=task.id,
+        trial=trial,
         arm=arm,
         prompt=task.prompt,
-        system_append=system_append,
-        workspace=workspace,
-        timeout=min(task.timeout_seconds, protocol.trial_timeout_seconds),
+        system_append=protocol.intervention if arm == _ARM_CANDIDATE else "",
+        workspace=str(workspace),
+        timeout_seconds=min(task.timeout_seconds, protocol.trial_timeout_seconds),
     )
+    return spec, task, arm_dir
+
+
+def _record_arm(
+    spec: TrialSpec,
+    task: AgentTask,
+    arm_dir: Path,
+    invocation: AgentInvocation,
+    *,
+    grading_timeout: float,
+) -> TrialArmResult:
+    workspace = Path(spec.workspace)
     (arm_dir / "agent-output.json").write_text(
         invocation.raw_output or json.dumps({"status": invocation.status, "detail": invocation.detail}),
         encoding="utf-8",
@@ -974,9 +1149,9 @@ def _run_single_arm(
     (arm_dir / "grader-output.txt").write_text(grader_tail, encoding="utf-8")
 
     return TrialArmResult(
-        task_id=task.id,
-        trial=trial,
-        arm=arm,
+        task_id=spec.task_id,
+        trial=spec.trial,
+        arm=spec.arm,
         passed=passed,
         agent_status=invocation.status,
         duration_seconds=round(invocation.duration_seconds, 3),

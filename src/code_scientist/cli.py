@@ -346,6 +346,12 @@ def build_parser() -> argparse.ArgumentParser:
     validate_parser.add_argument("--executor", choices=list(EXECUTOR_CHOICES), default="claude-cli")
     validate_parser.add_argument("--executor-script", default="", help="Deterministic executor script JSON (offline demos).")
     validate_parser.add_argument("--trials", type=int, default=DEFAULT_TRIALS_PER_TASK, help="Paired trials per task.")
+    validate_parser.add_argument(
+        "--trial-concurrency",
+        type=int,
+        default=1,
+        help="Trial pairs posted per batch (host-agent executor runs them in parallel).",
+    )
     validate_parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     validate_parser.add_argument("--model", default=DEFAULT_ANTHROPIC_MODEL)
     validate_parser.add_argument("--max-turns", type=int, default=DEFAULT_MAX_TURNS)
@@ -767,6 +773,7 @@ def main(argv: list[str] | None = None) -> int:
             alpha=args.alpha,
             min_discordant_pairs=args.min_discordant,
             cost_budget_usd=args.cost_budget_usd,
+            trial_concurrency=args.trial_concurrency,
         )
         out_dir = (
             Path(args.out)
@@ -785,7 +792,9 @@ def main(argv: list[str] | None = None) -> int:
         script = None
         if args.executor_script:
             script = json.loads(Path(args.executor_script).read_text(encoding="utf-8"))
-        executor = create_executor(protocol, env_file=args.env_file, script=script)
+        executor = create_executor(
+            protocol, out_dir=out_dir, env_file=args.env_file, script=script
+        )
         result = run_experiment(
             protocol,
             tasks,

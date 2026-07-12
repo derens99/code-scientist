@@ -11,7 +11,9 @@ from code_scientist.experiments import (
     DeterministicAgentExecutor,
     ExperimentAbort,
     ExperimentConfigError,
+    HostAgentTrialExecutor,
     MEASURED_PROVENANCE,
+    TrialSpec,
     _one_sided_binomial,
     benchmark_result_from_experiment,
     build_protocol,
@@ -262,16 +264,31 @@ def test_experiment_reruns_are_deterministic(tmp_path):
     assert results[0] == results[1]
 
 
+def _spec(workspace, *, arm="candidate", system_append="Verify before finishing.", prompt="Fix the bug.", timeout=120.0):
+    return TrialSpec(
+        request_id=f"task-a-trial1-{arm}",
+        task_id="task-a",
+        trial=1,
+        arm=arm,
+        prompt=prompt,
+        system_append=system_append,
+        workspace=str(workspace),
+        timeout_seconds=timeout,
+    )
+
+
 class _CostlyExecutor:
-    def run_trial(self, *, task_id, arm, prompt, system_append, workspace, timeout):
-        del task_id, arm, prompt, system_append, workspace, timeout
-        return AgentInvocation(
-            status="completed",
-            duration_seconds=1.0,
-            num_turns=1.0,
-            cost_usd=5.0,
-            raw_output="{}",
-        )
+    def run_batch(self, specs):
+        return [
+            AgentInvocation(
+                status="completed",
+                duration_seconds=1.0,
+                num_turns=1.0,
+                cost_usd=5.0,
+                raw_output="{}",
+            )
+            for _ in specs
+        ]
 
 
 def test_experiment_stops_on_cost_budget(tmp_path):
@@ -285,7 +302,9 @@ def test_experiment_stops_on_cost_budget(tmp_path):
 
     assert result.status == "incomplete"
     assert result.verdict == "incomplete"
-    assert len(result.trial_arms) == 1
+    # Budget is enforced between chunks: the first pair (2 arms) completes,
+    # then the run stops before the next chunk starts.
+    assert len(result.trial_arms) == 2
     assert any("cost budget" in note for note in result.notes)
 
 
@@ -327,14 +346,7 @@ def test_claude_cli_executor_argv_env_and_parsing(tmp_path, monkeypatch):
     workspace = tmp_path / "ws"
     workspace.mkdir()
 
-    invocation = executor.run_trial(
-        task_id="task-a",
-        arm="candidate",
-        prompt="Fix the bug.",
-        system_append="Verify before finishing.",
-        workspace=workspace,
-        timeout=120.0,
-    )
+    invocation = executor.run_trial(_spec(workspace))
 
     argv = record["argv"]
     assert "-p" in argv
@@ -361,14 +373,7 @@ def test_claude_cli_executor_omits_append_for_baseline(tmp_path):
     workspace = tmp_path / "ws"
     workspace.mkdir()
 
-    executor.run_trial(
-        task_id="task-a",
-        arm="baseline",
-        prompt="Fix the bug.",
-        system_append="",
-        workspace=workspace,
-        timeout=60.0,
-    )
+    executor.run_trial(_spec(workspace, arm="baseline", system_append="", timeout=60.0))
 
     assert "--append-system-prompt" not in record["argv"]
 
@@ -387,14 +392,7 @@ def test_claude_cli_executor_api_key_mode(tmp_path, monkeypatch):
     workspace = tmp_path / "ws"
     workspace.mkdir()
 
-    executor.run_trial(
-        task_id="task-a",
-        arm="baseline",
-        prompt="Fix.",
-        system_append="",
-        workspace=workspace,
-        timeout=60.0,
-    )
+    executor.run_trial(_spec(workspace, arm="baseline", system_append="", prompt="Fix.", timeout=60.0))
 
     assert record["env"]["ANTHROPIC_API_KEY"] == "sk-real-file-key"
 
@@ -421,14 +419,7 @@ def test_claude_cli_executor_timeout_and_abort(tmp_path):
     executor = ClaudeCliAgentExecutor(
         model="claude-haiku-4-5", runner=timeout_runner
     )
-    invocation = executor.run_trial(
-        task_id="t",
-        arm="baseline",
-        prompt="p",
-        system_append="",
-        workspace=workspace,
-        timeout=1.0,
-    )
+    invocation = executor.run_trial(_spec(workspace, arm="baseline", system_append="", timeout=1.0))
     assert invocation.status == "timeout"
 
     record: dict = {}
@@ -441,14 +432,131 @@ def test_claude_cli_executor_timeout_and_abort(tmp_path):
         ),
     )
     with pytest.raises(ExperimentAbort):
-        auth_fail.run_trial(
-            task_id="t",
-            arm="baseline",
-            prompt="p",
-            system_append="",
-            workspace=workspace,
-            timeout=1.0,
+        auth_fail.run_trial(_spec(workspace, arm="baseline", system_append="", timeout=1.0))
+
+
+def test_host_agent_executor_answers_from_bridge(tmp_path):
+    bridge = tmp_path / "agent-bridge"
+    (bridge / "responses").mkdir(parents=True)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    spec = _spec(workspace, timeout=5.0)
+    (bridge / "responses" / f"{spec.request_id}.json").write_text(
+        json.dumps(
+            {
+                "id": spec.request_id,
+                "status": "completed",
+                "duration_seconds": 12.5,
+                "num_turns": 6,
+                "cost_usd": 0.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    executor = HostAgentTrialExecutor(bridge, response_margin_seconds=2.0, poll_seconds=0.02)
+
+    invocations = executor.run_batch([spec])
+
+    assert invocations[0].status == "completed"
+    assert invocations[0].duration_seconds == pytest.approx(12.5)
+    assert invocations[0].num_turns == 6.0
+    # The answered request is removed; the request payload carried the trial.
+    assert not (bridge / "requests" / f"{spec.request_id}.json").exists()
+
+
+def test_host_agent_executor_request_payload_is_complete(tmp_path):
+    bridge = tmp_path / "agent-bridge"
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    spec = _spec(workspace, timeout=0.2)
+    executor = HostAgentTrialExecutor(bridge, response_margin_seconds=0.1, poll_seconds=0.02)
+
+    invocations = executor.run_batch([spec])
+
+    # Unanswered: times out, but the request must have been written complete.
+    assert invocations[0].status == "timeout"
+    request_path = bridge / "requests" / f"{spec.request_id}.json"
+    assert not request_path.exists()  # cleaned up after the deadline
+
+
+def test_host_agent_executor_abandons_after_unanswered_batches(tmp_path):
+    bridge = tmp_path / "agent-bridge"
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    executor = HostAgentTrialExecutor(
+        bridge, response_margin_seconds=0.05, poll_seconds=0.02, abandon_after_batches=2
+    )
+    spec = _spec(workspace, timeout=0.05)
+
+    first = executor.run_batch([spec])
+    assert first[0].status == "timeout"
+    with pytest.raises(ExperimentAbort):
+        executor.run_batch([spec])
+
+
+def test_host_agent_executor_stop_file_aborts(tmp_path):
+    bridge = tmp_path / "agent-bridge"
+    bridge.mkdir(parents=True)
+    (bridge / "stop").write_text("", encoding="utf-8")
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    executor = HostAgentTrialExecutor(bridge, response_margin_seconds=5.0)
+
+    with pytest.raises(ExperimentAbort):
+        executor.run_batch([_spec(workspace, timeout=5.0)])
+
+
+def test_host_agent_executor_error_and_unknown_status(tmp_path):
+    bridge = tmp_path / "agent-bridge"
+    (bridge / "responses").mkdir(parents=True)
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    error_spec = _spec(workspace, arm="baseline", system_append="", timeout=5.0)
+    unknown_spec = _spec(workspace, timeout=5.0)
+    (bridge / "responses" / f"{error_spec.request_id}.json").write_text(
+        json.dumps({"id": error_spec.request_id, "error": "subagent crashed"}),
+        encoding="utf-8",
+    )
+    (bridge / "responses" / f"{unknown_spec.request_id}.json").write_text(
+        json.dumps({"id": unknown_spec.request_id, "status": "finished-i-guess"}),
+        encoding="utf-8",
+    )
+    executor = HostAgentTrialExecutor(bridge, response_margin_seconds=2.0, poll_seconds=0.02)
+
+    invocations = executor.run_batch([error_spec, unknown_spec])
+
+    assert invocations[0].status == "error"
+    assert "subagent crashed" in invocations[0].detail
+    assert invocations[1].status == "error"
+    assert "unrecognized bridge status" in invocations[1].detail
+
+
+def test_run_experiment_with_host_agent_prewritten_responses(tmp_path):
+    task_ids = ["task-a"]
+    suite = _make_suite(tmp_path, task_ids)
+    tasks = load_agent_tasks(suite)
+    protocol = _protocol(
+        suite, tasks, executor="host-agent", trials_per_task=1, trial_concurrency=2
+    )
+    out_dir = tmp_path / "experiment"
+    protocol = pre_register_protocol(protocol, out_dir)
+    bridge = out_dir / "agent-bridge"
+    (bridge / "responses").mkdir(parents=True)
+    for arm in ("baseline", "candidate"):
+        (bridge / "responses" / f"task-a-trial1-{arm}.json").write_text(
+            json.dumps({"id": f"task-a-trial1-{arm}", "status": "completed"}),
+            encoding="utf-8",
         )
+    executor = HostAgentTrialExecutor(bridge, response_margin_seconds=2.0, poll_seconds=0.02)
+
+    result = run_experiment(protocol, tasks, executor, out_dir)
+
+    assert result.status == "complete"
+    assert result.stats["n_pairs"] == 1.0
+    # Neither arm edited the workspace, so both fail the grader.
+    assert result.stats["baseline_pass_rate"] == 0.0
+    assert result.stats["candidate_pass_rate"] == 0.0
+    assert result.verdict == "inconclusive"
 
 
 def test_protocol_preregistration_conflict(tmp_path):
