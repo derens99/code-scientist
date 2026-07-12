@@ -162,10 +162,13 @@ class EvidenceStore:
     def ingest_path(self, path: str | Path) -> None:
         source = Path(path)
         if source.is_dir():
+            root = source.resolve()
             for file_path in sorted(source.rglob("*")):
-                if _should_read(file_path):
+                if _should_read(file_path, within_root=root):
                     self._ingest_file(file_path)
             return
+        # An explicitly named single file is honored as given (the operator
+        # chose it); only directory recursion enforces symlink containment.
         if _should_read(source):
             self._ingest_file(source)
 
@@ -374,12 +377,23 @@ def read_document_text(path: str | Path) -> str:
     return _read_text(source)
 
 
-def _should_read(path: Path) -> bool:
+def _should_read(path: Path, within_root: Path | None = None) -> bool:
     if not path.is_file():
         return False
     if any(part in SKIP_DIRS for part in path.parts):
         return False
-    return path.suffix.lower() in TEXT_EXTENSIONS or path.suffix.lower() in PDF_EXTENSIONS
+    if path.suffix.lower() not in TEXT_EXTENSIONS and path.suffix.lower() not in PDF_EXTENSIONS:
+        return False
+    if within_root is not None:
+        # is_file() follows symlinks; a link inside the scanned directory could
+        # resolve to a secret elsewhere on the host. Keep ingestion within root.
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return False
+        if resolved != within_root and within_root not in resolved.parents:
+            return False
+    return True
 
 
 def _ingestible_chunks(text: str) -> list[tuple[int, int, str]]:

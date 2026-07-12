@@ -432,7 +432,7 @@ class LocalRepositorySearchTool:
         candidates: list[tuple[int, str, int, Evidence]] = []
         blocked_reasons: list[str] = []
         for file_path in sorted(resolved_root.rglob("*")):
-            if not _should_search_file(file_path):
+            if not _should_search_file(file_path, within_root=resolved_root):
                 continue
             file_candidates: list[tuple[int, str, int, Evidence]] = []
             for line_number, line in _matching_lines(file_path, query_tokens):
@@ -981,12 +981,24 @@ def _is_within_allowed_roots(path: Path, allowed_roots: list[Path]) -> bool:
     return any(path == root or root in path.parents for root in allowed_roots)
 
 
-def _should_search_file(path: Path) -> bool:
+def _should_search_file(path: Path, within_root: Path | None = None) -> bool:
     if not path.is_file():
         return False
     if any(part in SKIP_DIRS for part in path.parts):
         return False
-    return path.suffix.lower() in TEXT_EXTENSIONS
+    if path.suffix.lower() not in TEXT_EXTENSIONS:
+        return False
+    if within_root is not None:
+        # is_file() follows symlinks, so a link planted inside the scanned root
+        # can point at a host file (/etc/passwd, ~/.ssh/*) outside it. Require
+        # the resolved target to stay within the root the caller vetted.
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return False
+        if resolved != within_root and within_root not in resolved.parents:
+            return False
+    return True
 
 
 def _matching_lines(path: Path, query_tokens: set[str]) -> list[tuple[int, str]]:

@@ -22,6 +22,51 @@ from code_scientist.tools import (
 )
 
 
+def test_local_repository_search_does_not_follow_symlink_escapes(tmp_path):
+    import os
+
+    secret = tmp_path / "outside" / "secret.txt"
+    secret.parent.mkdir()
+    secret.write_text("SUPERSECRET tokentokentoken alpha beta", encoding="utf-8")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "real.txt").write_text("alpha beta gamma content here", encoding="utf-8")
+    link = repo / "leak.txt"
+    try:
+        os.symlink(secret, link)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unsupported on this platform")
+
+    tool = tools.LocalRepositorySearchTool(allowed_roots=[repo])
+    result = tool.search(repo, "SUPERSECRET alpha", limit=10)
+
+    joined = " ".join(item.content for item in result.evidence)
+    assert "SUPERSECRET" not in joined  # the escaping symlink target is not read
+    assert str(secret) not in " ".join(item.source for item in result.evidence)
+
+
+def test_evidence_ingest_does_not_follow_symlink_escapes(tmp_path):
+    import os
+
+    secret = tmp_path / "outside" / "creds.txt"
+    secret.parent.mkdir()
+    secret.write_text("PRIVATEKEY do not ingest", encoding="utf-8")
+    repo = tmp_path / "corpus"
+    repo.mkdir()
+    (repo / "note.txt").write_text("ordinary corpus note", encoding="utf-8")
+    try:
+        os.symlink(secret, repo / "creds.txt")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unsupported on this platform")
+
+    store = EvidenceStore()
+    store.ingest_path(repo)
+
+    contents = " ".join(item.content for item in store.evidence)
+    assert "PRIVATEKEY" not in contents
+
+
 def test_charset_from_content_type_rejects_unknown_codec():
     # A server-supplied charset is untrusted: an unknown codec name would raise
     # LookupError from raw.decode() and abort the collector, so it falls back.
