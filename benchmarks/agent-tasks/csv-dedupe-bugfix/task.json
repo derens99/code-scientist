@@ -1,0 +1,6 @@
+{
+  "id": "csv-dedupe-bugfix",
+  "title": "Fix last-wins bug in row deduplication",
+  "prompt": "You are working in the current directory. There is a file `dedupe.py` containing a function `dedupe_rows(rows, key)`. It takes a list of dicts (`rows`) and a key name (`key`), and must return a new list of dicts with one entry per distinct value of `rows[i][key]`. When the same key value appears in multiple rows, the returned entry for that key value must contain the field values from the LAST row with that key value in the input list (not the first). The order of entries in the output list must follow the order in which each distinct key value FIRST appeared in the input. The function must not mutate the input list or any of its dicts. There is a bug in `dedupe.py` that causes it to keep the wrong row's values when duplicates are present. Find and fix the bug. Do not change the function's name or signature. Run `python -m pytest tests_visible -q` to check your work; note that the visible tests only cover a subset of behavior.",
+  "timeout_seconds": 240
+}

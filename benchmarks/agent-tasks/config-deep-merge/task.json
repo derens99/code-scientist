@@ -1,0 +1,6 @@
+{
+  "id": "config-deep-merge",
+  "title": "Implement recursive config layer merging",
+  "prompt": "You are working in the current directory. There is a file `config_merge.py` containing a function `deep_merge(base, override)` that raises `NotImplementedError`. Implement it exactly according to the docstring already written in the file. Do not change the function's name or signature. Run `python -m pytest tests_visible -q` to check your work; note that the visible tests only cover a subset of behavior described in the docstring, so re-read the docstring carefully and handle every case it describes, including non-mutation of inputs, list replacement (not merging), and explicit `None` overrides.",
+  "timeout_seconds": 240
+}

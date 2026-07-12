@@ -1,0 +1,6 @@
+{
+  "id": "flatten-iterative",
+  "title": "Replace recursive flatten with an iterative implementation",
+  "prompt": "You are working in the current directory. There is a file `flatten.py` containing a function `flatten_nested(lst)` that recursively flattens an arbitrarily nested list of lists into a single flat list, preserving left-to-right order (e.g. `flatten_nested([1, [2, [3, 4], 5], 6])` returns `[1, 2, 3, 4, 5, 6]`). Non-list items (including strings, numbers, None, etc.) are kept as-is and never iterated into. The problem is that the current implementation uses Python function recursion, one call per nesting level, so it raises `RecursionError` on inputs nested thousands of levels deep. Rewrite `flatten_nested` to use an iterative approach (e.g. an explicit stack or loop) instead of function recursion, so it can handle arbitrarily deep nesting without hitting Python's recursion limit. The externally observable behavior for all existing inputs (flat lists, shallow nesting, non-list items) must stay exactly the same. Do not change the function's name or signature. Run `python -m pytest tests_visible -q` to check your work.",
+  "timeout_seconds": 240
+}
