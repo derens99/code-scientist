@@ -125,7 +125,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--provider-call-budget",
         type=int,
         default=100,
-        help="Hard shared provider-request limit for process workers.",
+        help=(
+            "Hard limit on LLM provider calls for this run (0 disables the in-process cap); "
+            "also the shared budget for review worker processes."
+        ),
     )
     run_parser.add_argument("--env-file", default=".env")
     run_parser.add_argument("--benchmark-fixture", action="append", default=[])

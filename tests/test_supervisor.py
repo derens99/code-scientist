@@ -8,6 +8,7 @@ from dataclasses import replace
 import pytest
 
 import code_scientist.supervisor as supervisor_module
+from code_scientist.llm import BudgetedLLMClient
 from code_scientist.agents import ProximityAgent, RankingAgent
 from code_scientist.models import (
     AgentTrace,
@@ -1463,6 +1464,93 @@ def test_supervisor_host_agent_rejects_review_worker_processes(tmp_path):
             provider="host-agent",
             review_processes=2,
         )
+
+
+def test_build_model_client_applies_in_process_call_budget(tmp_path):
+    budgeted = supervisor_module._build_model_client(
+        provider="host-agent",
+        model="",
+        env_file=".env",
+        llm_client=None,
+        bridge_dir=tmp_path / "llm-bridge",
+        provider_call_budget=7,
+    )
+    injected = object()
+    passthrough = supervisor_module._build_model_client(
+        provider="host-agent",
+        model="",
+        env_file=".env",
+        llm_client=injected,
+        bridge_dir=tmp_path / "llm-bridge",
+        provider_call_budget=7,
+    )
+    unlimited = supervisor_module._build_model_client(
+        provider="host-agent",
+        model="",
+        env_file=".env",
+        llm_client=None,
+        bridge_dir=tmp_path / "llm-bridge",
+        provider_call_budget=0,
+    )
+
+    assert isinstance(budgeted, BudgetedLLMClient)
+    assert budgeted.limit == 7
+    assert passthrough is injected
+    assert not isinstance(unlimited, BudgetedLLMClient)
+
+
+def test_supervisor_host_agent_run_respects_hard_call_budget(tmp_path, monkeypatch):
+    monkeypatch.setattr("code_scientist.llm.DEFAULT_BRIDGE_POLL_SECONDS", 0.01)
+    out_dir = tmp_path / "run"
+    bridge_dir = out_dir / "llm-bridge"
+    generation_response = json.dumps(
+        [
+            {
+                "title": "Budgeted idea",
+                "claim": "A hard call budget keeps host-agent runs bounded.",
+                "rationale": "Budget exhaustion degrades to deterministic paths.",
+                "assumptions": ["Budget errors are caught."],
+                "risks": ["fewer model-backed reviews"],
+            }
+        ]
+    )
+    stop = threading.Event()
+
+    def responder():
+        while not stop.is_set():
+            requests_dir = bridge_dir / "requests"
+            if requests_dir.exists():
+                for request_path in sorted(requests_dir.glob("*.json")):
+                    try:
+                        payload = json.loads(request_path.read_text(encoding="utf-8"))
+                    except (OSError, json.JSONDecodeError):
+                        continue
+                    responses_dir = bridge_dir / "responses"
+                    responses_dir.mkdir(parents=True, exist_ok=True)
+                    (responses_dir / f"{payload['id']}.json").write_text(
+                        json.dumps({"id": payload["id"], "response": generation_response}),
+                        encoding="utf-8",
+                    )
+            time.sleep(0.01)
+
+    thread = threading.Thread(target=responder, daemon=True)
+    thread.start()
+    try:
+        state = run_research_cycle(
+            objective="Find testable ideas to improve LLM coding agents",
+            cycles=1,
+            max_hypotheses=4,
+            max_matches=1,
+            out_dir=out_dir,
+            provider="host-agent",
+            provider_call_budget=3,
+        )
+    finally:
+        stop.set()
+        thread.join(timeout=2)
+
+    assert state.run_status == "completed"
+    assert len(list((bridge_dir / "responses").glob("*.json"))) <= 3
 
 
 def test_supervisor_anthropic_provider_drives_plan_and_all_agent_roles(tmp_path):

@@ -55,6 +55,12 @@ The engine blocks each of its LLM calls on a file handshake that this session an
    - If no requests are pending and the process is still running, wait briefly and poll again.
 3. A request left unanswered for 600 seconds fails that engine call, so stay in the loop until the run process exits, then continue the workflow (report, packets, reviewers).
 
+Budgets and stopping:
+
+- `--provider-call-budget` (default 100) is a hard cap on the run's LLM calls; when exhausted, the engine finishes on its deterministic paths instead of asking for more answers. State the expected call ceiling to the user before starting a long run.
+- To stop a run early, create `runs/<run-id>/llm-bridge/stop` — every pending and future bridge call fails immediately and the engine wraps up and writes `state.json` and `report.md`. Writing `{"action": "stop"}` to `runs/<run-id>/control.json` also stops any run at the next task boundary.
+- After two consecutive unanswered requests the bridge declares itself abandoned and stops issuing calls, so a run whose operator walks away still finishes on its own.
+
 ## Workflow
 
 1. Inspect the current state before running anything:

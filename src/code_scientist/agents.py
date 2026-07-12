@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from code_scientist.evidence import EvidenceStore
 from code_scientist.elo import update_elo
-from code_scientist.llm import LLMResponseError
+from code_scientist.llm import LLMRequestError, LLMResponseError
 from code_scientist.models import (
     AssumptionCheck,
     Evidence,
@@ -151,7 +151,10 @@ class GenerationAgent(_LLMTraceMixin):
         agent_feedback: list[str] | None = None,
     ) -> list[Hypothesis]:
         if self.llm_client:
-            return self._generate_with_llm(goal, evidence, limit, agent_feedback)
+            try:
+                return self._generate_with_llm(goal, evidence, limit, agent_feedback)
+            except (LLMRequestError, LLMResponseError):
+                pass
 
         evidence_refs = [getattr(item, "id", "") for item in evidence][:3]
         blueprints = [
@@ -293,7 +296,10 @@ class GenerationAgent(_LLMTraceMixin):
         if mode == "tool_augmented_generation":
             store = evidence if isinstance(evidence, EvidenceStore) else EvidenceStore(evidence)
             if self.llm_client:
-                return self._generate_tool_augmented_with_llm(goal, store, limit, agent_feedback)
+                try:
+                    return self._generate_tool_augmented_with_llm(goal, store, limit, agent_feedback)
+                except (LLMRequestError, LLMResponseError):
+                    pass
             return _tool_augmented_hypotheses(goal, store, limit)
         if mode == "assumption_decomposition":
             source_evidence = evidence.evidence if isinstance(evidence, EvidenceStore) else evidence
@@ -302,9 +308,12 @@ class GenerationAgent(_LLMTraceMixin):
             source_evidence = evidence.evidence if isinstance(evidence, EvidenceStore) else evidence
             known = existing_hypotheses or []
             if self.llm_client:
-                return self._generate_expansion_with_llm(
-                    goal, source_evidence, limit, agent_feedback, known, research_overview
-                )
+                try:
+                    return self._generate_expansion_with_llm(
+                        goal, source_evidence, limit, agent_feedback, known, research_overview
+                    )
+                except (LLMRequestError, LLMResponseError):
+                    pass
             known_tokens = {
                 token
                 for item in known
@@ -694,7 +703,7 @@ class ReflectionAgent(_LLMTraceMixin):
                 return self._review_with_llm(
                     goal, hypothesis, review_type, evidence_store, agent_feedback, matches
                 )
-            except LLMResponseError:
+            except (LLMRequestError, LLMResponseError):
                 pass
         if review_type == "initial_review":
             result = self.review(goal, hypothesis)
@@ -1418,7 +1427,7 @@ class ProximityAgent(_LLMTraceMixin):
                 return self._compute_goal_aware_with_llm(
                     goal, hypotheses, reviews or [], evidence_store, agent_feedback
                 )
-            except LLMResponseError:
+            except (LLMRequestError, LLMResponseError):
                 pass
         if evidence_store is not None and evidence_store.evidence:
             return self.compute_embedding(goal, hypotheses, reviews, evidence_store)
@@ -1733,7 +1742,7 @@ class RankingAgent(_LLMTraceMixin):
         if self.llm_client:
             try:
                 return self._compare_debate_with_llm(goal, first, second, reviews or [], agent_feedback)
-            except LLMResponseError:
+            except (LLMRequestError, LLMResponseError):
                 pass
         first_reviews = [review for review in reviews or [] if review.hypothesis_id == first.id]
         second_reviews = [review for review in reviews or [] if review.hypothesis_id == second.id]
@@ -1898,7 +1907,7 @@ class RankingAgent(_LLMTraceMixin):
                     round_count,
                     agent_feedback,
                 )
-            except LLMResponseError:
+            except (LLMRequestError, LLMResponseError):
                 pass
 
         first_reviews = [review for review in reviews or [] if review.hypothesis_id == first.id]
@@ -2169,7 +2178,7 @@ class EvolutionAgent(_LLMTraceMixin):
         if self.llm_client:
             try:
                 return self._evolve_with_llm(goal, parents, feedback, limit, evidence_store)
-            except LLMResponseError:
+            except (LLMRequestError, LLMResponseError):
                 pass
         return self._evolve_deterministic(
             goal,
@@ -2209,7 +2218,7 @@ class EvolutionAgent(_LLMTraceMixin):
                     )
                     for child in children
                 ]
-            except LLMResponseError:
+            except (LLMRequestError, LLMResponseError):
                 pass
         return self._evolve_deterministic(
             goal,
@@ -2576,7 +2585,7 @@ class MetaReviewAgent(_LLMTraceMixin):
         if self.llm_client:
             try:
                 return self._summarize_with_llm(goal, reviews, matches, evidence_store)
-            except LLMResponseError:
+            except (LLMRequestError, LLMResponseError):
                 pass
         weakness_counts = Counter(weakness for review in reviews for weakness in review.weaknesses)
         safety_counts = Counter(note for review in reviews for note in review.safety_notes)
@@ -2674,7 +2683,7 @@ class MetaReviewAgent(_LLMTraceMixin):
         if self.llm_client:
             try:
                 return self._build_overview_with_llm(goal, hypotheses, meta_reviews, cycle)
-            except LLMResponseError:
+            except (LLMRequestError, LLMResponseError):
                 pass
         leaders = sorted(hypotheses, key=lambda item: item.elo, reverse=True)[:3]
         latest_meta = meta_reviews[-1] if meta_reviews else None
@@ -2892,7 +2901,7 @@ filesystem path, shell command, crawl setting, or full-text setting.
             )
             if parsed:
                 return parsed[:1]
-        except LLMResponseError:
+        except (LLMRequestError, LLMResponseError):
             pass
 
     if iteration > 0 and eligible_source_refs:

@@ -21,6 +21,8 @@ DEFAULT_CODEX_CLI_BINARY = "codex"
 DEFAULT_CLI_TIMEOUT_SECONDS = 600.0
 DEFAULT_BRIDGE_TIMEOUT_SECONDS = 600.0
 DEFAULT_BRIDGE_POLL_SECONDS = 0.25
+DEFAULT_BRIDGE_ABANDON_AFTER_TIMEOUTS = 2
+BRIDGE_STOP_FILENAME = "stop"
 
 LLM_PROVIDERS = ("anthropic", "claude-cli", "codex-cli", "host-agent")
 PROVIDER_CHOICES = ("deterministic", *LLM_PROVIDERS)
@@ -350,21 +352,27 @@ class HostAgentBridgeClient:
         bridge_dir: str | Path,
         timeout: float | None = None,
         poll_seconds: float | None = None,
+        abandon_after_timeouts: int = DEFAULT_BRIDGE_ABANDON_AFTER_TIMEOUTS,
     ) -> None:
         if not str(bridge_dir).strip():
             raise LLMConfigurationError("The host-agent provider requires a bridge directory.")
         self.bridge_dir = Path(bridge_dir)
         self.requests_dir = self.bridge_dir / "requests"
         self.responses_dir = self.bridge_dir / "responses"
+        self.stop_path = self.bridge_dir / BRIDGE_STOP_FILENAME
         self.timeout = float(timeout if timeout is not None else DEFAULT_BRIDGE_TIMEOUT_SECONDS)
         self.poll_seconds = max(
             float(poll_seconds if poll_seconds is not None else DEFAULT_BRIDGE_POLL_SECONDS),
             0.01,
         )
+        self.abandon_after_timeouts = max(int(abandon_after_timeouts), 1)
         self._counter = 0
+        self._consecutive_timeouts = 0
         self._counter_lock = threading.Lock()
 
     def complete(self, prompt: str, max_tokens: int = 1024) -> str:
+        self._raise_if_stopped()
+        self._raise_if_abandoned()
         request_id = self._next_request_id()
         self.requests_dir.mkdir(parents=True, exist_ok=True)
         self.responses_dir.mkdir(parents=True, exist_ok=True)
@@ -384,6 +392,8 @@ class HostAgentBridgeClient:
             parsed = _read_json_object(response_path)
             if parsed is not None:
                 request_path.unlink(missing_ok=True)
+                with self._counter_lock:
+                    self._consecutive_timeouts = 0
                 error = str(parsed.get("error", "") or "").strip()
                 if error:
                     raise LLMRequestError(
@@ -395,13 +405,38 @@ class HostAgentBridgeClient:
                         f"Host agent bridge response {request_id} did not contain response text."
                     )
                 return _strip_response_fence(response)
+            if self.stop_path.exists():
+                request_path.unlink(missing_ok=True)
+                raise LLMRequestError(
+                    f"Host agent bridge stop was requested ({self.stop_path}); "
+                    f"bridge request {request_id} was cancelled."
+                )
             if time.monotonic() >= deadline:
                 request_path.unlink(missing_ok=True)
+                with self._counter_lock:
+                    self._consecutive_timeouts += 1
                 raise LLMRequestError(
                     f"Host agent did not answer bridge request {request_id} "
                     f"within {self.timeout:.0f} seconds."
                 )
             time.sleep(self.poll_seconds)
+
+    def _raise_if_stopped(self) -> None:
+        if self.stop_path.exists():
+            raise LLMRequestError(
+                f"Host agent bridge stop was requested ({self.stop_path}); "
+                "no further bridge requests will be issued."
+            )
+
+    def _raise_if_abandoned(self) -> None:
+        with self._counter_lock:
+            timeouts = self._consecutive_timeouts
+        if timeouts >= self.abandon_after_timeouts:
+            raise LLMRequestError(
+                f"Host agent bridge appears abandoned after {timeouts} consecutive "
+                "unanswered requests; further bridge requests are disabled so the run "
+                "can finish deterministically."
+            )
 
     def complete_multimodal(
         self,
@@ -419,6 +454,51 @@ class HostAgentBridgeClient:
             self._counter += 1
             sequence = self._counter
         return f"{time.time_ns()}-{os.getpid()}-{sequence:04d}"
+
+
+class BudgetedLLMClient:
+    """Hard cap on the number of completion calls a run may make.
+
+    Exhaustion raises LLMRequestError, which agents already treat as a failed
+    provider call, so the run degrades to its deterministic paths and finishes
+    instead of spending further tokens.
+    """
+
+    def __init__(self, client: Any, limit: int) -> None:
+        self._client = client
+        self.limit = max(int(limit), 1)
+        self._used = 0
+        self._lock = threading.Lock()
+
+    @property
+    def used(self) -> int:
+        with self._lock:
+            return self._used
+
+    def complete(self, prompt: str, max_tokens: int = 1024) -> str:
+        self._consume()
+        return self._client.complete(prompt, max_tokens=max_tokens)
+
+    def complete_multimodal(
+        self,
+        prompt: str,
+        images: list[dict[str, str]],
+        max_tokens: int = 1024,
+    ) -> str:
+        self._consume()
+        return self._client.complete_multimodal(prompt, images, max_tokens=max_tokens)
+
+    def _consume(self) -> None:
+        with self._lock:
+            if self._used >= self.limit:
+                raise LLMRequestError(
+                    f"Provider call budget exhausted ({self.limit} calls); "
+                    "further LLM calls are disabled for this run."
+                )
+            self._used += 1
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
 
 
 def create_llm_client(

@@ -31,6 +31,8 @@ from code_scientist.evaluation import (
 from code_scientist.evidence import EvidenceStore, merge_evidence, read_document_text
 from code_scientist.llm import (
     DEFAULT_ANTHROPIC_MODEL,
+    BudgetedLLMClient,
+    LLMRequestError,
     LLMResponseError,
     create_llm_client,
     is_llm_provider,
@@ -244,6 +246,7 @@ def run_research_cycle(
         env_file=env_file,
         llm_client=llm_client,
         bridge_dir=out_path / "llm-bridge",
+        provider_call_budget=provider_call_budget,
     )
     safety_policies = load_safety_policies(safety_policy_paths or [])
     if existing_state is not None:
@@ -1647,6 +1650,7 @@ def run_continuous_research(
         env_file=env_file,
         llm_client=llm_client,
         bridge_dir=out_path / "llm-bridge",
+        provider_call_budget=provider_call_budget,
     )
     state = _ensure_continuous_state(
         objective=objective,
@@ -2656,13 +2660,19 @@ def _build_model_client(
     env_file: str | Path,
     llm_client: Any | None,
     bridge_dir: str | Path | None = None,
+    provider_call_budget: int = 0,
 ) -> Any | None:
     if provider == "deterministic":
         return None
     if is_llm_provider(provider):
-        return llm_client or create_llm_client(
+        if llm_client is not None:
+            return llm_client
+        client = create_llm_client(
             provider, model=model, env_file=env_file, bridge_dir=bridge_dir
         )
+        if int(provider_call_budget) > 0:
+            client = BudgetedLLMClient(client, provider_call_budget)
+        return client
     raise ValueError(f"Unknown provider: {provider}")
 
 
@@ -2675,7 +2685,7 @@ def _plan_for_goal(
     if is_llm_provider(provider) and model_client is not None:
         try:
             return parse_research_plan_with_llm(goal, model_client, max_tokens=max_tokens)
-        except LLMResponseError:
+        except (LLMRequestError, LLMResponseError):
             pass
     return ResearchPlanConfig.from_goal(goal)
 

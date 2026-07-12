@@ -12,6 +12,7 @@ from code_scientist.llm import (
     PROVIDER_CHOICES,
     WORKER_PROVIDER_CHOICES,
     AnthropicHaikuClient,
+    BudgetedLLMClient,
     ClaudeCLIClient,
     CodexCLIClient,
     HostAgentBridgeClient,
@@ -499,3 +500,84 @@ def test_host_agent_bridge_rejects_multimodal_content(tmp_path):
 
     with pytest.raises(LLMRequestError, match="does not support image content"):
         client.complete_multimodal("prompt", [{"media_type": "image/png", "data": "cG5n"}])
+
+
+def test_host_agent_bridge_stop_file_cancels_immediately(tmp_path):
+    bridge_dir = tmp_path / "llm-bridge"
+    bridge_dir.mkdir(parents=True)
+    (bridge_dir / "stop").write_text("", encoding="utf-8")
+    client = HostAgentBridgeClient(bridge_dir, timeout=30, poll_seconds=0.01)
+
+    started = time.monotonic()
+    with pytest.raises(LLMRequestError, match="stop was requested"):
+        client.complete("prompt")
+
+    assert time.monotonic() - started < 5
+    assert not (bridge_dir / "requests").exists() or not list((bridge_dir / "requests").glob("*.json"))
+
+
+def test_host_agent_bridge_stop_file_aborts_in_flight_wait(tmp_path):
+    bridge_dir = tmp_path / "llm-bridge"
+    client = HostAgentBridgeClient(bridge_dir, timeout=30, poll_seconds=0.01)
+
+    def stopper():
+        time.sleep(0.1)
+        bridge_dir.mkdir(parents=True, exist_ok=True)
+        (bridge_dir / "stop").write_text("", encoding="utf-8")
+
+    thread = threading.Thread(target=stopper, daemon=True)
+    started = time.monotonic()
+    thread.start()
+    try:
+        with pytest.raises(LLMRequestError, match="stop was requested"):
+            client.complete("prompt")
+    finally:
+        thread.join(timeout=2)
+
+    assert time.monotonic() - started < 5
+    assert list((bridge_dir / "requests").glob("*.json")) == []
+
+
+def test_host_agent_bridge_declares_abandonment_after_consecutive_timeouts(tmp_path):
+    bridge_dir = tmp_path / "llm-bridge"
+    client = HostAgentBridgeClient(bridge_dir, timeout=0.05, poll_seconds=0.01)
+
+    for _attempt in range(2):
+        with pytest.raises(LLMRequestError, match="did not answer"):
+            client.complete("prompt")
+
+    started = time.monotonic()
+    with pytest.raises(LLMRequestError, match="appears abandoned"):
+        client.complete("prompt")
+
+    assert time.monotonic() - started < 0.05
+    assert list((bridge_dir / "requests").glob("*.json")) == []
+
+
+def test_budgeted_llm_client_caps_calls_and_proxies_attributes():
+    class FakeLLM:
+        model = "fake-model"
+
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, prompt, max_tokens):
+            self.calls += 1
+            return "ok"
+
+        def complete_multimodal(self, prompt, images, max_tokens):
+            self.calls += 1
+            return "ok-image"
+
+    inner = FakeLLM()
+    client = BudgetedLLMClient(inner, limit=2)
+
+    assert client.complete("one", max_tokens=16) == "ok"
+    assert client.complete_multimodal("two", [], max_tokens=16) == "ok-image"
+    assert client.used == 2
+    assert client.model == "fake-model"
+
+    with pytest.raises(LLMRequestError, match="budget exhausted"):
+        client.complete("three")
+
+    assert inner.calls == 2
