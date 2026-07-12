@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import json
 import ipaddress
 import socket
@@ -1952,7 +1953,15 @@ def _charset_from_content_type(content_type: str) -> str:
     for part in content_type.split(";"):
         key, _, value = part.strip().partition("=")
         if key.lower() == "charset" and value:
-            return value.strip()
+            candidate = value.strip().strip("\"'")
+            # A server-supplied charset is untrusted: an unknown codec name would
+            # raise LookupError from raw.decode() (before errors="replace" can
+            # help) and abort the collector. Validate it, fall back to utf-8.
+            try:
+                codecs.lookup(candidate)
+            except (LookupError, ValueError):
+                return "utf-8"
+            return candidate
     return "utf-8"
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -575,22 +576,31 @@ def _read_json_object(path: Path) -> dict[str, Any] | None:
     not-yet-written so bridge polling tolerates non-atomic host writers."""
 
     try:
+        # ValueError subsumes both json.JSONDecodeError and the
+        # UnicodeDecodeError a partial multibyte write raises; either means the
+        # host has not finished writing this response yet.
         parsed = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, ValueError):
         return None
     return parsed if isinstance(parsed, dict) else None
 
 
 def _strip_response_fence(text: str) -> str:
+    """Strip one Markdown code fence around a response.
+
+    Handles the three shapes a host agent produces: a multi-line fenced block,
+    a single-line ``` ```json{...}``` ``` block, and a fenced block followed by
+    trailing prose. The opening fence consumes only an optional language tag
+    (never the payload), and everything at and after the first closing fence is
+    dropped so trailing commentary does not corrupt the JSON.
+    """
+
     stripped = text.strip()
     if not stripped.startswith("```"):
         return stripped
-    lines = stripped.splitlines()
-    if lines and lines[0].startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip().startswith("```"):
-        lines = lines[:-1]
-    return "\n".join(lines).strip()
+    body = re.sub(r"^```[A-Za-z0-9_.+-]*\n?", "", stripped)
+    body = re.split(r"\n?```", body, maxsplit=1)[0]
+    return body.strip()
 
 
 def _parse_env_value(value: str) -> str:

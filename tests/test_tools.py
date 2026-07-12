@@ -17,8 +17,22 @@ from code_scientist.tools import (
     ToolSearchResult,
     WebEvidenceTool,
     build_agent_retrieval_executors,
+    _charset_from_content_type,
     _normalize_space,
 )
+
+
+def test_charset_from_content_type_rejects_unknown_codec():
+    # A server-supplied charset is untrusted: an unknown codec name would raise
+    # LookupError from raw.decode() and abort the collector, so it falls back.
+    assert _charset_from_content_type("text/html; charset=not-a-real-codec") == "utf-8"
+    assert _charset_from_content_type("text/html; charset=utf-8") == "utf-8"
+    assert _charset_from_content_type('text/html; charset="ISO-8859-1"') == "ISO-8859-1"
+    assert _charset_from_content_type("text/html") == "utf-8"
+    # The fallback value must itself be a usable codec.
+    import codecs
+
+    codecs.lookup(_charset_from_content_type("text/html; charset=bogus"))
 
 
 def test_agent_retrieval_session_enforces_hard_budget_and_persists_denied_calls():

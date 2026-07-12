@@ -598,6 +598,95 @@ def test_overtime_arm_fails_even_when_graders_pass(tmp_path):
     assert baseline.overtime is True
 
 
+def test_host_agent_timeout_arm_is_marked_overtime(tmp_path):
+    # A synthesized bridge timeout reports duration == budget; without the
+    # status check the strict `>` overtime comparison would let a fix that
+    # landed after the deadline pass.
+    task_ids = ["task-a"]
+    suite = _make_suite(tmp_path, task_ids)
+    tasks = load_agent_tasks(suite)
+    protocol = _protocol(suite, tasks, executor="host-agent", trials_per_task=1)
+    out_dir = tmp_path / "experiment"
+    protocol = pre_register_protocol(protocol, out_dir)
+    bridge = out_dir / "agent-bridge"
+    (bridge / "responses").mkdir(parents=True)
+    # Answer only the baseline; leave the candidate unanswered so it times out.
+    (bridge / "responses" / "task-a-trial1-baseline.json").write_text(
+        json.dumps({"id": "task-a-trial1-baseline", "status": "completed"}),
+        encoding="utf-8",
+    )
+    # Even if a timed-out arm's workspace happened to satisfy the grader, the
+    # overtime rule must fail it. Pre-fix the candidate workspace so graders pass.
+    executor = HostAgentTrialExecutor(bridge, response_margin_seconds=0.1, poll_seconds=0.02)
+    (out_dir / "trials").mkdir(parents=True, exist_ok=True)
+
+    result = run_experiment(protocol, tasks, executor, out_dir)
+
+    candidate = next(item for item in result.trial_arms if item.arm == "candidate")
+    assert candidate.agent_status == "timeout"
+    assert candidate.overtime is True
+    assert candidate.passed is False
+
+
+def test_run_experiment_purges_stale_bridge_responses(tmp_path):
+    task_ids = ["task-a"]
+    suite = _make_suite(tmp_path, task_ids)
+    tasks = load_agent_tasks(suite)
+    protocol = _protocol(suite, tasks, executor="host-agent", trials_per_task=1)
+    out_dir = tmp_path / "experiment"
+    protocol = pre_register_protocol(protocol, out_dir)
+    bridge = out_dir / "agent-bridge"
+    (bridge / "responses").mkdir(parents=True)
+    # A stale response and stop file from a prior interrupted run.
+    (bridge / "responses" / "task-a-trial1-baseline.json").write_text(
+        json.dumps({"id": "task-a-trial1-baseline", "status": "completed"}),
+        encoding="utf-8",
+    )
+    (bridge / "stop").write_text("", encoding="utf-8")
+
+    # The purge runs at start; with no live answerer the run times out fast
+    # rather than instantly consuming the stale response as a fresh result.
+    executor = HostAgentTrialExecutor(bridge, response_margin_seconds=0.1, poll_seconds=0.02)
+    result = run_experiment(protocol, tasks, executor, out_dir)
+
+    assert not (bridge / "stop").exists()
+    baseline = next(item for item in result.trial_arms if item.arm == "baseline")
+    # Stale "completed" was purged, so the arm actually timed out.
+    assert baseline.agent_status == "timeout"
+
+
+def test_grade_workspace_ignores_agent_written_pytest_config(tmp_path):
+    suite = _make_suite(tmp_path, ["task-a"])
+    task = load_agent_tasks(suite)[0]
+
+    # Broken solution + an agent-planted conftest.py that skips all tests and a
+    # pyproject.toml that would force --collect-only. The grader must still fail.
+    workspace = tmp_path / "sabotaged"
+    workspace.mkdir()
+    (workspace / "solution.py").write_text(BROKEN_MODULE, encoding="utf-8")
+    (workspace / "conftest.py").write_text(
+        "import pytest\n\n\n"
+        "def pytest_collection_modifyitems(config, items):\n"
+        "    for item in items:\n"
+        "        item.add_marker(pytest.mark.skip(reason='sabotage'))\n",
+        encoding="utf-8",
+    )
+    (workspace / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\naddopts = \"--collect-only\"\n", encoding="utf-8"
+    )
+
+    passed, _tail = grade_workspace(workspace, task.grader_dir())
+    assert passed is False
+
+    # The correct solution still passes despite the same planted config.
+    fixed = tmp_path / "fixed"
+    fixed.mkdir()
+    (fixed / "solution.py").write_text(FIXED_MODULE, encoding="utf-8")
+    (fixed / "conftest.py").write_text("# noop\n", encoding="utf-8")
+    passed_ok, _ = grade_workspace(fixed, task.grader_dir())
+    assert passed_ok is True
+
+
 def test_protocol_preregistration_conflict(tmp_path):
     suite = _make_suite(tmp_path, ["task-a"])
     tasks = load_agent_tasks(suite)

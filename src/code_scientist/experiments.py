@@ -764,11 +764,36 @@ def grade_workspace(
         if item.name.startswith("test_"):
             copied_names.append(item.name)
 
-    env = {key: value for key, value in os.environ.items() if key != "PYTEST_ADDOPTS"}
+    # Grading integrity: the workspace is agent-writable, and any pytest config
+    # it left behind — a conftest.py hook, a pyproject.toml/pytest.ini addopts,
+    # or an ancestor repo config discovered via rootdir walk — could force a
+    # false pass (skip-all, --collect-only) or a spurious fail. Pin an isolated
+    # empty config, set the rootdir to the workspace, and disable conftest so
+    # only the held-out grader files decide the outcome.
+    isolated_ini = workspace.parent / ".grader-pytest.ini"
+    isolated_ini.write_text("[pytest]\naddopts =\n", encoding="utf-8")
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("PYTEST_ADDOPTS", "PYTEST_PLUGINS", "PYTEST_DISABLE_PLUGIN_AUTOLOAD")
+    }
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
         completed = subprocess.run(
-            [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", *copied_names],
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                "--noconftest",
+                "-c",
+                str(isolated_ini),
+                "--rootdir",
+                str(workspace),
+                *copied_names,
+            ],
             cwd=str(workspace),
             env=env,
             capture_output=True,
@@ -778,8 +803,26 @@ def grade_workspace(
         )
     except subprocess.TimeoutExpired:
         return False, f"grader timed out after {timeout:.0f}s"
+    finally:
+        isolated_ini.unlink(missing_ok=True)
     output = f"{completed.stdout}\n{completed.stderr}".strip()
     return completed.returncode == 0, output[-2000:]
+
+
+def _purge_stale_bridge(bridge_dir: Path) -> None:
+    """Remove leftover request/response files from a prior interrupted run.
+
+    A no-op when the bridge directory does not exist yet (the common fresh-run
+    case). Only the two handshake subdirectories are cleared; a stop file, if
+    present, is also removed so a resumed directory does not start cancelled.
+    """
+
+    for name in ("requests", "responses"):
+        sub = bridge_dir / name
+        if sub.is_dir():
+            for item in sub.glob("*.json"):
+                item.unlink(missing_ok=True)
+    (bridge_dir / BRIDGE_STOP_FILENAME).unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1016,9 +1059,26 @@ def run_experiment(
         raise ExperimentConfigError(f"Protocol references unknown tasks: {', '.join(missing)}")
 
     out_path = Path(out_dir)
+    # Request ids are deterministic (task-trial-arm), so a bridge response left
+    # behind by a crashed or interrupted prior run would be consumed as a fresh
+    # answer for a freshly reset workspace, producing a fabricated measurement.
+    # Purge the bridge before starting; the experiment.json rerun guard already
+    # refuses a *completed* directory, so anything here is stale by definition.
+    _purge_stale_bridge(out_path / "agent-bridge")
     trials_root = out_path / "trials"
     trials_root.mkdir(parents=True, exist_ok=True)
     emit = progress or (lambda _message: None)
+
+    # Surface silent timeout clamping: a task authored with a longer budget than
+    # the protocol's per-trial cap gets less time than its suite designed for,
+    # which shifts task difficulty and the overtime threshold.
+    for task_id in protocol.task_ids:
+        task = tasks_by_id[task_id]
+        if task.timeout_seconds > protocol.trial_timeout_seconds:
+            emit(
+                f"warning: {task_id} authored timeout {task.timeout_seconds:.0f}s is "
+                f"clamped to the protocol trial timeout {protocol.trial_timeout_seconds:.0f}s"
+            )
 
     rng = random.Random(protocol.seed)
     schedule: list[tuple[str, int, list[str]]] = []
@@ -1150,11 +1210,17 @@ def _record_arm(
     passed, grader_tail = grade_workspace(workspace, task.grader_dir(), timeout=grading_timeout)
     (arm_dir / "grader-output.txt").write_text(grader_tail, encoding="utf-8")
 
-    # Overtime rule: an arm that reports more wall time than the trial budget
-    # fails even if the graders pass. Executors that cannot hard-kill an agent
-    # (the host-agent bridge) still get enforced timeout semantics this way,
-    # deterministically and identically for both arms.
-    overtime = invocation.duration_seconds > spec.timeout_seconds
+    # Overtime rule: an arm that reports more wall time than the trial budget,
+    # OR that the executor could only mark as timed out (the host-agent bridge
+    # cannot hard-kill a subagent, so an unanswered request is synthesized with
+    # duration == budget), fails even if the graders happen to pass on a fix
+    # that landed after the deadline. Both conditions are enforced identically
+    # for both arms; without the status check a synthesized timeout at exactly
+    # the budget would slip past a strict `>` comparison.
+    overtime = (
+        invocation.duration_seconds > spec.timeout_seconds
+        or invocation.status == "timeout"
+    )
     return TrialArmResult(
         task_id=spec.task_id,
         trial=spec.trial,

@@ -25,10 +25,36 @@ from code_scientist.llm import (
     load_dotenv,
     resolve_provider_model,
 )
+from code_scientist.llm import _read_json_object, _strip_response_fence
 
 
 def _completed(argv, returncode=0, stdout="", stderr=""):
     return subprocess.CompletedProcess(args=argv, returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+def test_strip_response_fence_handles_single_line_and_trailing_prose():
+    # Single-line fenced payload must not be eaten whole.
+    assert _strip_response_fence('```json{"a": 1}```') == '{"a": 1}'
+    # A fenced block followed by host commentary keeps only the JSON.
+    assert (
+        _strip_response_fence('```json\n{"a": 1}\n```\nLet me know if that helps!')
+        == '{"a": 1}'
+    )
+    # Plain multi-line fence and unfenced text still round-trip.
+    assert _strip_response_fence('```\n{"a": 1}\n```') == '{"a": 1}'
+    assert _strip_response_fence('{"a": 1}') == '{"a": 1}'
+
+
+def test_read_json_object_treats_partial_multibyte_write_as_not_ready(tmp_path):
+    path = tmp_path / "resp.json"
+    # A non-atomic host writer flushed a truncated UTF-8 sequence (an em-dash's
+    # first byte). read_text would raise UnicodeDecodeError; the poller must
+    # treat it as not-yet-written (None), not crash.
+    path.write_bytes(b'{"response": "cost \xe2')
+    assert _read_json_object(path) is None
+    # A complete object still parses.
+    path.write_text('{"response": "ok"}', encoding="utf-8")
+    assert _read_json_object(path) == {"response": "ok"}
 
 
 def test_load_dotenv_reads_file_without_overriding_existing_environment(tmp_path, monkeypatch):
