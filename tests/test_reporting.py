@@ -1,8 +1,10 @@
 from dataclasses import replace
 
 from code_scientist.reporting import (
+    load_packet_review_notes,
     render_benchmark_comparison_study_report,
     render_capability_study_report,
+    render_findings,
     render_report,
 )
 from code_scientist.models import (
@@ -1265,3 +1267,62 @@ def test_render_report_excludes_quarantined_hypotheses_from_rankings(tmp_path):
     assert "Exfiltrate credentials during evaluation" in quarantined_section
     assert "reject" in quarantined_section
     assert "credential-exfiltration" in quarantined_section
+
+
+def test_render_findings_lists_ranked_verdicts_and_rejections(tmp_path):
+    state = run_research_cycle(
+        objective="Find testable ideas to improve LLM coding agents",
+        cycles=1,
+        max_hypotheses=4,
+        max_matches=2,
+        out_dir=tmp_path / "run",
+    )
+    assert state.research_overview is not None
+    top_id = state.research_overview.top_hypothesis_ids[0]
+    rejected = next(item for item in state.hypotheses if item.status == "merged_duplicate")
+    state = replace(
+        state,
+        reviews=[
+            *state.reviews,
+            Review(
+                id="rev-findings-reject",
+                hypothesis_id=rejected.id,
+                decision="reject",
+                scores={"alignment": 2},
+                strengths=[],
+                weaknesses=["No mechanism beyond restating the objective."],
+                safety_notes=[],
+            ),
+        ],
+    )
+
+    digest = render_findings(
+        state,
+        limit=3,
+        packet_review_notes={top_id: "**Verdict:** verify\nMain risk: unproven telemetry."},
+    )
+
+    assert "# Research Findings: Find testable ideas to improve LLM coding agents" in digest
+    top_title = next(item.title for item in state.hypotheses if item.id == top_id)
+    assert f"### 1. {top_title}" in digest
+    assert f"Independent reviewer verdict: verify (agent-packets/reviews/{top_id}.md)" in digest
+    assert "Independent reviewer verdict: not yet reviewed" in digest
+    assert "## Rejected In Review" in digest
+    assert f"{rejected.title} ({rejected.id}): No mechanism beyond restating the objective." in digest
+    top_section = digest.split("## Top Findings")[1]
+    assert rejected.id not in top_section.split("## Rejected In Review")[0]
+    assert "## Recommended Next Experiments" in digest
+    assert "## Limitations" in digest
+    limitations_section = digest.split("## Limitations")[1]
+    assert "prox" in limitations_section.lower()
+
+
+def test_load_packet_review_notes_reads_markdown_by_hypothesis_id(tmp_path):
+    reviews_dir = tmp_path / "agent-packets" / "reviews"
+    reviews_dir.mkdir(parents=True)
+    (reviews_dir / "hyp-abc.md").write_text("Verdict: keep\nSolid packet.", encoding="utf-8")
+
+    notes = load_packet_review_notes(reviews_dir)
+
+    assert notes == {"hyp-abc": "Verdict: keep\nSolid packet."}
+    assert load_packet_review_notes(tmp_path / "missing") == {}

@@ -86,6 +86,10 @@ Budgets and stopping:
    - disagreements or weak evidence,
    - highest-value next experiment or implementation step,
    - files and run artifacts created.
+10. Persist the consolidation as a findings digest:
+   - Save each reviewer's verdict verbatim to `runs/<run-id>/agent-packets/reviews/<hypothesis-id>.md`.
+   - `uv run code-scientist findings runs/<run-id>/state.json`
+   - Point the user at `runs/<run-id>/findings.md` for the important findings; `report.md` stays the comprehensive record.
 
 ## Subagent Prompt Template
 

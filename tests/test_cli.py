@@ -80,6 +80,33 @@ def test_cli_run_accepts_provider_options(tmp_path):
     assert (out_dir / "state.json").exists()
 
 
+def test_cli_findings_writes_digest_with_reviewer_verdicts(tmp_path):
+    out_dir = tmp_path / "demo"
+    assert (
+        main(
+            [
+                "run",
+                "Find testable ideas to improve LLM coding agents",
+                "--out",
+                str(out_dir),
+            ]
+        )
+        == 0
+    )
+    state = json.loads((out_dir / "state.json").read_text())
+    top_id = state["research_overview"]["top_hypothesis_ids"][0]
+    reviews_dir = out_dir / "agent-packets" / "reviews"
+    reviews_dir.mkdir(parents=True)
+    (reviews_dir / f"{top_id}.md").write_text("**Verdict:** keep\nGood packet.", encoding="utf-8")
+
+    exit_code = main(["findings", str(out_dir / "state.json")])
+
+    assert exit_code == 0
+    digest = (out_dir / "findings.md").read_text(encoding="utf-8")
+    assert "# Research Findings" in digest
+    assert f"Independent reviewer verdict: keep (agent-packets/reviews/{top_id}.md)" in digest
+
+
 def test_cli_parsers_accept_host_cli_providers():
     parser = cli_module.build_parser()
 

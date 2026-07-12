@@ -76,9 +76,11 @@ uv run code-scientist run "Find testable ideas to improve coding-agent subagent 
 uv run code-scientist agent-packets runs/subagent-orchestration/state.json \
   --out runs/subagent-orchestration/agent-packets \
   --limit 3
+
+uv run code-scientist findings runs/subagent-orchestration/state.json
 ```
 
-`packet-index.json` lists the generated packet files. The custom subagent definitions at `.claude/agents/code-scientist-packet-reviewer.md` and `.codex/agents/code-scientist-packet-reviewer.toml` are intentionally read-only: packet reviewers should return verdicts and next actions, not edit source files.
+`packet-index.json` lists the generated packet files. `findings` writes `findings.md` next to the state file — a concise digest of the ranked findings (claim, review strengths and risks, suggested experiment), what was rejected in review and why, recommended next experiments, missing evidence, and limitations. When the host saves packet-reviewer verdicts to `agent-packets/reviews/<hypothesis-id>.md`, each finding also carries its independent reviewer verdict; `report.md` remains the comprehensive record. The custom subagent definitions at `.claude/agents/code-scientist-packet-reviewer.md` and `.codex/agents/code-scientist-packet-reviewer.toml` are intentionally read-only: packet reviewers should return verdicts and next actions, not edit source files.
 
 ## Benchmark Fixtures
 

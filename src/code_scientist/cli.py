@@ -40,8 +40,10 @@ from code_scientist.llm import DEFAULT_ANTHROPIC_MODEL, PROVIDER_CHOICES, WORKER
 from code_scientist.models import ResearchGoal, ResearchPlanConfig, UserFeedback, stable_id
 from code_scientist.objective_discovery import discover_objectives
 from code_scientist.reporting import (
+    load_packet_review_notes,
     render_benchmark_comparison_study_report,
     render_capability_study_report,
+    render_findings,
     render_report,
 )
 from code_scientist.safety import (
@@ -300,6 +302,18 @@ def build_parser() -> argparse.ArgumentParser:
     agent_packets_parser.add_argument("state_json")
     agent_packets_parser.add_argument("--out", required=True)
     agent_packets_parser.add_argument("--limit", type=int, default=3)
+
+    findings_parser = subparsers.add_parser(
+        "findings",
+        help="Write a concise findings digest from a saved run state.",
+    )
+    findings_parser.add_argument("state_json")
+    findings_parser.add_argument(
+        "--out",
+        default="",
+        help="Output path (defaults to findings.md next to the state file).",
+    )
+    findings_parser.add_argument("--limit", type=int, default=5)
 
     elo_concordance_parser = subparsers.add_parser(
         "elo-concordance",
@@ -654,6 +668,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote {output / 'packet-index.json'}")
         for packet in index["packets"]:
             print(f"Wrote {output / packet['path']}")
+        return 0
+    if args.command == "findings":
+        state_path = Path(args.state_json)
+        notes = load_packet_review_notes(state_path.parent / "agent-packets" / "reviews")
+        digest = render_findings(
+            load_state(state_path),
+            limit=args.limit,
+            packet_review_notes=notes,
+        )
+        output = Path(args.out) if args.out else state_path.parent / "findings.md"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(digest, encoding="utf-8")
+        print(f"Wrote {output}")
         return 0
     if args.command == "elo-concordance":
         state_path = Path(args.state_json)

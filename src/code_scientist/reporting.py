@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
+from pathlib import Path
 
+from code_scientist.agent_packets import select_top_hypotheses
 from code_scientist.benchmarks import summarize_benchmark_comparison_study
 from code_scientist.evidence import EvidenceStore
 from code_scientist.evaluation import (
@@ -236,6 +239,168 @@ def _proximity_quality_difference_correlation(state: RunState) -> float | None:
     if denominator_x == 0 or denominator_y == 0:
         return None
     return round(numerator / (denominator_x * denominator_y), 3)
+
+
+def render_findings(
+    state: RunState,
+    *,
+    limit: int = 5,
+    packet_review_notes: dict[str, str] | None = None,
+) -> str:
+    """Render a concise, decision-oriented digest of a run.
+
+    Unlike render_report, which records everything, this lists only the ranked
+    findings with their review outcomes, what was rejected and why, the
+    recommended next experiments, and the independent packet-reviewer verdicts
+    when the host saved them under agent-packets/reviews/.
+    """
+
+    notes = packet_review_notes or {}
+    reviews_by_hypothesis: dict[str, list] = {}
+    for review in state.reviews:
+        reviews_by_hypothesis.setdefault(review.hypothesis_id, []).append(review)
+    rejected_ids = {
+        review.hypothesis_id for review in state.reviews if review.decision == "reject"
+    }
+    ranked_pool = select_top_hypotheses(state, limit=max(len(state.hypotheses), 1))
+    ranked = [item for item in ranked_pool if item.id not in rejected_ids][: max(int(limit), 1)]
+
+    lines: list[str] = [f"# Research Findings: {state.goal.objective}", ""]
+    origins = sorted({item.origin for item in state.hypotheses})
+    lines.append(
+        f"Run status: {state.run_status} | hypotheses: {len(state.hypotheses)} | "
+        f"reviews: {len(state.reviews)} | matches: {len(state.matches)} | "
+        f"evidence: {len(state.evidence)}"
+    )
+    if origins:
+        lines.append(f"Hypothesis origins: {', '.join(origins)}")
+    lines.extend(["", "## Top Findings", ""])
+    if not ranked:
+        lines.extend(["- No hypotheses were produced.", ""])
+    for position, hypothesis in enumerate(ranked, start=1):
+        hypothesis_reviews = reviews_by_hypothesis.get(hypothesis.id, [])
+        strengths = _unique_ordered(
+            [item for review in hypothesis_reviews for item in review.strengths]
+        )[:2]
+        weaknesses = _unique_ordered(
+            [item for review in hypothesis_reviews for item in review.weaknesses]
+        )[:2]
+        experiment = next(
+            (item for review in hypothesis_reviews for item in review.findings),
+            "",
+        ) or hypothesis.test_plan.experiment
+        lines.append(f"### {position}. {hypothesis.title}")
+        lines.append("")
+        lines.append(hypothesis.claim)
+        lines.append("")
+        lines.append(
+            f"- Id: {hypothesis.id} | Status: {hypothesis.status} | "
+            f"Elo: {hypothesis.elo:.1f} | Origin: {hypothesis.origin}"
+        )
+        if strengths:
+            lines.append(f"- Why it matters: {'; '.join(strengths)}")
+        if weaknesses:
+            lines.append(f"- Open risks: {'; '.join(weaknesses)}")
+        if experiment:
+            lines.append(f"- Suggested experiment: {_single_line(experiment)}")
+        note = notes.get(hypothesis.id, "")
+        if note:
+            verdict = _reviewer_verdict(note) or "recorded"
+            lines.append(
+                f"- Independent reviewer verdict: {verdict} "
+                f"(agent-packets/reviews/{hypothesis.id}.md)"
+            )
+        else:
+            lines.append("- Independent reviewer verdict: not yet reviewed")
+        lines.append("")
+
+    rejected_lines: list[str] = []
+    for hypothesis in state.hypotheses:
+        if hypothesis.id not in rejected_ids:
+            continue
+        reject_reviews = [
+            review
+            for review in reviews_by_hypothesis.get(hypothesis.id, [])
+            if review.decision == "reject"
+        ]
+        reason = next(
+            (item for review in reject_reviews for item in review.weaknesses),
+            "rejected in review",
+        )
+        rejected_lines.append(f"- {hypothesis.title} ({hypothesis.id}): {_single_line(reason)}")
+    if rejected_lines:
+        lines.extend(["## Rejected In Review", "", *rejected_lines, ""])
+
+    overview = state.research_overview
+    latest_meta = state.meta_reviews[-1] if state.meta_reviews else None
+    next_experiments = (overview.next_experiments if overview else []) or (
+        latest_meta.promising_directions if latest_meta else []
+    )
+    if next_experiments:
+        lines.extend(
+            ["## Recommended Next Experiments", "", *[f"- {item}" for item in next_experiments], ""]
+        )
+    if latest_meta and latest_meta.missing_evidence:
+        lines.extend(
+            ["## Missing Evidence", "", *[f"- {item}" for item in latest_meta.missing_evidence], ""]
+        )
+
+    limitations = list(overview.limitations) if overview else []
+    if not any(
+        "proxy" in item.lower() or "auto-evaluation" in item.lower() for item in limitations
+    ):
+        limitations.append(
+            "Elo rankings are auto-evaluation proxies; findings are candidate hypotheses, "
+            "not validated improvements."
+        )
+    lines.extend(["## Limitations", "", *[f"- {item}" for item in limitations], ""])
+    lines.extend(
+        [
+            "## Artifacts",
+            "",
+            "- state.json — full run state",
+            "- report.md — comprehensive run report",
+            "- agent-packets/ — bounded subagent review packets",
+            "- agent-packets/reviews/ — independent packet-reviewer verdicts",
+        ]
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def load_packet_review_notes(directory: str | Path) -> dict[str, str]:
+    """Load host-saved packet-reviewer notes keyed by hypothesis id.
+
+    The /code-scientist skills save each reviewer's verdict as
+    agent-packets/reviews/<hypothesis-id>.md after consolidation.
+    """
+
+    notes_dir = Path(directory)
+    if not notes_dir.is_dir():
+        return {}
+    return {
+        path.stem: path.read_text(encoding="utf-8")
+        for path in sorted(notes_dir.glob("*.md"))
+    }
+
+
+def _reviewer_verdict(note: str) -> str:
+    match = re.search(
+        r"verdict[:*\s]+[*_`\s]*(keep|revise|verify|reject)",
+        note,
+        flags=re.IGNORECASE,
+    )
+    return match.group(1).lower() if match else ""
+
+
+def _unique_ordered(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for item in items:
+        cleaned = item.strip()
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            ordered.append(cleaned)
+    return ordered
 
 
 def render_report(state: RunState) -> str:

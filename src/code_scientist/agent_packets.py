@@ -17,7 +17,7 @@ def write_agent_packets(
 ) -> dict[str, Any]:
     output = Path(out_dir)
     output.mkdir(parents=True, exist_ok=True)
-    selected = _select_hypotheses(state, limit=limit)
+    selected = select_top_hypotheses(state, limit=limit)
     packets = []
     for hypothesis in selected:
         packet_path = output / f"{_safe_filename(hypothesis.id)}.md"
@@ -168,7 +168,7 @@ def render_agent_packet(
     return "\n".join(lines) + "\n"
 
 
-def _select_hypotheses(state: RunState, *, limit: int) -> list[Hypothesis]:
+def select_top_hypotheses(state: RunState, *, limit: int) -> list[Hypothesis]:
     active = [item for item in state.hypotheses if item.status != "merged_duplicate"]
     if not active or limit <= 0:
         return []
