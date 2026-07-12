@@ -16,6 +16,24 @@ from code_scientist.benchmarks import (
     summarize_benchmark_comparison_study,
 )
 from code_scientist.concordance import compute_elo_concordance, grade_hypotheses, load_objective_benchmark
+from code_scientist.experiments import (
+    AGENT_AUTH_CHOICES,
+    DEFAULT_ALPHA,
+    DEFAULT_COST_BUDGET_USD,
+    DEFAULT_MAX_TURNS,
+    DEFAULT_MIN_DISCORDANT_PAIRS,
+    DEFAULT_SEED,
+    DEFAULT_TRIAL_TIMEOUT_SECONDS,
+    DEFAULT_TRIALS_PER_TASK,
+    EXECUTOR_CHOICES,
+    ExperimentConfigError,
+    benchmark_result_from_experiment,
+    build_protocol,
+    create_executor,
+    load_agent_tasks,
+    pre_register_protocol,
+    run_experiment,
+)
 from code_scientist.coordination import SQLiteTaskCoordinator
 from code_scientist.evidence import EvidenceStore
 from code_scientist.evidence import merge_evidence
@@ -314,6 +332,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output path (defaults to findings.md next to the state file).",
     )
     findings_parser.add_argument("--limit", type=int, default=5)
+
+    validate_parser = subparsers.add_parser(
+        "validate",
+        help="Run a pre-registered baseline-vs-candidate agent experiment for one hypothesis.",
+    )
+    validate_parser.add_argument("state_json")
+    validate_parser.add_argument("--hypothesis", required=True, help="Hypothesis id from the state file.")
+    validate_parser.add_argument("--intervention", default="", help="Candidate arm's appended system prompt.")
+    validate_parser.add_argument("--intervention-file", default="", help="File containing the intervention text.")
+    validate_parser.add_argument("--tasks", default="benchmarks/agent-tasks", help="Agent task suite directory.")
+    validate_parser.add_argument("--task", action="append", default=[], help="Restrict to specific task ids (repeatable).")
+    validate_parser.add_argument("--executor", choices=list(EXECUTOR_CHOICES), default="claude-cli")
+    validate_parser.add_argument("--executor-script", default="", help="Deterministic executor script JSON (offline demos).")
+    validate_parser.add_argument("--trials", type=int, default=DEFAULT_TRIALS_PER_TASK, help="Paired trials per task.")
+    validate_parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+    validate_parser.add_argument("--model", default=DEFAULT_ANTHROPIC_MODEL)
+    validate_parser.add_argument("--max-turns", type=int, default=DEFAULT_MAX_TURNS)
+    validate_parser.add_argument("--trial-timeout", type=float, default=DEFAULT_TRIAL_TIMEOUT_SECONDS)
+    validate_parser.add_argument("--agent-auth", choices=list(AGENT_AUTH_CHOICES), default="login")
+    validate_parser.add_argument("--env-file", default=".env")
+    validate_parser.add_argument("--cost-budget-usd", type=float, default=DEFAULT_COST_BUDGET_USD)
+    validate_parser.add_argument("--alpha", type=float, default=DEFAULT_ALPHA)
+    validate_parser.add_argument("--min-discordant", type=int, default=DEFAULT_MIN_DISCORDANT_PAIRS)
+    validate_parser.add_argument(
+        "--out",
+        default="",
+        help="Experiment directory (defaults to experiments/<hypothesis-id> next to the state file).",
+    )
+    validate_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Pre-register the protocol without running any trial.",
+    )
 
     elo_concordance_parser = subparsers.add_parser(
         "elo-concordance",
@@ -681,6 +732,82 @@ def main(argv: list[str] | None = None) -> int:
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text(digest, encoding="utf-8")
         print(f"Wrote {output}")
+        return 0
+    if args.command == "validate":
+        state_path = Path(args.state_json)
+        state = load_state(state_path)
+        hypothesis = next(
+            (item for item in state.hypotheses if item.id == args.hypothesis), None
+        )
+        if hypothesis is None:
+            raise ExperimentConfigError(
+                f"Hypothesis {args.hypothesis!r} not found in {state_path}."
+            )
+        intervention = args.intervention
+        if args.intervention_file:
+            if intervention:
+                raise ExperimentConfigError(
+                    "Pass --intervention or --intervention-file, not both."
+                )
+            intervention = Path(args.intervention_file).read_text(encoding="utf-8")
+        tasks = load_agent_tasks(args.tasks, args.task or None)
+        protocol = build_protocol(
+            state_path=str(state_path),
+            hypothesis=hypothesis,
+            intervention=intervention,
+            task_suite=args.tasks,
+            tasks=tasks,
+            trials_per_task=args.trials,
+            seed=args.seed,
+            executor=args.executor,
+            model=args.model,
+            max_turns=args.max_turns,
+            trial_timeout_seconds=args.trial_timeout,
+            agent_auth=args.agent_auth,
+            alpha=args.alpha,
+            min_discordant_pairs=args.min_discordant,
+            cost_budget_usd=args.cost_budget_usd,
+        )
+        out_dir = (
+            Path(args.out)
+            if args.out
+            else state_path.parent / "experiments" / hypothesis.id
+        )
+        protocol = pre_register_protocol(protocol, out_dir)
+        print(f"Registered protocol {protocol.id} (sha256 {protocol.content_hash()[:16]})")
+        print(f"Wrote {out_dir / 'protocol.json'}")
+        if args.dry_run:
+            return 0
+        if (out_dir / "experiment.json").exists():
+            raise ExperimentConfigError(
+                f"{out_dir} already contains experiment results; use a fresh --out directory."
+            )
+        script = None
+        if args.executor_script:
+            script = json.loads(Path(args.executor_script).read_text(encoding="utf-8"))
+        executor = create_executor(protocol, env_file=args.env_file, script=script)
+        result = run_experiment(
+            protocol,
+            tasks,
+            executor,
+            out_dir,
+            progress=lambda message: print(message, flush=True),
+        )
+        benchmark = benchmark_result_from_experiment(protocol, result)
+        state = replace(state, benchmark_results=[*state.benchmark_results, benchmark])
+        run_dir = state_path.parent
+        (run_dir / "state.json").write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+        (run_dir / "report.md").write_text(render_report(state), encoding="utf-8")
+        stats = result.stats
+        print(f"Wrote {out_dir / 'experiment.json'}")
+        print(f"Wrote {out_dir / 'experiment-report.md'}")
+        print(f"Wrote {run_dir / 'state.json'}")
+        print(f"Wrote {run_dir / 'report.md'}")
+        print(
+            f"Verdict: {result.verdict} (delta {stats.get('pass_rate_delta', 0.0):+.3f}, "
+            f"one-sided McNemar p={stats.get('mcnemar_p_one_sided', 1.0):.4f}, "
+            f"cost ${result.total_cost_usd:.2f})"
+        )
         return 0
     if args.command == "elo-concordance":
         state_path = Path(args.state_json)

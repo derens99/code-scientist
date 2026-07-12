@@ -505,13 +505,25 @@ class BenchmarkResult:
     deltas: dict[str, float]
     success: bool
     notes: list[str] = field(default_factory=list)
+    # Empty provenance means an asserted fixture; "measured:agent-experiment"
+    # means the metrics were produced by executing a pre-registered experiment.
+    provenance: str = ""
+    hypothesis_id: str = ""
+    verdict: str = ""
+    stats: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BenchmarkResult:
-        return cls(**data)
+        copied = dict(data)
+        copied.setdefault("notes", [])
+        copied.setdefault("provenance", "")
+        copied.setdefault("hypothesis_id", "")
+        copied.setdefault("verdict", "")
+        copied.setdefault("stats", {})
+        return cls(**copied)
 
 
 @dataclass(frozen=True)

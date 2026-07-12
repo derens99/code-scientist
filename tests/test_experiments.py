@@ -1,0 +1,597 @@
+import json
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from code_scientist.cli import main
+from code_scientist.experiments import (
+    AgentInvocation,
+    ClaudeCliAgentExecutor,
+    DeterministicAgentExecutor,
+    ExperimentAbort,
+    ExperimentConfigError,
+    MEASURED_PROVENANCE,
+    _one_sided_binomial,
+    benchmark_result_from_experiment,
+    build_protocol,
+    compute_experiment_stats,
+    decide_verdict,
+    grade_workspace,
+    load_agent_tasks,
+    pre_register_protocol,
+    run_experiment,
+)
+from code_scientist.experiments import TrialArmResult
+from code_scientist.models import BenchmarkResult, Hypothesis, TestPlan
+
+
+BROKEN_MODULE = "def add(a, b):\n    return a - b\n"
+FIXED_MODULE = "def add(a, b):\n    return a + b\n"
+GRADER_TEST = (
+    "from solution import add\n\n\n"
+    "def test_add():\n"
+    "    assert add(2, 3) == 5\n"
+    "    assert add(-1, 1) == 0\n"
+)
+
+
+def _hypothesis() -> Hypothesis:
+    return Hypothesis(
+        id="hyp-test0001",
+        title="Test intervention improves pass rate",
+        claim="Appending the intervention raises task pass rate.",
+        rationale="test",
+        assumptions=[],
+        evidence_refs=[],
+        test_plan=TestPlan(experiment="A/B", metrics=["pass_rate"], success_condition="delta>0"),
+        risks=[],
+        origin="test",
+    )
+
+
+def _make_suite(root: Path, task_ids: list[str]) -> Path:
+    suite = root / "suite"
+    for task_id in task_ids:
+        task_dir = suite / task_id
+        (task_dir / "workspace").mkdir(parents=True)
+        (task_dir / "grader").mkdir()
+        (task_dir / "task.json").write_text(
+            json.dumps(
+                {
+                    "id": task_id,
+                    "title": task_id,
+                    "prompt": "Fix add() in solution.py so it adds.",
+                    "timeout_seconds": 60,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (task_dir / "workspace" / "solution.py").write_text(BROKEN_MODULE, encoding="utf-8")
+        (task_dir / "grader" / "test_grader.py").write_text(GRADER_TEST, encoding="utf-8")
+    return suite
+
+
+def _fixing_script(task_ids: list[str], arm: str = "candidate") -> dict:
+    return {
+        task_id: {arm: {"files": {"solution.py": FIXED_MODULE}}}
+        for task_id in task_ids
+    }
+
+
+def _protocol(suite: Path, tasks, **overrides):
+    defaults = dict(
+        state_path="state.json",
+        hypothesis=_hypothesis(),
+        intervention="Always re-read the diff before finishing.",
+        task_suite=str(suite),
+        tasks=tasks,
+        trials_per_task=3,
+        seed=11,
+        executor="deterministic",
+    )
+    defaults.update(overrides)
+    return build_protocol(**defaults)
+
+
+def test_load_agent_tasks_validates_structure(tmp_path):
+    suite = _make_suite(tmp_path, ["task-a", "task-b"])
+
+    tasks = load_agent_tasks(suite)
+    assert [task.id for task in tasks] == ["task-a", "task-b"]
+
+    filtered = load_agent_tasks(suite, ["task-b"])
+    assert [task.id for task in filtered] == ["task-b"]
+
+    with pytest.raises(ExperimentConfigError):
+        load_agent_tasks(suite, ["task-missing"])
+
+    (suite / "task-a" / "grader" / "test_grader.py").unlink()
+    with pytest.raises(ExperimentConfigError):
+        load_agent_tasks(suite)
+
+
+def test_load_agent_tasks_rejects_id_mismatch(tmp_path):
+    suite = _make_suite(tmp_path, ["task-a"])
+    task_json = suite / "task-a" / "task.json"
+    data = json.loads(task_json.read_text())
+    data["id"] = "other-name"
+    task_json.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ExperimentConfigError):
+        load_agent_tasks(suite)
+
+
+def test_one_sided_binomial_known_values():
+    assert _one_sided_binomial(0, 0) == 1.0
+    assert _one_sided_binomial(5, 6) == pytest.approx(7 / 64)
+    assert _one_sided_binomial(7, 7) == pytest.approx(1 / 128)
+    assert _one_sided_binomial(0, 4) == 1.0
+
+
+def _arm(task_id: str, trial: int, arm: str, passed: bool) -> TrialArmResult:
+    return TrialArmResult(
+        task_id=task_id,
+        trial=trial,
+        arm=arm,
+        passed=passed,
+        agent_status="completed",
+        duration_seconds=1.0,
+        num_turns=2.0,
+        cost_usd=0.01,
+    )
+
+
+def test_stats_and_verdict_supported():
+    arms = []
+    for task_id in ("t1", "t2"):
+        for trial in (1, 2, 3):
+            arms.append(_arm(task_id, trial, "baseline", False))
+            arms.append(_arm(task_id, trial, "candidate", True))
+
+    stats = compute_experiment_stats(arms, seed=1, bootstrap_iterations=500)
+    assert stats["n_pairs"] == 6.0
+    assert stats["pass_rate_delta"] == pytest.approx(1.0)
+    assert stats["discordant_pairs"] == 6.0
+    assert stats["mcnemar_p_one_sided"] == pytest.approx(1 / 64)
+    assert stats["delta_ci95_low"] == pytest.approx(1.0)
+    assert stats["delta_ci95_high"] == pytest.approx(1.0)
+    assert stats["tasks_candidate_better"] == 2.0
+    assert decide_verdict(stats, alpha=0.05, min_discordant_pairs=3) == "supported"
+
+
+def test_stats_and_verdict_refuted():
+    arms = []
+    for task_id in ("t1", "t2"):
+        for trial in (1, 2, 3):
+            arms.append(_arm(task_id, trial, "baseline", True))
+            arms.append(_arm(task_id, trial, "candidate", False))
+
+    stats = compute_experiment_stats(arms, seed=1, bootstrap_iterations=200)
+    assert stats["pass_rate_delta"] == pytest.approx(-1.0)
+    assert stats["mcnemar_p_regression"] == pytest.approx(1 / 64)
+    assert decide_verdict(stats, alpha=0.05, min_discordant_pairs=3) == "refuted"
+
+
+def test_verdict_inconclusive_below_min_discordant():
+    arms = [
+        _arm("t1", 1, "baseline", False),
+        _arm("t1", 1, "candidate", True),
+        _arm("t1", 2, "baseline", True),
+        _arm("t1", 2, "candidate", True),
+    ]
+    stats = compute_experiment_stats(arms, seed=1, bootstrap_iterations=100)
+    assert stats["discordant_pairs"] == 1.0
+    assert decide_verdict(stats, alpha=0.05, min_discordant_pairs=3) == "inconclusive"
+
+
+def test_verdict_inconclusive_when_empty():
+    assert decide_verdict(compute_experiment_stats([], seed=1)) == "inconclusive"
+
+
+def test_grade_workspace_pass_and_fail(tmp_path):
+    suite = _make_suite(tmp_path, ["task-a"])
+    task = load_agent_tasks(suite)[0]
+
+    workspace = tmp_path / "graded-fail"
+    workspace.mkdir()
+    (workspace / "solution.py").write_text(BROKEN_MODULE, encoding="utf-8")
+    passed, tail = grade_workspace(workspace, task.grader_dir())
+    assert passed is False
+    assert "failed" in tail or "error" in tail.lower()
+
+    workspace_ok = tmp_path / "graded-pass"
+    workspace_ok.mkdir()
+    (workspace_ok / "solution.py").write_text(FIXED_MODULE, encoding="utf-8")
+    passed_ok, _ = grade_workspace(workspace_ok, task.grader_dir())
+    assert passed_ok is True
+
+
+def test_deterministic_experiment_end_to_end(tmp_path):
+    task_ids = ["task-a", "task-b"]
+    suite = _make_suite(tmp_path, task_ids)
+    tasks = load_agent_tasks(suite)
+    protocol = _protocol(suite, tasks)
+    out_dir = tmp_path / "experiment"
+    protocol = pre_register_protocol(protocol, out_dir)
+    executor = DeterministicAgentExecutor(script=_fixing_script(task_ids))
+
+    result = run_experiment(protocol, tasks, executor, out_dir)
+
+    assert result.status == "complete"
+    assert result.verdict == "supported"
+    assert result.stats["n_pairs"] == 6.0
+    assert (out_dir / "experiment.json").exists()
+    assert (out_dir / "experiment-report.md").exists()
+    arm_dir = out_dir / "trials" / "task-a" / "trial-1" / "candidate"
+    assert (arm_dir / "agent-output.json").exists()
+    assert "modified: solution.py" in (arm_dir / "workspace-diff.txt").read_text()
+    assert (arm_dir / "grader-output.txt").exists()
+    baseline_diff = (out_dir / "trials" / "task-a" / "trial-1" / "baseline" / "workspace-diff.txt").read_text()
+    assert "no changes" in baseline_diff
+
+    benchmark = benchmark_result_from_experiment(protocol, result)
+    assert benchmark.provenance == MEASURED_PROVENANCE
+    assert benchmark.hypothesis_id == "hyp-test0001"
+    assert benchmark.verdict == "supported"
+    assert benchmark.success is True
+    assert benchmark.deltas["pass_rate"] == pytest.approx(1.0)
+    assert benchmark.candidate_metrics["cost"] == 0.0
+
+    report = (out_dir / "experiment-report.md").read_text()
+    assert "pre-registered" in report
+    assert "trusted_local" in report
+
+
+def test_experiment_reruns_are_deterministic(tmp_path):
+    task_ids = ["task-a", "task-b"]
+    suite = _make_suite(tmp_path, task_ids)
+    tasks = load_agent_tasks(suite)
+    script = _fixing_script(task_ids)
+
+    results = []
+    for label in ("one", "two"):
+        protocol = _protocol(suite, tasks)
+        out_dir = tmp_path / f"experiment-{label}"
+        protocol = pre_register_protocol(protocol, out_dir)
+        result = run_experiment(
+            protocol, tasks, DeterministicAgentExecutor(script=script), out_dir
+        )
+        results.append(result.stats)
+
+    assert results[0] == results[1]
+
+
+class _CostlyExecutor:
+    def run_trial(self, *, task_id, arm, prompt, system_append, workspace, timeout):
+        del task_id, arm, prompt, system_append, workspace, timeout
+        return AgentInvocation(
+            status="completed",
+            duration_seconds=1.0,
+            num_turns=1.0,
+            cost_usd=5.0,
+            raw_output="{}",
+        )
+
+
+def test_experiment_stops_on_cost_budget(tmp_path):
+    suite = _make_suite(tmp_path, ["task-a"])
+    tasks = load_agent_tasks(suite)
+    protocol = _protocol(suite, tasks, cost_budget_usd=4.0)
+    out_dir = tmp_path / "experiment"
+    protocol = pre_register_protocol(protocol, out_dir)
+
+    result = run_experiment(protocol, tasks, _CostlyExecutor(), out_dir)
+
+    assert result.status == "incomplete"
+    assert result.verdict == "incomplete"
+    assert len(result.trial_arms) == 1
+    assert any("cost budget" in note for note in result.notes)
+
+
+def _fake_runner(record: dict, stdout: str = "", returncode: int = 0):
+    def runner(argv, stdin_text, timeout, env, cwd):
+        record["argv"] = argv
+        record["stdin"] = stdin_text
+        record["timeout"] = timeout
+        record["env"] = env
+        record["cwd"] = cwd
+        return subprocess.CompletedProcess(argv, returncode, stdout=stdout, stderr="")
+
+    return runner
+
+
+def _success_payload() -> str:
+    return json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "duration_ms": 2000,
+            "num_turns": 4,
+            "result": "done",
+            "total_cost_usd": 0.0125,
+        }
+    )
+
+
+def test_claude_cli_executor_argv_env_and_parsing(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "harness-proxy-key")
+    record: dict = {}
+    executor = ClaudeCliAgentExecutor(
+        model="claude-haiku-4-5",
+        max_turns=9,
+        agent_auth="login",
+        runner=_fake_runner(record, stdout=_success_payload()),
+    )
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+
+    invocation = executor.run_trial(
+        task_id="task-a",
+        arm="candidate",
+        prompt="Fix the bug.",
+        system_append="Verify before finishing.",
+        workspace=workspace,
+        timeout=120.0,
+    )
+
+    argv = record["argv"]
+    assert "-p" in argv
+    assert argv[argv.index("--model") + 1] == "claude-haiku-4-5"
+    assert argv[argv.index("--max-turns") + 1] == "9"
+    assert argv[argv.index("--append-system-prompt") + 1] == "Verify before finishing."
+    assert argv[argv.index("--output-format") + 1] == "json"
+    assert "--allowedTools" in argv and "--disallowedTools" in argv
+    assert record["stdin"] == "Fix the bug."
+    assert record["cwd"] == str(workspace)
+    assert "ANTHROPIC_API_KEY" not in record["env"]
+    assert invocation.status == "completed"
+    assert invocation.num_turns == 4.0
+    assert invocation.cost_usd == pytest.approx(0.0125)
+    assert invocation.duration_seconds == pytest.approx(2.0)
+
+
+def test_claude_cli_executor_omits_append_for_baseline(tmp_path):
+    record: dict = {}
+    executor = ClaudeCliAgentExecutor(
+        model="claude-haiku-4-5",
+        runner=_fake_runner(record, stdout=_success_payload()),
+    )
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+
+    executor.run_trial(
+        task_id="task-a",
+        arm="baseline",
+        prompt="Fix the bug.",
+        system_append="",
+        workspace=workspace,
+        timeout=60.0,
+    )
+
+    assert "--append-system-prompt" not in record["argv"]
+
+
+def test_claude_cli_executor_api_key_mode(tmp_path, monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "harness-proxy-key")
+    env_file = tmp_path / ".env"
+    env_file.write_text("ANTHROPIC_API_KEY=sk-real-file-key\n", encoding="utf-8")
+    record: dict = {}
+    executor = ClaudeCliAgentExecutor(
+        model="claude-haiku-4-5",
+        agent_auth="api-key",
+        env_file=env_file,
+        runner=_fake_runner(record, stdout=_success_payload()),
+    )
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+
+    executor.run_trial(
+        task_id="task-a",
+        arm="baseline",
+        prompt="Fix.",
+        system_append="",
+        workspace=workspace,
+        timeout=60.0,
+    )
+
+    assert record["env"]["ANTHROPIC_API_KEY"] == "sk-real-file-key"
+
+
+def test_claude_cli_executor_requires_key_for_api_key_mode(tmp_path):
+    empty_env = tmp_path / ".env"
+    empty_env.write_text("", encoding="utf-8")
+
+    with pytest.raises(ExperimentConfigError):
+        ClaudeCliAgentExecutor(
+            model="claude-haiku-4-5",
+            agent_auth="api-key",
+            env_file=empty_env,
+        )
+
+
+def test_claude_cli_executor_timeout_and_abort(tmp_path):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+
+    def timeout_runner(argv, stdin_text, timeout, env, cwd):
+        raise subprocess.TimeoutExpired(cmd=argv, timeout=timeout)
+
+    executor = ClaudeCliAgentExecutor(
+        model="claude-haiku-4-5", runner=timeout_runner
+    )
+    invocation = executor.run_trial(
+        task_id="t",
+        arm="baseline",
+        prompt="p",
+        system_append="",
+        workspace=workspace,
+        timeout=1.0,
+    )
+    assert invocation.status == "timeout"
+
+    record: dict = {}
+    auth_fail = ClaudeCliAgentExecutor(
+        model="claude-haiku-4-5",
+        runner=_fake_runner(
+            record,
+            stdout='{"is_error": true, "result": "authentication_error: run /login"}',
+            returncode=1,
+        ),
+    )
+    with pytest.raises(ExperimentAbort):
+        auth_fail.run_trial(
+            task_id="t",
+            arm="baseline",
+            prompt="p",
+            system_append="",
+            workspace=workspace,
+            timeout=1.0,
+        )
+
+
+def test_protocol_preregistration_conflict(tmp_path):
+    suite = _make_suite(tmp_path, ["task-a"])
+    tasks = load_agent_tasks(suite)
+    out_dir = tmp_path / "experiment"
+
+    first = pre_register_protocol(_protocol(suite, tasks), out_dir)
+    again = pre_register_protocol(_protocol(suite, tasks), out_dir)
+    assert again.id == first.id
+    assert again.created_at == first.created_at
+
+    with pytest.raises(ExperimentConfigError):
+        pre_register_protocol(
+            _protocol(suite, tasks, intervention="A different intervention."),
+            out_dir,
+        )
+
+
+def test_benchmark_result_backward_compat_loading():
+    legacy = {
+        "id": "bench-1234",
+        "name": "legacy",
+        "source": "fixture.json",
+        "baseline_metrics": {"pass_rate": 0.5},
+        "candidate_metrics": {"pass_rate": 0.7},
+        "deltas": {"pass_rate": 0.2},
+        "success": True,
+    }
+    result = BenchmarkResult.from_dict(legacy)
+    assert result.provenance == ""
+    assert result.hypothesis_id == ""
+    assert result.verdict == ""
+    assert result.stats == {}
+
+
+def test_cli_validate_deterministic_end_to_end(tmp_path):
+    run_dir = tmp_path / "run"
+    assert main(["run", "Find testable ideas to improve LLM coding agents", "--out", str(run_dir)]) == 0
+    state = json.loads((run_dir / "state.json").read_text())
+    hypothesis_id = state["hypotheses"][0]["id"]
+
+    task_ids = ["task-a", "task-b"]
+    suite = _make_suite(tmp_path, task_ids)
+    script_path = tmp_path / "script.json"
+    script_path.write_text(json.dumps(_fixing_script(task_ids)), encoding="utf-8")
+    out_dir = tmp_path / "experiment"
+
+    exit_code = main(
+        [
+            "validate",
+            str(run_dir / "state.json"),
+            "--hypothesis",
+            hypothesis_id,
+            "--intervention",
+            "Re-run the visible tests before declaring done.",
+            "--tasks",
+            str(suite),
+            "--executor",
+            "deterministic",
+            "--executor-script",
+            str(script_path),
+            "--trials",
+            "3",
+            "--out",
+            str(out_dir),
+        ]
+    )
+
+    assert exit_code == 0
+    assert (out_dir / "protocol.json").exists()
+    assert (out_dir / "experiment.json").exists()
+    updated = json.loads((run_dir / "state.json").read_text())
+    measured = [
+        item
+        for item in updated["benchmark_results"]
+        if item.get("provenance") == MEASURED_PROVENANCE
+    ]
+    assert len(measured) == 1
+    assert measured[0]["hypothesis_id"] == hypothesis_id
+    assert measured[0]["verdict"] == "supported"
+    report = (run_dir / "report.md").read_text()
+    assert "executed experiment" in report
+
+    assert main(["findings", str(run_dir / "state.json")]) == 0
+    findings = (run_dir / "findings.md").read_text()
+    if hypothesis_id in findings:
+        assert "Measured result:" in findings
+
+
+def test_cli_validate_dry_run_only_registers(tmp_path):
+    run_dir = tmp_path / "run"
+    assert main(["run", "Find testable ideas to improve LLM coding agents", "--out", str(run_dir)]) == 0
+    state = json.loads((run_dir / "state.json").read_text())
+    hypothesis_id = state["hypotheses"][0]["id"]
+    suite = _make_suite(tmp_path, ["task-a"])
+    out_dir = tmp_path / "experiment"
+
+    exit_code = main(
+        [
+            "validate",
+            str(run_dir / "state.json"),
+            "--hypothesis",
+            hypothesis_id,
+            "--intervention",
+            "Check twice.",
+            "--tasks",
+            str(suite),
+            "--executor",
+            "deterministic",
+            "--out",
+            str(out_dir),
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+    assert (out_dir / "protocol.json").exists()
+    assert not (out_dir / "experiment.json").exists()
+
+
+def test_cli_validate_refuses_completed_out_dir(tmp_path):
+    run_dir = tmp_path / "run"
+    assert main(["run", "Find testable ideas to improve LLM coding agents", "--out", str(run_dir)]) == 0
+    state = json.loads((run_dir / "state.json").read_text())
+    hypothesis_id = state["hypotheses"][0]["id"]
+    suite = _make_suite(tmp_path, ["task-a"])
+    out_dir = tmp_path / "experiment"
+    argv = [
+        "validate",
+        str(run_dir / "state.json"),
+        "--hypothesis",
+        hypothesis_id,
+        "--intervention",
+        "Check twice.",
+        "--tasks",
+        str(suite),
+        "--executor",
+        "deterministic",
+        "--out",
+        str(out_dir),
+    ]
+    assert main(argv) == 0
+
+    with pytest.raises(ExperimentConfigError):
+        main(argv)

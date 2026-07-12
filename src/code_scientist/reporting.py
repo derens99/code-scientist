@@ -256,6 +256,11 @@ def render_findings(
     """
 
     notes = packet_review_notes or {}
+    measured_by_hypothesis = {
+        result.hypothesis_id: result
+        for result in state.benchmark_results
+        if result.hypothesis_id and result.provenance.startswith("measured")
+    }
     reviews_by_hypothesis: dict[str, list] = {}
     for review in state.reviews:
         reviews_by_hypothesis.setdefault(review.hypothesis_id, []).append(review)
@@ -312,6 +317,16 @@ def render_findings(
             )
         else:
             lines.append("- Independent reviewer verdict: not yet reviewed")
+        measured = measured_by_hypothesis.get(hypothesis.id)
+        if measured:
+            delta = measured.stats.get("pass_rate_delta", measured.deltas.get("pass_rate", 0.0))
+            p_value = measured.stats.get("mcnemar_p_one_sided")
+            detail = f"pass-rate delta {delta:+.3f}"
+            if p_value is not None:
+                detail += f", one-sided McNemar p={p_value:.4f}"
+            lines.append(
+                f"- Measured result: **{measured.verdict or 'recorded'}** ({detail}; {measured.source})"
+            )
         lines.append("")
 
     rejected_lines: list[str] = []
@@ -352,6 +367,12 @@ def render_findings(
         limitations.append(
             "Elo rankings are auto-evaluation proxies; findings are candidate hypotheses, "
             "not validated improvements."
+        )
+    if measured_by_hypothesis:
+        limitations.append(
+            "Hypotheses marked with a measured result carry executed-experiment evidence "
+            "scoped to that experiment's task suite and model; all other findings remain "
+            "unvalidated candidates."
         )
     lines.extend(["## Limitations", "", *[f"- {item}" for item in limitations], ""])
     lines.extend(
@@ -809,6 +830,15 @@ def render_report(state: RunState) -> str:
         for result in state.benchmark_results:
             lines.append(f"- {result.name}: {'passed' if result.success else 'needs review'}")
             lines.append(f"  - Source: {result.source}")
+            if result.provenance:
+                origin = "executed experiment" if result.provenance.startswith("measured") else result.provenance
+                lines.append(f"  - Provenance: {origin} ({result.provenance})")
+            else:
+                lines.append("  - Provenance: asserted fixture (metrics supplied, not executed by this engine)")
+            if result.verdict:
+                lines.append(f"  - Verdict: {result.verdict}")
+            if result.hypothesis_id:
+                lines.append(f"  - Hypothesis: {result.hypothesis_id}")
             for metric in sorted(result.candidate_metrics):
                 baseline = result.baseline_metrics[metric]
                 candidate = result.candidate_metrics[metric]
