@@ -167,7 +167,7 @@ def test_evidence_store_ocr_extracts_scanned_pdf_text_and_figure_provenance(tmp_
 
     image = Image.new("RGB", (1400, 320), "white")
     draw = ImageDraw.Draw(image)
-    font = ImageFont.truetype("/System/Library/Fonts/Supplemental/Arial.ttf", 58)
+    font = ImageFont.load_default(size=58)
     draw.text(
         (30, 70),
         "Coding agent benchmark pass rate improved 27 percent",
