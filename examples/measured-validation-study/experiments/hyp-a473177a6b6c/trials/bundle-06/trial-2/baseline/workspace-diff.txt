@@ -1,0 +1,342 @@
+modified: glob_match.py
+--- a/glob_match.py
++++ b/glob_match.py
+@@ -45,4 +45,133 @@
+ 
+     Returns `True` or `False`.
+     """
+-    raise NotImplementedError
++    # Parse the pattern first to validate it
++    parsed = []
++    i = 0
++    while i < len(pattern):
++        if pattern[i] == "\\":
++            # Backslash escape
++            if i + 1 >= len(pattern):
++                raise ValueError("Backslash at end of pattern")
++            # Add escaped character as literal
++            parsed.append(("literal", pattern[i + 1]))
++            i += 2
++        elif pattern[i] == "*":
++            # Skip consecutive stars
++            while i < len(pattern) and pattern[i] == "*":
++                i += 1
++            parsed.append(("star", None))
++        elif pattern[i] == "?":
++            parsed.append(("question", None))
++            i += 1
++        elif pattern[i] == "[":
++            # Character class
++            i += 1
++            negated = False
++            if i < len(pattern) and pattern[i] in ("!", "^"):
++                negated = True
++                i += 1
++
++            # Find the closing bracket
++            class_chars = ""
++            start = i
++            while i < len(pattern) and pattern[i] != "]":
++                class_chars += pattern[i]
++                i += 1
++
++            if i >= len(pattern):
++                raise ValueError("Unterminated character class")
++
++            # i now points to "]", move past it
++            i += 1
++
++            # Parse the character class
++            char_set = _parse_char_class(class_chars)
++            parsed.append(("class", (negated, char_set)))
++        else:
++            # Literal character
++            parsed.append(("literal", pattern[i]))
++            i += 1
++
++    # Now match the parsed pattern against text
++    return _match_parsed(parsed, text, 0, 0)
++
++
++def _parse_char_class(class_str):
++    """Parse a character class string and return set of matching chars."""
++    chars = set()
++    i = 0
++    while i < len(class_str):
++        # Check if this forms a range (X-Y)
++        if i + 2 < len(class_str) and class_str[i + 1] == "-":
++            # Could be a range
++            start_char = class_str[i]
++            end_char = class_str[i + 2]
++            if ord(start_char) <= ord(end_char):
++                # It's a valid range
++                for code_point in range(ord(start_char), ord(end_char) + 1):
++                    chars.add(chr(code_point))
++                i += 3
++                continue
++
++        # Not a range, add single character
++        chars.add(class_str[i])
++        i += 1
++
++    return chars
++
++
++def _match_parsed(parsed, text, p_idx, t_idx):
++    """Recursively match parsed pattern against text."""
++    # Base case: both pattern and text exhausted
++    if p_idx >= len(parsed) and t_idx >= len(text):
++        return True
++
++    # Pattern exhausted but text remains
++    if p_idx >= len(parsed):
++        return False
++
++    # Text exhausted but pattern remains (only ok if remaining is all stars)
++    if t_idx >= len(text):
++        # Check if all remaining pattern elements are stars
++        while p_idx < len(parsed):
++            if parsed[p_idx][0] != "star":
++                return False
++            p_idx += 1
++        return True
++
++    p_type, p_value = parsed[p_idx]
++
++    if p_type == "literal":
++        # Match literal character
++        if text[t_idx] == p_value:
++            return _match_parsed(parsed, text, p_idx + 1, t_idx + 1)
++        return False
++
++    elif p_type == "question":
++        # Match exactly one character
++        return _match_parsed(parsed, text, p_idx + 1, t_idx + 1)
++
++    elif p_type == "star":
++        # Match zero or more characters
++        # Try matching zero characters first
++        if _match_parsed(parsed, text, p_idx + 1, t_idx):
++            return True
++        # Try matching one or more characters
++        # We try consuming one character at a time
++        for i in range(t_idx, len(text)):
++            if _match_parsed(parsed, text, p_idx + 1, i + 1):
++                return True
++        return False
++
++    elif p_type == "class":
++        negated, char_set = p_value
++        match = text[t_idx] in char_set
++        if negated:
++            match = not match
++
++        if match:
++            return _match_parsed(parsed, text, p_idx + 1, t_idx + 1)
++        return False
++
++    return False
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -46,4 +46,96 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    # Validate records is a list
++    if not isinstance(records, list):
++        raise TypeError
++
++    # Validate keys is a non-empty list
++    if not isinstance(keys, list) or len(keys) == 0:
++        raise ValueError
++
++    # Validate each key element
++    for key in keys:
++        if not isinstance(key, (tuple, list)) or len(key) != 2:
++            raise ValueError
++        field_name, direction = key
++        if direction not in ("asc", "desc"):
++            raise ValueError
++
++    # Create indexed list to track original order (for stable sort)
++    indexed_records = list(enumerate(records))
++
++    # Define sort key function
++    def sort_key(indexed_record):
++        idx, record = indexed_record
++        key_values = []
++
++        for field_name, direction in keys:
++            value = record.get(field_name, None)
++
++            # Create tuple for sorting
++            # (is_none, sort_value, original_index)
++            # is_none: 0 for non-None (sorts first), 1 for None (sorts last)
++            # sort_value: the value for comparison (wrapped if descending)
++            # original_index: for stability when all keys are equal
++
++            if value is None:
++                # None values sort last regardless of direction
++                key_values.append((1, None))
++            else:
++                # For descending order, wrap in _ReverseComparable
++                if direction == "asc":
++                    key_values.append((0, value))
++                else:  # desc
++                    key_values.append((0, _ReverseComparable(value)))
++
++        # Add original index for stability
++        key_values.append(idx)
++        return tuple(key_values)
++
++    # We need a custom comparison to handle TypeError for incompatible types
++    # Since Python 3 doesn't support cmp parameter, we need to validate during sort
++    try:
++        result = sorted(indexed_records, key=sort_key)
++    except TypeError as e:
++        # Check if this is due to comparison of incomparable types
++        raise TypeError
++
++    # Extract the original records in sorted order
++    return [record for idx, record in result]
++
++
++class _ReverseComparable:
++    """Wrapper to reverse comparison order for descending sorts."""
++    def __init__(self, obj):
++        self.obj = obj
++
++    def __lt__(self, other):
++        if not isinstance(other, _ReverseComparable):
++            return NotImplemented
++        return self.obj > other.obj
++
++    def __le__(self, other):
++        if not isinstance(other, _ReverseComparable):
++            return NotImplemented
++        return self.obj >= other.obj
++
++    def __gt__(self, other):
++        if not isinstance(other, _ReverseComparable):
++            return NotImplemented
++        return self.obj < other.obj
++
++    def __ge__(self, other):
++        if not isinstance(other, _ReverseComparable):
++            return NotImplemented
++        return self.obj <= other.obj
++
++    def __eq__(self, other):
++        if not isinstance(other, _ReverseComparable):
++            return NotImplemented
++        return self.obj == other.obj
++
++    def __ne__(self, other):
++        if not isinstance(other, _ReverseComparable):
++            return NotImplemented
++        return self.obj != other.obj
+modified: table_render.py
+--- a/table_render.py
++++ b/table_render.py
+@@ -55,4 +55,98 @@
+ 
+     Returns the list of rendered lines (no trailing newline characters).
+     """
+-    raise NotImplementedError
++    # Validate headers
++    if not isinstance(headers, list) or len(headers) == 0:
++        raise ValueError
++    for header in headers:
++        if not isinstance(header, str):
++            raise TypeError
++
++    # Validate and apply defaults
++    if alignments is None:
++        alignments = ["left"] * len(headers)
++    else:
++        if not isinstance(alignments, list) or len(alignments) != len(headers):
++            raise ValueError
++        for alignment in alignments:
++            if alignment not in ("left", "right", "center"):
++                raise ValueError
++
++    # Validate max_col_width
++    if max_col_width is not None:
++        if not isinstance(max_col_width, int) or max_col_width < 4:
++            raise ValueError
++
++    # Validate rows
++    for row in rows:
++        if not isinstance(row, list) or len(row) != len(headers):
++            raise ValueError
++        for cell in row:
++            if not isinstance(cell, str):
++                raise TypeError
++
++    # Apply truncation to headers and rows if needed
++    def truncate_cell(text):
++        if max_col_width is not None and len(text) > max_col_width:
++            return text[:max_col_width - 3] + "..."
++        return text
++
++    truncated_headers = [truncate_cell(h) for h in headers]
++    truncated_rows = [[truncate_cell(cell) for cell in row] for row in rows]
++
++    # Calculate column widths
++    col_widths = []
++    for i in range(len(headers)):
++        width = len(truncated_headers[i])
++        for row in truncated_rows:
++            width = max(width, len(row[i]))
++        col_widths.append(width)
++
++    # Build border line
++    def build_border():
++        parts = ["+"]
++        for width in col_widths:
++            parts.append("-" * (width + 2))
++            parts.append("+")
++        return "".join(parts)
++
++    # Alignment functions
++    def align_cell(text, alignment, width):
++        if alignment == "left":
++            return text.ljust(width)
++        elif alignment == "right":
++            return text.rjust(width)
++        else:  # center
++            return text.center(width)
++
++    # Build header line
++    def build_header_line():
++        parts = ["|"]
++        for i, header in enumerate(truncated_headers):
++            aligned = align_cell(header, alignments[i], col_widths[i])
++            parts.append(" ")
++            parts.append(aligned)
++            parts.append(" |")
++        return "".join(parts)
++
++    # Build data line
++    def build_data_line(row):
++        parts = ["|"]
++        for i, cell in enumerate(row):
++            aligned = align_cell(cell, alignments[i], col_widths[i])
++            parts.append(" ")
++            parts.append(aligned)
++            parts.append(" |")
++        return "".join(parts)
++
++    # Build result
++    result = []
++    border = build_border()
++    result.append(border)
++    result.append(build_header_line())
++    result.append(border)
++    for row in truncated_rows:
++        result.append(build_data_line(row))
++    result.append(border)
++
++    return result

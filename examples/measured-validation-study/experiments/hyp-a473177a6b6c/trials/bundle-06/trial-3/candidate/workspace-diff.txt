@@ -1,0 +1,333 @@
+modified: glob_match.py
+--- a/glob_match.py
++++ b/glob_match.py
+@@ -35,7 +35,7 @@
+        that follows it, making that character match itself literally
+        (even if it is `*`, `?`, `[`, or `\\`). A `\\` as the very last
+        character of `pattern`, with nothing after it to escape, raises
+-       `ValueError`.
++       ValueError`.
+     5. Any other character matches itself literally.
+     6. An empty `pattern` matches only an empty `text`.
+     7. This function must not import or use the `re` module (or any
+@@ -45,4 +45,166 @@
+ 
+     Returns `True` or `False`.
+     """
+-    raise NotImplementedError
++
++    def parse_char_class(pattern, idx):
++        """Parse a character class [...] and return (negated, chars_set, next_idx)"""
++        # idx should point to the character after '['
++        negated = False
++        if idx < len(pattern) and pattern[idx] in ("!", "^"):
++            negated = True
++            idx += 1
++
++        chars = set()
++        start_idx = idx
++
++        while idx < len(pattern) and pattern[idx] != "]":
++            ch = pattern[idx]
++
++            # Check if this might be a range (X-Y)
++            if idx + 2 < len(pattern) and pattern[idx + 1] == "-" and pattern[idx + 2] != "]":
++                # This is a range X-Y
++                start_ch = pattern[idx]
++                end_ch = pattern[idx + 2]
++                if ord(start_ch) <= ord(end_ch):
++                    # Valid range
++                    for code_point in range(ord(start_ch), ord(end_ch) + 1):
++                        chars.add(chr(code_point))
++                    idx += 3
++                else:
++                    # Invalid range (X > Y), treat as individual chars
++                    chars.add(pattern[idx])
++                    chars.add(pattern[idx + 1])
++                    idx += 2
++            elif ch == "-" and idx == start_idx:
++                # - is first char in class body, treat as literal
++                chars.add(ch)
++                idx += 1
++            elif ch == "-" and idx + 1 == len(pattern):
++                # - is last char, treat as literal (but this shouldn't happen since we check for ']')
++                chars.add(ch)
++                idx += 1
++            else:
++                chars.add(ch)
++                idx += 1
++
++        if idx >= len(pattern):
++            # No closing ']' found
++            raise ValueError()
++
++        # idx points to ']'
++        return negated, chars, idx + 1
++
++    def matches_char_class(ch, negated, chars):
++        """Check if character matches the character class"""
++        in_class = ch in chars
++        if negated:
++            return not in_class
++        else:
++            return in_class
++
++    def normalize_pattern(pattern):
++        """Normalize pattern by collapsing consecutive * into single *"""
++        result = []
++        i = 0
++        while i < len(pattern):
++            if pattern[i] == "\\":
++                # Escaping
++                if i + 1 >= len(pattern):
++                    raise ValueError()
++                result.append("\\")
++                result.append(pattern[i + 1])
++                i += 2
++            elif pattern[i] == "*":
++                # Collapse consecutive stars
++                result.append("*")
++                while i + 1 < len(pattern) and pattern[i + 1] == "*":
++                    i += 1
++                i += 1
++            else:
++                result.append(pattern[i])
++                i += 1
++        return "".join(result)
++
++    # Normalize the pattern first
++    try:
++        normalized_pattern = normalize_pattern(pattern)
++    except ValueError:
++        raise ValueError()
++
++    # Parse pattern into tokens
++    def parse_pattern(pattern):
++        """Parse pattern into tokens: ('literal', ch), ('?',), ('*',), ('class', negated, chars)"""
++        tokens = []
++        i = 0
++        while i < len(pattern):
++            if pattern[i] == "\\":
++                # Escaping
++                if i + 1 >= len(pattern):
++                    raise ValueError()
++                tokens.append(("literal", pattern[i + 1]))
++                i += 2
++            elif pattern[i] == "?":
++                tokens.append(("?",))
++                i += 1
++            elif pattern[i] == "*":
++                tokens.append(("*",))
++                i += 1
++            elif pattern[i] == "[":
++                negated, chars, next_idx = parse_char_class(pattern, i + 1)
++                tokens.append(("class", negated, chars))
++                i = next_idx
++            else:
++                tokens.append(("literal", pattern[i]))
++                i += 1
++        return tokens
++
++    try:
++        tokens = parse_pattern(normalized_pattern)
++    except ValueError:
++        raise ValueError()
++
++    # Recursive matcher
++    def match_tokens(tokens, token_idx, text, text_idx):
++        """Recursively match tokens against text"""
++        # Base case: both pattern and text exhausted
++        if token_idx >= len(tokens) and text_idx >= len(text):
++            return True
++
++        # Base case: pattern exhausted but text not
++        if token_idx >= len(tokens):
++            return False
++
++        token = tokens[token_idx]
++
++        if token[0] == "literal":
++            # Match literal character
++            if text_idx >= len(text) or text[text_idx] != token[1]:
++                return False
++            return match_tokens(tokens, token_idx + 1, text, text_idx + 1)
++
++        elif token[0] == "?":
++            # Match exactly one character
++            if text_idx >= len(text):
++                return False
++            return match_tokens(tokens, token_idx + 1, text, text_idx + 1)
++
++        elif token[0] == "*":
++            # Match zero or more characters
++            # Try matching zero characters first, then one, two, etc.
++            for i in range(text_idx, len(text) + 1):
++                if match_tokens(tokens, token_idx + 1, text, i):
++                    return True
++            return False
++
++        elif token[0] == "class":
++            # Match character class
++            negated, chars = token[1], token[2]
++            if text_idx >= len(text):
++                return False
++            if not matches_char_class(text[text_idx], negated, chars):
++                return False
++            return match_tokens(tokens, token_idx + 1, text, text_idx + 1)
++
++        return False
++
++    return match_tokens(tokens, 0, text, 0)
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -46,4 +46,52 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    # Rule 1: records must be a list
++    if not isinstance(records, list):
++        raise TypeError()
++
++    # Rule 2: keys must be a non-empty list
++    if not isinstance(keys, list) or len(keys) == 0:
++        raise ValueError()
++
++    # Rule 3 & 4: Validate each key
++    for key in keys:
++        if not isinstance(key, (tuple, list)) or len(key) != 2:
++            raise ValueError()
++        field_name, direction = key
++        if direction not in ("asc", "desc"):
++            raise ValueError()
++
++    # Create a new list to return (Rule 11)
++    result = list(records)
++
++    # Sort from the last key backwards so that the first key takes precedence
++    # This is because Python's sort is stable
++    for field_name, direction in reversed(keys):
++        reverse = (direction == "desc")
++
++        # Create a key function that handles None values and type checking
++        def make_sort_key(field_name, direction):
++            def sort_key(record):
++                value = record.get(field_name, None)
++
++                # Rule 6: None values sort after non-None values
++                # Rule 5: Missing field treated as None
++                if value is None:
++                    # Return tuple (1, 0) to sort None values last
++                    # 1 indicates "is None", 0 is arbitrary
++                    return (1, 0)
++                else:
++                    # Return tuple (0, value) to sort non-None values first
++                    # 0 indicates "is not None"
++                    return (0, value)
++            return sort_key
++
++        try:
++            result.sort(key=make_sort_key(field_name, direction), reverse=reverse)
++        except TypeError as e:
++            # Rule 8: If incomparable types, raise TypeError
++            # This happens when comparing values of incompatible types
++            raise TypeError()
++
++    return result
+modified: table_render.py
+--- a/table_render.py
++++ b/table_render.py
+@@ -55,4 +55,91 @@
+ 
+     Returns the list of rendered lines (no trailing newline characters).
+     """
+-    raise NotImplementedError
++    # Rule 1: Validate headers
++    if not isinstance(headers, list) or len(headers) == 0:
++        raise ValueError()
++    for header in headers:
++        if not isinstance(header, str):
++            raise TypeError()
++
++    # Rule 2: Validate rows
++    for row in rows:
++        if not isinstance(row, list) or len(row) != len(headers):
++            raise ValueError()
++        for cell in row:
++            if not isinstance(cell, str):
++                raise TypeError()
++
++    # Rule 3: Validate alignments if given
++    if alignments is None:
++        alignments = ["left"] * len(headers)
++    else:
++        if len(alignments) != len(headers):
++            raise ValueError()
++        for alignment in alignments:
++            if alignment not in ("left", "right", "center"):
++                raise ValueError()
++
++    # Rule 4: Validate max_col_width if given
++    if max_col_width is not None:
++        if not isinstance(max_col_width, int) or max_col_width < 4:
++            raise ValueError()
++
++    # Rule 6: Truncate headers and cells if needed
++    truncated_headers = []
++    for header in headers:
++        if max_col_width is not None and len(header) > max_col_width:
++            truncated_headers.append(header[:max_col_width - 3] + "...")
++        else:
++            truncated_headers.append(header)
++
++    truncated_rows = []
++    for row in rows:
++        truncated_row = []
++        for cell in row:
++            if max_col_width is not None and len(cell) > max_col_width:
++                truncated_row.append(cell[:max_col_width - 3] + "...")
++            else:
++                truncated_row.append(cell)
++        truncated_rows.append(truncated_row)
++
++    # Rule 7: Compute column widths
++    col_widths = []
++    for col_idx in range(len(headers)):
++        width = len(truncated_headers[col_idx])
++        for row in truncated_rows:
++            width = max(width, len(row[col_idx]))
++        col_widths.append(width)
++
++    # Rule 9: Create border line
++    def make_border():
++        border_parts = []
++        for width in col_widths:
++            border_parts.append("-" * (width + 2))
++        return "+" + "+".join(border_parts) + "+"
++
++    # Rule 8: Create a padded cell line
++    def pad_and_format_row(cells):
++        padded_cells = []
++        for col_idx, cell in enumerate(cells):
++            width = col_widths[col_idx]
++            alignment = alignments[col_idx]
++            if alignment == "left":
++                padded = cell.ljust(width)
++            elif alignment == "right":
++                padded = cell.rjust(width)
++            else:  # center
++                padded = cell.center(width)
++            padded_cells.append("| " + padded + " ")
++        return "".join(padded_cells) + "|"
++
++    # Rule 10: Build the output lines
++    result = []
++    result.append(make_border())
++    result.append(pad_and_format_row(truncated_headers))
++    result.append(make_border())
++    for row in truncated_rows:
++        result.append(pad_and_format_row(row))
++    result.append(make_border())
++
++    return result

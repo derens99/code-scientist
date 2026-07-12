@@ -1,0 +1,4 @@
+{
+  "id": "1783833946746363000-22222-0046",
+  "response": "{\"winner\": \"first\", \"rationale\": \"Mirrored pairing with the checklist arm listed first; the verdict is order-invariant. Checklist extraction subsumes the re-read mechanism (a forced careful pass over the spec) while adding front-loaded timing, a persistent numbered artifact, and an enumerable, transcript-auditable verification step, all at one to two prose turns of overhead against measured five-plus turns of headroom. Proxy judgment of experimental promise, not a measured result.\", \"judge_trace\": \"Position-bias check applied; identical weights as the reversed pairing — mechanism subsumption plus compliance observability decide the match for checklist.\", \"uncertainty\": 0.3, \"debate_transcript\": [\"Judge: mirrored match confirms checklist over re-read; no order effect.\"], \"outcome\": \"win\"}"
+}

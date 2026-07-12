@@ -1,0 +1,243 @@
+modified: event_windows.py
+--- a/event_windows.py
++++ b/event_windows.py
+@@ -49,4 +49,62 @@
+ 
+     Returns the list of `(window_start, window_end, aggregate)` tuples.
+     """
+-    raise NotImplementedError
++    # Validate window_size
++    if not isinstance(window_size, int) or window_size <= 0:
++        raise ValueError("window_size must be a positive int")
++
++    # Validate agg
++    valid_aggs = {"sum", "avg", "min", "max", "count"}
++    if agg not in valid_aggs:
++        raise ValueError(f"agg must be one of {valid_aggs}")
++
++    # Validate events is a list
++    if not isinstance(events, list):
++        raise ValueError("events must be a list")
++
++    # Handle empty events
++    if not events:
++        return []
++
++    # Validate and group events by window
++    windows = {}
++    for event in events:
++        # Check element is tuple or list of exactly 2 elements
++        if not isinstance(event, (tuple, list)) or len(event) != 2:
++            raise ValueError("Each event must be a tuple or list of exactly two elements")
++
++        timestamp, value = event
++
++        # Check timestamp is int
++        if not isinstance(timestamp, int):
++            raise TypeError("timestamp must be an int")
++
++        # Compute window index and start
++        window_idx = timestamp // window_size
++        window_start = window_idx * window_size
++
++        # Add to windows dict
++        if window_start not in windows:
++            windows[window_start] = []
++        windows[window_start].append(value)
++
++    # Compute aggregates
++    result = []
++    for window_start in sorted(windows.keys()):
++        values = windows[window_start]
++        window_end = window_start + window_size
++
++        if agg == "sum":
++            aggregate = sum(values)
++        elif agg == "avg":
++            aggregate = sum(values) / len(values)
++        elif agg == "min":
++            aggregate = min(values)
++        elif agg == "max":
++            aggregate = max(values)
++        elif agg == "count":
++            aggregate = len(values)
++
++        result.append((window_start, window_end, aggregate))
++
++    return result
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -1,4 +1,6 @@
+ """Stable multi-key sorter for lists of dict records."""
++
++from functools import cmp_to_key
+ 
+ 
+ def sort_records(records, keys):
+@@ -46,4 +48,67 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    # Validate records is a list
++    if not isinstance(records, list):
++        raise TypeError("records must be a list")
++
++    # Validate keys is a non-empty list
++    if not isinstance(keys, list) or not keys:
++        raise ValueError("keys must be a non-empty list")
++
++    # Validate each key
++    for key in keys:
++        if not isinstance(key, (tuple, list)) or len(key) != 2:
++            raise ValueError("Each key must be a tuple or list of exactly two elements")
++        field_name, direction = key
++        if direction not in ("asc", "desc"):
++            raise ValueError("direction must be exactly 'asc' or 'desc'")
++
++    # Check type comparability for all non-None values per field
++    for field_name, direction in keys:
++        non_none_values = []
++        for record in records:
++            value = record.get(field_name, None)
++            if value is not None:
++                non_none_values.append(value)
++        # Check type comparability
++        if len(non_none_values) > 1:
++            for val in non_none_values[1:]:
++                try:
++                    _ = non_none_values[0] < val
++                except TypeError:
++                    raise TypeError(f"Incomparable types for field '{field_name}'")
++
++    # Create a comparison function for multi-key sorting
++    def compare(rec1, rec2):
++        for field_name, direction in keys:
++            val1 = rec1.get(field_name, None)
++            val2 = rec2.get(field_name, None)
++
++            # Handle None: None always sorts last, regardless of direction
++            if val1 is None and val2 is None:
++                continue  # Equal, move to next key
++            elif val1 is None:
++                return 1  # val1 (None) sorts after val2
++            elif val2 is None:
++                return -1  # val1 sorts before val2 (which is None)
++
++            # Both are non-None, compare them
++            if val1 < val2:
++                cmp_result = -1
++            elif val1 > val2:
++                cmp_result = 1
++            else:
++                cmp_result = 0  # Equal, move to next key
++
++            # If not equal, return result (or reversed for desc)
++            if cmp_result != 0:
++                if direction == "desc":
++                    return -cmp_result
++                else:
++                    return cmp_result
++
++        return 0  # All keys are equal
++
++    result = sorted(records, key=cmp_to_key(compare))
++    return result
+modified: table_render.py
+--- a/table_render.py
++++ b/table_render.py
+@@ -55,4 +55,92 @@
+ 
+     Returns the list of rendered lines (no trailing newline characters).
+     """
+-    raise NotImplementedError
++    # Validate headers
++    if not isinstance(headers, list) or len(headers) == 0:
++        raise ValueError("headers must be a non-empty list")
++    for header in headers:
++        if not isinstance(header, str):
++            raise TypeError("each header must be a string")
++
++    # Validate rows
++    for row in rows:
++        if not isinstance(row, list) or len(row) != len(headers):
++            raise ValueError("each row must be a list with same length as headers")
++        for cell in row:
++            if not isinstance(cell, str):
++                raise TypeError("each cell must be a string")
++
++    # Set default alignments
++    if alignments is None:
++        alignments = ["left"] * len(headers)
++
++    # Validate alignments
++    if len(alignments) != len(headers):
++        raise ValueError("alignments length must equal headers length")
++    for alignment in alignments:
++        if alignment not in ("left", "right", "center"):
++            raise ValueError("each alignment must be 'left', 'right', or 'center'")
++
++    # Validate max_col_width
++    if max_col_width is not None:
++        if not isinstance(max_col_width, int) or max_col_width < 4:
++            raise ValueError("max_col_width must be an integer >= 4")
++
++    # Apply truncation
++    def truncate(text):
++        if max_col_width is not None and len(text) > max_col_width:
++            return text[:max_col_width - 3] + "..."
++        return text
++
++    # Truncate headers
++    truncated_headers = [truncate(h) for h in headers]
++
++    # Truncate rows
++    truncated_rows = []
++    for row in rows:
++        truncated_row = [truncate(cell) for cell in row]
++        truncated_rows.append(truncated_row)
++
++    # Compute column widths
++    col_widths = []
++    for col_idx in range(len(headers)):
++        max_width = len(truncated_headers[col_idx])
++        for row in truncated_rows:
++            max_width = max(max_width, len(row[col_idx]))
++        col_widths.append(max_width)
++
++    # Create alignment functions
++    align_funcs = {
++        "left": str.ljust,
++        "right": str.rjust,
++        "center": str.center,
++    }
++
++    # Build horizontal border line
++    def make_border():
++        border_parts = []
++        for width in col_widths:
++            border_parts.append("-" * (width + 2))
++        return "+" + "+".join(border_parts) + "+"
++
++    # Build a row line
++    def make_row_line(cells):
++        line_parts = []
++        for col_idx, cell in enumerate(cells):
++            width = col_widths[col_idx]
++            alignment = alignments[col_idx]
++            align_func = align_funcs[alignment]
++            padded = align_func(cell, width)
++            line_parts.append(" " + padded + " ")
++        return "|" + "|".join(line_parts) + "|"
++
++    # Build result
++    result = []
++    result.append(make_border())
++    result.append(make_row_line(truncated_headers))
++    result.append(make_border())
++    for row in truncated_rows:
++        result.append(make_row_line(row))
++    result.append(make_border())
++
++    return result

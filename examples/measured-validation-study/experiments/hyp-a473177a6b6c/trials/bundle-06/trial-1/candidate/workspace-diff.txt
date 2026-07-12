@@ -1,0 +1,411 @@
+modified: glob_match.py
+--- a/glob_match.py
++++ b/glob_match.py
+@@ -45,4 +45,198 @@
+ 
+     Returns `True` or `False`.
+     """
+-    raise NotImplementedError
++
++    def parse_char_class(pattern, start_idx):
++        """Parse a character class [...] and return (negated, char_set, end_idx)"""
++        idx = start_idx + 1  # Skip the [
++        negated = False
++
++        # Check for leading ! or ^
++        if idx < len(pattern) and pattern[idx] in ("!", "^"):
++            negated = True
++            idx += 1
++
++        class_body_start = idx
++        chars = set()
++
++        # Parse the character class body
++        while idx < len(pattern):
++            if pattern[idx] == "]":
++                # End of class
++                class_body = pattern[class_body_start:idx]
++                # Process the class body to extract chars and ranges
++                i = 0
++                while i < len(class_body):
++                    if i + 2 < len(class_body) and class_body[i + 1] == "-":
++                        # Potential range
++                        x = class_body[i]
++                        y = class_body[i + 2]
++                        if ord(x) <= ord(y):
++                            # Valid range
++                            for code_point in range(ord(x), ord(y) + 1):
++                                chars.add(chr(code_point))
++                            i += 3
++                        else:
++                            # Invalid range, treat as literals
++                            chars.add(x)
++                            i += 1
++                    else:
++                        chars.add(class_body[i])
++                        i += 1
++                return (negated, chars, idx + 1)
++            idx += 1
++
++        # If we get here, the class is unterminated
++        raise ValueError
++
++    def match_helper(pattern, text, p_idx, t_idx, memo):
++        """Recursive matching function with memoization"""
++        if (p_idx, t_idx) in memo:
++            return memo[(p_idx, t_idx)]
++
++        # Base cases
++        if p_idx == len(pattern):
++            result = (t_idx == len(text))
++            memo[(p_idx, t_idx)] = result
++            return result
++
++        if t_idx == len(text):
++            # Check if remaining pattern can match empty string
++            # This includes: *, [...]*, and combinations
++            temp_p_idx = p_idx
++            while temp_p_idx < len(pattern):
++                if pattern[temp_p_idx] == "*":
++                    temp_p_idx += 1
++                elif pattern[temp_p_idx] == "[":
++                    # Check if this is [...]* which can match zero characters
++                    try:
++                        negated, char_set, class_end_idx = parse_char_class(pattern, temp_p_idx)
++                        if class_end_idx < len(pattern) and pattern[class_end_idx] == "*":
++                            temp_p_idx = class_end_idx + 1
++                        else:
++                            result = False
++                            memo[(p_idx, t_idx)] = result
++                            return result
++                    except ValueError:
++                        result = False
++                        memo[(p_idx, t_idx)] = result
++                        return result
++                else:
++                    result = False
++                    memo[(p_idx, t_idx)] = result
++                    return result
++            result = True
++            memo[(p_idx, t_idx)] = result
++            return result
++
++        # Handle backslash escaping
++        if pattern[p_idx] == "\\":
++            if p_idx + 1 >= len(pattern):
++                raise ValueError
++            # Match literal character
++            if text[t_idx] == pattern[p_idx + 1]:
++                result = match_helper(pattern, text, p_idx + 2, t_idx + 1, memo)
++            else:
++                result = False
++            memo[(p_idx, t_idx)] = result
++            return result
++
++        # Handle character class
++        if pattern[p_idx] == "[":
++            negated, char_set, class_end_idx = parse_char_class(pattern, p_idx)
++
++            # Check if this is followed by a * quantifier
++            if class_end_idx < len(pattern) and pattern[class_end_idx] == "*":
++                # Handle [...]* as a quantified element
++                next_p_idx = class_end_idx + 1
++                # Try matching zero characters
++                if match_helper(pattern, text, next_p_idx, t_idx, memo):
++                    result = True
++                    memo[(p_idx, t_idx)] = result
++                    return result
++                # Try matching one or more characters
++                orig_t_idx = t_idx
++                while t_idx < len(text):
++                    char_matches = text[t_idx] in char_set
++                    if negated:
++                        char_matches = not char_matches
++                    if not char_matches:
++                        break
++                    t_idx += 1
++                    if match_helper(pattern, text, next_p_idx, t_idx, memo):
++                        result = True
++                        memo[(p_idx, t_idx)] = result
++                        return result
++                result = False
++                memo[(p_idx, t_idx)] = result
++                return result
++            else:
++                # Regular character class without quantifier
++                if t_idx < len(text):
++                    char_matches = text[t_idx] in char_set
++                    if negated:
++                        char_matches = not char_matches
++
++                    if char_matches:
++                        result = match_helper(pattern, text, class_end_idx, t_idx + 1, memo)
++                    else:
++                        result = False
++                else:
++                    result = False
++                memo[(p_idx, t_idx)] = result
++                return result
++
++        # Handle ?
++        if pattern[p_idx] == "?":
++            result = match_helper(pattern, text, p_idx + 1, t_idx + 1, memo)
++            memo[(p_idx, t_idx)] = result
++            return result
++
++        # Handle *
++        if pattern[p_idx] == "*":
++            # Skip consecutive stars
++            next_p_idx = p_idx + 1
++            while next_p_idx < len(pattern) and pattern[next_p_idx] == "*":
++                next_p_idx += 1
++
++            # Try matching zero characters, one character, etc.
++            # First try matching zero characters
++            if match_helper(pattern, text, next_p_idx, t_idx, memo):
++                result = True
++                memo[(p_idx, t_idx)] = result
++                return result
++
++            # Try matching one or more characters
++            while t_idx < len(text):
++                t_idx += 1
++                if match_helper(pattern, text, next_p_idx, t_idx, memo):
++                    result = True
++                    memo[(p_idx, t_idx)] = result
++                    return result
++
++            result = False
++            memo[(p_idx, t_idx)] = result
++            return result
++
++        # Handle literal character
++        if text[t_idx] == pattern[p_idx]:
++            result = match_helper(pattern, text, p_idx + 1, t_idx + 1, memo)
++        else:
++            result = False
++        memo[(p_idx, t_idx)] = result
++        return result
++
++    # Validate pattern for trailing backslash
++    if len(pattern) > 0 and pattern[-1] == "\\" and (len(pattern) < 2 or pattern[-2] != "\\"):
++        # Check if this is truly a trailing backslash (not escaped)
++        # Count preceding backslashes
++        count = 0
++        i = len(pattern) - 1
++        while i >= 0 and pattern[i] == "\\":
++            count += 1
++            i -= 1
++        if count % 2 == 1:  # Odd number of backslashes means the last one is unescaped
++            raise ValueError
++
++    memo = {}
++    return match_helper(pattern, text, 0, 0, memo)
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -1,4 +1,40 @@
+ """Stable multi-key sorter for lists of dict records."""
++
++
++class _ReverseCompare:
++    """Wrapper to reverse comparison order for descending sorts while preserving None placement."""
++    def __init__(self, value):
++        self.value = value
++
++    def __lt__(self, other):
++        if isinstance(other, _ReverseCompare):
++            return self.value > other.value
++        return NotImplemented
++
++    def __le__(self, other):
++        if isinstance(other, _ReverseCompare):
++            return self.value >= other.value
++        return NotImplemented
++
++    def __gt__(self, other):
++        if isinstance(other, _ReverseCompare):
++            return self.value < other.value
++        return NotImplemented
++
++    def __ge__(self, other):
++        if isinstance(other, _ReverseCompare):
++            return self.value <= other.value
++        return NotImplemented
++
++    def __eq__(self, other):
++        if isinstance(other, _ReverseCompare):
++            return self.value == other.value
++        return NotImplemented
++
++    def __ne__(self, other):
++        if isinstance(other, _ReverseCompare):
++            return self.value != other.value
++        return NotImplemented
+ 
+ 
+ def sort_records(records, keys):
+@@ -46,4 +82,73 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    # Validate records
++    if not isinstance(records, list):
++        raise TypeError
++
++    # Validate keys
++    if not isinstance(keys, list) or len(keys) == 0:
++        raise ValueError
++
++    # Validate each key tuple
++    for key in keys:
++        if not isinstance(key, (tuple, list)) or len(key) != 2:
++            raise ValueError
++        field_name, direction = key
++        if direction not in ("asc", "desc"):
++            raise ValueError
++
++    # Create a copy with index to maintain stability
++    indexed_records = [(i, rec) for i, rec in enumerate(records)]
++
++    # Create sort key function - process keys in reverse for multi-key sort stability
++    def make_sort_key(idx, record):
++        key_values = []
++        for field_name, direction in reversed(keys):
++            value = record.get(field_name, None)
++            # None always sorts last
++            if value is None:
++                # (1, None) sorts after (0, any_value)
++                key_values.append((1, None))
++            else:
++                # For non-None, we need to handle direction and compare
++                # We'll use (0, value) for non-None, with direction applied later
++                key_values.append((0, value))
++        return tuple(key_values)
++
++    # Validate that all values are comparable
++    for idx, record in indexed_records:
++        for field_name, direction in keys:
++            value = record.get(field_name, None)
++            if value is not None:
++                # Check comparability by trying to compare with other values
++                for other_idx, other_record in indexed_records:
++                    other_value = other_record.get(field_name, None)
++                    if other_value is not None and type(value) != type(other_value):
++                        try:
++                            _ = value < other_value
++                        except TypeError:
++                            raise TypeError
++
++    # Sort with a custom approach using Python's stable sort
++    result = indexed_records[:]
++
++    # Process keys in reverse order for stable sorting
++    for field_name, direction in reversed(keys):
++        def sort_key(item):
++            idx, record = item
++            value = record.get(field_name, None)
++            if value is None:
++                # None sorts last regardless of direction
++                return (1, None)
++            else:
++                if direction == "asc":
++                    return (0, value)
++                else:  # desc
++                    # Use ReverseCompare to invert order without affecting None placement
++                    return (0, _ReverseCompare(value))
++
++        result.sort(key=sort_key)
++
++    # Extract just the records, maintaining order
++    return [rec for idx, rec in result]
+modified: table_render.py
+--- a/table_render.py
++++ b/table_render.py
+@@ -55,4 +55,84 @@
+ 
+     Returns the list of rendered lines (no trailing newline characters).
+     """
+-    raise NotImplementedError
++    # Validate headers
++    if not isinstance(headers, list) or len(headers) == 0:
++        raise ValueError
++    for h in headers:
++        if not isinstance(h, str):
++            raise TypeError
++
++    # Validate rows
++    for row in rows:
++        if not isinstance(row, list) or len(row) != len(headers):
++            raise ValueError
++        for cell in row:
++            if not isinstance(cell, str):
++                raise TypeError
++
++    # Validate alignments
++    if alignments is None:
++        alignments = ["left"] * len(headers)
++    else:
++        if len(alignments) != len(headers):
++            raise ValueError
++        for align in alignments:
++            if align not in ("left", "right", "center"):
++                raise ValueError
++
++    # Validate max_col_width
++    if max_col_width is not None:
++        if not isinstance(max_col_width, int) or max_col_width < 4:
++            raise ValueError
++
++    # Apply truncation to headers and rows
++    def truncate_cell(cell):
++        if max_col_width is not None and len(cell) > max_col_width:
++            return cell[:max_col_width - 3] + "..."
++        return cell
++
++    headers = [truncate_cell(h) for h in headers]
++    rows = [[truncate_cell(cell) for cell in row] for row in rows]
++
++    # Compute column widths
++    col_widths = []
++    for col_idx in range(len(headers)):
++        width = len(headers[col_idx])
++        for row in rows:
++            width = max(width, len(row[col_idx]))
++        col_widths.append(width)
++
++    # Helper function to create a border line
++    def make_border():
++        parts = ["+"]
++        for width in col_widths:
++            parts.append("-" * (width + 2))
++            parts.append("+")
++        return "".join(parts)
++
++    # Helper function to create a row line
++    def make_row_line(cells):
++        parts = ["|"]
++        for col_idx, cell in enumerate(cells):
++            width = col_widths[col_idx]
++            align = alignments[col_idx]
++            if align == "left":
++                padded = cell.ljust(width)
++            elif align == "right":
++                padded = cell.rjust(width)
++            else:  # center
++                padded = cell.center(width)
++            parts.append(" " + padded + " ")
++            parts.append("|")
++        return "".join(parts)
++
++    # Build the result
++    result = []
++    result.append(make_border())
++    result.append(make_row_line(headers))
++    result.append(make_border())
++    for row in rows:
++        result.append(make_row_line(row))
++    result.append(make_border())
++
++    return result

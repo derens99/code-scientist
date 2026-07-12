@@ -1,0 +1,264 @@
+modified: glob_match.py
+--- a/glob_match.py
++++ b/glob_match.py
+@@ -45,4 +45,111 @@
+ 
+     Returns `True` or `False`.
+     """
+-    raise NotImplementedError
++    # Parse pattern into tokens
++    tokens = _parse_pattern(pattern)
++    return _match_tokens(tokens, text, 0, 0)
++
++
++def _parse_pattern(pattern):
++    """Parse a glob pattern into tokens."""
++    tokens = []
++    i = 0
++    while i < len(pattern):
++        if pattern[i] == '\\':
++            if i + 1 >= len(pattern):
++                raise ValueError("Backslash at end of pattern")
++            tokens.append(('literal', pattern[i + 1]))
++            i += 2
++        elif pattern[i] == '*':
++            # Collapse consecutive '*' into one
++            while i + 1 < len(pattern) and pattern[i + 1] == '*':
++                i += 1
++            tokens.append(('star', None))
++            i += 1
++        elif pattern[i] == '?':
++            tokens.append(('question', None))
++            i += 1
++        elif pattern[i] == '[':
++            # Parse character class
++            close_idx = pattern.find(']', i + 1)
++            if close_idx == -1:
++                raise ValueError("Unterminated character class")
++            class_body = pattern[i + 1:close_idx]
++            tokens.append(('class', class_body))
++            i = close_idx + 1
++        else:
++            tokens.append(('literal', pattern[i]))
++            i += 1
++    return tokens
++
++
++def _match_char_class(class_body, char):
++    """Check if char matches the character class."""
++    if not class_body:
++        return False
++
++    negate = False
++    if class_body[0] in ('!', '^'):
++        negate = True
++        body = class_body[1:]
++    else:
++        body = class_body
++
++    matched = False
++    i = 0
++    while i < len(body):
++        if i + 2 < len(body) and body[i + 1] == '-' and body[i] < body[i + 2]:
++            # This is a range
++            if ord(body[i]) <= ord(char) <= ord(body[i + 2]):
++                matched = True
++                break
++            i += 3
++        else:
++            # Literal character
++            if body[i] == char:
++                matched = True
++                break
++            i += 1
++
++    return matched != negate
++
++
++def _match_tokens(tokens, text, token_idx, text_idx):
++    """Recursively match tokens against text."""
++    # Base case: both exhausted
++    if token_idx == len(tokens) and text_idx == len(text):
++        return True
++
++    # Pattern exhausted but text remains
++    if token_idx == len(tokens):
++        return False
++
++    token_type, token_val = tokens[token_idx]
++
++    if token_type == 'literal':
++        if text_idx < len(text) and text[text_idx] == token_val:
++            return _match_tokens(tokens, text, token_idx + 1, text_idx + 1)
++        return False
++
++    elif token_type == 'question':
++        if text_idx < len(text):
++            return _match_tokens(tokens, text, token_idx + 1, text_idx + 1)
++        return False
++
++    elif token_type == 'class':
++        if text_idx < len(text) and _match_char_class(token_val, text[text_idx]):
++            return _match_tokens(tokens, text, token_idx + 1, text_idx + 1)
++        return False
++
++    elif token_type == 'star':
++        # Try matching 0 or more characters
++        # First try matching 0 characters
++        if _match_tokens(tokens, text, token_idx + 1, text_idx):
++            return True
++        # Then try matching 1, 2, 3... characters
++        for i in range(text_idx, len(text) + 1):
++            if _match_tokens(tokens, text, token_idx + 1, i):
++                return True
++        return False
++
++    return False
+modified: num_format.py
+--- a/num_format.py
++++ b/num_format.py
+@@ -48,4 +48,72 @@
+ 
+     Returns the formatted string.
+     """
+-    raise NotImplementedError
++    # Validate value type
++    if isinstance(value, bool) or not isinstance(value, (int, float)):
++        raise TypeError(f"value must be int or float, not {type(value).__name__}")
++
++    # Validate value is finite
++    if math.isnan(value) or math.isinf(value):
++        raise ValueError("value must be finite")
++
++    # Validate decimals
++    if not isinstance(decimals, int) or decimals < 0:
++        raise ValueError("decimals must be a non-negative int")
++
++    # Validate width
++    if width is not None:
++        if not isinstance(width, int) or width < 0:
++            raise ValueError("width must be a non-negative int")
++
++    # Apply percent conversion before rounding
++    if percent:
++        value = value * 100
++
++    # Round
++    rounded = round(value, decimals)
++
++    # Suppress negative zero
++    if rounded == 0:
++        rounded = 0
++
++    # Determine sign
++    is_negative = rounded < 0
++    abs_value = abs(rounded)
++
++    # Format the number
++    if decimals == 0:
++        # No decimal point
++        int_part = str(int(abs_value))
++    else:
++        # With decimal point
++        formatted_with_decimals = f"{abs_value:.{decimals}f}"
++        int_part, frac_part = formatted_with_decimals.split('.')
++
++    # Apply thousands separator
++    if thousands_sep:
++        # Insert commas in the integer part from the right
++        int_list = list(int_part)
++        for i in range(len(int_list) - 3, 0, -3):
++            int_list.insert(i, ',')
++        int_part = ''.join(int_list)
++
++    # Build the number string
++    if decimals == 0:
++        num_str = int_part
++    else:
++        num_str = int_part + '.' + frac_part
++
++    # Add sign
++    if is_negative:
++        num_str = '-' + num_str
++
++    # Add percent sign
++    if percent:
++        num_str = num_str + '%'
++
++    # Apply width padding
++    if width is not None:
++        if len(num_str) < width:
++            num_str = ' ' * (width - len(num_str)) + num_str
++
++    return num_str
+modified: record_split.py
+--- a/record_split.py
++++ b/record_split.py
+@@ -44,4 +44,66 @@
+ 
+     Returns a list of field strings, in order.
+     """
+-    raise NotImplementedError
++    # Validate sep
++    if not isinstance(sep, str) or len(sep) != 1:
++        raise ValueError("sep must be a string of length exactly 1")
++    if sep == '"':
++        raise ValueError("sep must not be the double-quote character")
++
++    # Handle empty line
++    if line == "":
++        return [""]
++
++    fields = []
++    i = 0
++
++    while i < len(line):
++        if line[i] == '"':
++            # Quoted field
++            field_value = ""
++            i += 1  # Skip opening quote
++            while i < len(line):
++                if line[i] == '"':
++                    # Check if it's a doubled quote
++                    if i + 1 < len(line) and line[i + 1] == '"':
++                        # Doubled quote, add one quote to field
++                        field_value += '"'
++                        i += 2
++                    else:
++                        # Closing quote
++                        i += 1
++                        break
++                else:
++                    field_value += line[i]
++                    i += 1
++            else:
++                # Reached end of line without finding closing quote
++                raise ValueError("Unterminated quoted field")
++
++            # Check that the next character is sep or end of line
++            if i < len(line) and line[i] != sep:
++                raise ValueError("Trailing data after closing quote")
++
++            fields.append(field_value)
++
++            # Skip separator if present
++            if i < len(line) and line[i] == sep:
++                i += 1
++        else:
++            # Unquoted field
++            field_value = ""
++            while i < len(line) and line[i] != sep:
++                field_value += line[i]
++                i += 1
++
++            fields.append(field_value)
++
++            # Skip separator if present
++            if i < len(line) and line[i] == sep:
++                i += 1
++
++    # Handle trailing separator
++    if len(line) > 0 and line[-1] == sep:
++        fields.append("")
++
++    return fields

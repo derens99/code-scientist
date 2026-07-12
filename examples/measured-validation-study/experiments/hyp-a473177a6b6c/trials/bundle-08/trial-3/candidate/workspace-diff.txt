@@ -1,0 +1,253 @@
+modified: event_windows.py
+--- a/event_windows.py
++++ b/event_windows.py
+@@ -49,4 +49,67 @@
+ 
+     Returns the list of `(window_start, window_end, aggregate)` tuples.
+     """
+-    raise NotImplementedError
++    # Rule 1: Check window_size is positive int
++    if not isinstance(window_size, int) or window_size <= 0:
++        raise ValueError
++
++    # Rule 2: Check agg is valid
++    if agg not in ("sum", "avg", "min", "max", "count"):
++        raise ValueError
++
++    # Rule 3: Check events is a list
++    if not isinstance(events, list):
++        raise ValueError
++
++    # Rule 13: Empty events returns empty list
++    if not events:
++        return []
++
++    # Validate and group events by window
++    windows = {}
++    for event in events:
++        # Rule 3: Each element must be tuple/list of exactly 2 elements
++        if not isinstance(event, (tuple, list)) or len(event) != 2:
++            raise ValueError
++
++        timestamp, value = event
++
++        # Rule 4: timestamp must be int
++        if not isinstance(timestamp, int):
++            raise TypeError
++
++        # Rule 5: Calculate window index
++        window_index = timestamp // window_size
++        window_start = window_index * window_size
++
++        # Group events by window
++        if window_start not in windows:
++            windows[window_start] = []
++        windows[window_start].append(value)
++
++    # Rule 14: Sort by window_start and build result
++    result = []
++    for window_start in sorted(windows.keys()):
++        values = windows[window_start]
++        window_end = window_start + window_size
++
++        # Calculate aggregate based on agg type
++        if agg == "sum":
++            # Rule 9: Use sum()
++            aggregate = sum(values)
++        elif agg == "avg":
++            # Rule 10: Always float result
++            aggregate = sum(values) / len(values)
++        elif agg == "min":
++            # Rule 11: Use numeric min
++            aggregate = min(values)
++        elif agg == "max":
++            # Rule 11: Use numeric max
++            aggregate = max(values)
++        elif agg == "count":
++            # Rule 12: Count events, ignore value
++            aggregate = len(values)
++
++        result.append((window_start, window_end, aggregate))
++
++    return result
+modified: path_normalize.py
+--- a/path_normalize.py
++++ b/path_normalize.py
+@@ -44,4 +44,75 @@
+ 
+     Returns the normalized path string.
+     """
+-    raise NotImplementedError
++    # Rule 1: Check type
++    if not isinstance(path, str):
++        raise TypeError
++
++    # Rule 2: Check not empty
++    if path == "":
++        raise ValueError
++
++    # Rule 3: Check no backslashes
++    if "\\" in path:
++        raise ValueError
++
++    # Determine if absolute (starts with /)
++    is_absolute = path.startswith("/")
++
++    # Rule 4: Collapse consecutive slashes to single slash
++    # Replace multiple slashes with single slash
++    normalized = path
++    while "//" in normalized:
++        normalized = normalized.replace("//", "/")
++
++    # Rule 9: Remove trailing slash (except root)
++    if len(normalized) > 1 and normalized.endswith("/"):
++        normalized = normalized[:-1]
++
++    # Split into segments
++    if is_absolute:
++        # Remove leading "/" before splitting
++        segments = normalized[1:].split("/")
++    else:
++        segments = normalized.split("/")
++
++    # Process segments: handle . and ..
++    result = []
++    for segment in segments:
++        if segment == "." or segment == "":
++            # Rule 5: Remove . segments
++            # Rule 4: Empty segments (from multiple slashes) are ignored
++            continue
++        elif segment == "..":
++            if result:
++                # Check if last result item is a real segment (not "..")
++                # Rule 6: Cancel preceding real segment
++                if result[-1] != "..":
++                    result.pop()
++                else:
++                    # Last item is "..", so append another ".."
++                    result.append("..")
++            else:
++                # No preceding segment
++                if is_absolute:
++                    # Rule 7: For absolute path, drop ..
++                    pass
++                else:
++                    # Rule 8: For relative path, keep .. literally
++                    result.append("..")
++        else:
++            # Rule 13: Keep all other segments literally
++            result.append(segment)
++
++    # Build output
++    if is_absolute:
++        # Rule 12: Absolute path always starts with exactly one /
++        if not result:
++            # Rule 10: Root path
++            return "/"
++        return "/" + "/".join(result)
++    else:
++        # Rule 11: Relative path with no segments becomes "."
++        if not result:
++            return "."
++        return "/".join(result)
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -46,4 +46,96 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    # Rule 1: Check records is a list
++    if not isinstance(records, list):
++        raise TypeError
++
++    # Rule 2: Check keys is non-empty list
++    if not isinstance(keys, list) or len(keys) == 0:
++        raise ValueError
++
++    # Rule 3 & 4: Validate each key pair
++    for key_pair in keys:
++        if not isinstance(key_pair, (tuple, list)) or len(key_pair) != 2:
++            raise ValueError
++        field_name, direction = key_pair
++        if direction not in ("asc", "desc"):
++            raise ValueError
++
++    # Pre-compute sort keys to detect type mismatches early
++    # Rule 8: Detect incomparable types
++    def get_sort_key(record, key_index):
++        field_name, direction = keys[key_index]
++        value = record.get(field_name, None)  # Rule 5: Missing field is None
++        return value
++
++    # Check for type compatibility across all records for each key
++    for key_index in range(len(keys)):
++        non_none_values = []
++        for record in records:
++            value = get_sort_key(record, key_index)
++            if value is not None:
++                non_none_values.append(value)
++
++        # Check if all non-None values are comparable
++        if len(non_none_values) >= 2:
++            # Try to compare first two non-None values
++            try:
++                _ = non_none_values[0] < non_none_values[1]
++            except TypeError:
++                raise TypeError
++
++    # Rule 9: Use stable sort (Python's sort is stable by default)
++    # Rule 11: Create a new list
++    result = list(records)
++
++    # Sort by each key from last to first (for stability with multi-key sort)
++    for key_index in range(len(keys) - 1, -1, -1):
++        field_name, direction = keys[key_index]
++        reverse = (direction == "desc")
++
++        def sort_key_func(record, field_name=field_name, reverse=reverse):
++            value = record.get(field_name, None)  # Rule 5: Missing field is None
++
++            # Rule 6: None values sort AFTER non-None regardless of direction
++            # Rule 8: Compare non-None values using <
++            if value is None:
++                # None always sorts last, regardless of direction
++                return (1, None)
++            else:
++                # Non-None values: return (0, value) for asc, (0, value) for desc
++                # For descending, we negate numeric values, but keep (0, ...) first part
++                if reverse:
++                    # For descending, we need to reverse the sort order of the value
++                    # We can achieve this by using a wrapper that reverses comparison
++                    # For now, use (0, value) and then handle it differently
++                    return (0, value)
++                else:
++                    return (0, value)
++
++        # Since we can't simply use reverse=True (it would put None first for desc),
++        # we need to handle asc and desc separately
++        if reverse:
++            # For descending: sort non-None in descending order, keep None last
++            # Split into None and non-None groups
++            none_group = [r for r in result if r.get(field_name) is None]
++            non_none_group = [r for r in result if r.get(field_name) is not None]
++
++            # Sort non-None group in descending order
++            non_none_group.sort(key=lambda r: r.get(field_name), reverse=True)
++
++            # Combine: non-None (sorted desc) then None (stable order from result)
++            result = non_none_group + none_group
++        else:
++            # For ascending: sort non-None in ascending order, keep None last
++            # Split into None and non-None groups
++            none_group = [r for r in result if r.get(field_name) is None]
++            non_none_group = [r for r in result if r.get(field_name) is not None]
++
++            # Sort non-None group in ascending order
++            non_none_group.sort(key=lambda r: r.get(field_name))
++
++            # Combine: non-None (sorted asc) then None (stable order from result)
++            result = non_none_group + none_group
++
++    return result

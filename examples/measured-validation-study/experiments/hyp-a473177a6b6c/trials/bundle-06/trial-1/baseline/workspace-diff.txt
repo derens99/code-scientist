@@ -1,0 +1,301 @@
+modified: glob_match.py
+--- a/glob_match.py
++++ b/glob_match.py
+@@ -45,4 +45,122 @@
+ 
+     Returns `True` or `False`.
+     """
+-    raise NotImplementedError
++    def validate_pattern(p):
++        """Validate pattern for syntax errors."""
++        i = 0
++        while i < len(p):
++            if p[i] == '\\':
++                if i + 1 >= len(p):
++                    raise ValueError()
++                i += 2
++            elif p[i] == '[':
++                # Check for unterminated class
++                i += 1
++                if i < len(p) and p[i] in ('!', '^'):
++                    i += 1
++                found_close = False
++                while i < len(p):
++                    if p[i] == ']':
++                        found_close = True
++                        break
++                    i += 1
++                if not found_close:
++                    raise ValueError()
++                i += 1
++            else:
++                i += 1
++
++    def parse_char_class(s, pos):
++        """Parse a character class starting at pos. Returns (is_negated, chars_set, end_pos)."""
++        if pos >= len(s) or s[pos] != '[':
++            raise ValueError()
++        pos += 1
++
++        # Check for negation
++        is_negated = False
++        if pos < len(s) and s[pos] in ('!', '^'):
++            is_negated = True
++            pos += 1
++
++        chars_set = set()
++        class_start = pos
++
++        while pos < len(s):
++            if s[pos] == ']':
++                # End of class
++                return is_negated, chars_set, pos + 1
++
++            # Check for range (but only if not first/last)
++            if pos + 2 < len(s) and s[pos + 1] == '-' and s[pos + 2] != ']':
++                start_char = s[pos]
++                end_char = s[pos + 2]
++                if ord(start_char) <= ord(end_char):
++                    # Valid range
++                    for code_point in range(ord(start_char), ord(end_char) + 1):
++                        chars_set.add(chr(code_point))
++                    pos += 3
++                else:
++                    # Invalid range, treat as literals
++                    chars_set.add(s[pos])
++                    pos += 1
++            else:
++                # Literal character
++                chars_set.add(s[pos])
++                pos += 1
++
++        # Unterminated class
++        raise ValueError()
++
++    def match(p_idx, t_idx):
++        """Recursively match pattern starting at p_idx with text at t_idx."""
++        # Base cases
++        if p_idx >= len(pattern):
++            return t_idx >= len(text)
++        if pattern[p_idx] == '*':
++            # Collapse consecutive *
++            while p_idx + 1 < len(pattern) and pattern[p_idx + 1] == '*':
++                p_idx += 1
++            # * matches zero or more characters
++            # Try matching zero characters
++            if match(p_idx + 1, t_idx):
++                return True
++            # Try matching one or more characters
++            if t_idx < len(text):
++                return match(p_idx, t_idx + 1)
++            return False
++
++        # Check if we have text to match
++        if t_idx >= len(text):
++            return False
++
++        # Handle escape
++        if pattern[p_idx] == '\\':
++            if p_idx + 1 >= len(pattern):
++                raise ValueError()
++            # Match the escaped character literally
++            if pattern[p_idx + 1] == text[t_idx]:
++                return match(p_idx + 2, t_idx + 1)
++            return False
++
++        # Handle character class
++        if pattern[p_idx] == '[':
++            is_negated, chars_set, next_p_idx = parse_char_class(pattern, p_idx)
++            char_matches = text[t_idx] in chars_set
++            if is_negated:
++                char_matches = not char_matches
++            if char_matches:
++                return match(next_p_idx, t_idx + 1)
++            return False
++
++        # Handle ?
++        if pattern[p_idx] == '?':
++            return match(p_idx + 1, t_idx + 1)
++
++        # Literal character
++        if pattern[p_idx] == text[t_idx]:
++            return match(p_idx + 1, t_idx + 1)
++        return False
++
++    # Validate pattern first
++    validate_pattern(pattern)
++    return match(0, 0)
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -46,4 +46,82 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    # Validation
++    if not isinstance(records, list):
++        raise TypeError()
++    if not isinstance(keys, list) or len(keys) == 0:
++        raise ValueError()
++
++    for key in keys:
++        if not isinstance(key, (tuple, list)) or len(key) != 2:
++            raise ValueError()
++        field_name, direction = key
++        if direction not in ("asc", "desc"):
++            raise ValueError()
++
++    # Check type compatibility for all values before sorting
++    for record in records:
++        for field_name, direction in keys:
++            value = record.get(field_name)
++            if value is not None:
++                # Try to compare with itself to ensure it's comparable
++                try:
++                    _ = value < value
++                except TypeError:
++                    pass  # Will check during sort
++
++    # Create indexed records to maintain stability
++    indexed_records = list(enumerate(records))
++
++    def sort_key(item):
++        idx, record = item
++        key_tuple = []
++        for field_name, direction in keys:
++            value = record.get(field_name)
++            # None values always sort after non-None values
++            if value is None:
++                key_tuple.append((1, None, idx))
++            else:
++                reverse = 1 if direction == "desc" else 0
++                key_tuple.append((0, reverse, value, idx))
++        return key_tuple
++
++    # Use a custom comparison for descending order
++    from functools import cmp_to_key
++
++    def compare(item1, item2):
++        idx1, rec1 = item1
++        idx2, rec2 = item2
++        for field_name, direction in keys:
++            val1 = rec1.get(field_name)
++            val2 = rec2.get(field_name)
++
++            # Handle None values - they sort after non-None
++            is_none1 = val1 is None
++            is_none2 = val2 is None
++
++            if is_none1 and is_none2:
++                continue  # Both None, maintain order
++            elif is_none1:
++                return 1  # val1 is None, goes after val2
++            elif is_none2:
++                return -1  # val2 is None, val1 goes before
++
++            # Both are non-None, compare
++            try:
++                if val1 < val2:
++                    result = -1
++                elif val1 > val2:
++                    result = 1
++                else:
++                    result = 0
++            except TypeError:
++                raise TypeError()
++
++            if result != 0:
++                return result if direction == "asc" else -result
++
++        return 0  # Maintain original order for equal records
++
++    result = sorted(indexed_records, key=cmp_to_key(compare))
++    return [record for idx, record in result]
+modified: table_render.py
+--- a/table_render.py
++++ b/table_render.py
+@@ -55,4 +55,82 @@
+ 
+     Returns the list of rendered lines (no trailing newline characters).
+     """
+-    raise NotImplementedError
++    # Validation
++    if not isinstance(headers, list) or len(headers) == 0:
++        raise ValueError()
++    for h in headers:
++        if not isinstance(h, str):
++            raise TypeError()
++
++    for row in rows:
++        if not isinstance(row, list) or len(row) != len(headers):
++            raise ValueError()
++        for cell in row:
++            if not isinstance(cell, str):
++                raise TypeError()
++
++    if alignments is None:
++        alignments = ["left"] * len(headers)
++    else:
++        if len(alignments) != len(headers):
++            raise ValueError()
++        for align in alignments:
++            if align not in ("left", "right", "center"):
++                raise ValueError()
++
++    if max_col_width is not None:
++        if not isinstance(max_col_width, int) or max_col_width < 4:
++            raise ValueError()
++
++    # Truncate cells if needed
++    def truncate(text):
++        if max_col_width is not None and len(text) > max_col_width:
++            return text[:max_col_width - 3] + "..."
++        return text
++
++    headers = [truncate(h) for h in headers]
++    rows = [[truncate(cell) for cell in row] for row in rows]
++
++    # Compute column widths
++    col_widths = []
++    for i in range(len(headers)):
++        width = len(headers[i])
++        for row in rows:
++            width = max(width, len(row[i]))
++        col_widths.append(width)
++
++    # Build lines
++    lines = []
++
++    # Border line
++    def make_border():
++        parts = ["+"]
++        for width in col_widths:
++            parts.append("-" * (width + 2))
++            parts.append("+")
++        return "".join(parts)
++
++    lines.append(make_border())
++
++    # Header line
++    header_cells = []
++    for i, h in enumerate(headers):
++        align_func = {"left": str.ljust, "right": str.rjust, "center": str.center}[alignments[i]]
++        padded = align_func(h, col_widths[i])
++        header_cells.append("| " + padded + " ")
++    lines.append("".join(header_cells) + "|")
++
++    lines.append(make_border())
++
++    # Data rows
++    for row in rows:
++        row_cells = []
++        for i, cell in enumerate(row):
++            align_func = {"left": str.ljust, "right": str.rjust, "center": str.center}[alignments[i]]
++            padded = align_func(cell, col_widths[i])
++            row_cells.append("| " + padded + " ")
++        lines.append("".join(row_cells) + "|")
++
++    lines.append(make_border())
++
++    return lines

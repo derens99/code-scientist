@@ -1,0 +1,4 @@
+{
+  "id": "1783833900434956000-22222-0044",
+  "response": "{\"winner\": \"first\", \"rationale\": \"Mirrored pairing with edge-case enumeration listed first; order-invariance holds and the executed-feedback argument prevails again: adversarial per-class checks produce self-correcting failures on the classes where held-out graders discriminate, which outweighs the re-read arm's broad but weak second pass through the reading modality that produced the baseline failure. Proxy judgment, not measurement.\", \"judge_trace\": \"Position-bias check: verdict identical to the reversed match under identical weights (signal strength on applicable classes over coverage breadth; overhead a non-factor for both).\", \"uncertainty\": 0.4, \"debate_transcript\": [\"Judge: mirrored match confirms edge-enum over re-read; no order effect.\"], \"outcome\": \"win\"}"
+}

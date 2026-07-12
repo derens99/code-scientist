@@ -1,0 +1,240 @@
+modified: event_windows.py
+--- a/event_windows.py
++++ b/event_windows.py
+@@ -49,4 +49,69 @@
+ 
+     Returns the list of `(window_start, window_end, aggregate)` tuples.
+     """
+-    raise NotImplementedError
++    # Rule 1: window_size must be positive int
++    if not isinstance(window_size, int) or window_size <= 0:
++        raise ValueError
++
++    # Rule 2: agg must be one of the valid values
++    if agg not in ("sum", "avg", "min", "max", "count"):
++        raise ValueError
++
++    # Rule 3: events must be a list
++    if not isinstance(events, list):
++        raise ValueError
++
++    # Rule 13: if events is empty, return []
++    if len(events) == 0:
++        return []
++
++    # Validate each event and group by window
++    windows = {}
++    for event in events:
++        # Rule 3: each element must be tuple or list of exactly two elements
++        if not isinstance(event, (tuple, list)) or len(event) != 2:
++            raise ValueError
++
++        timestamp, value = event
++
++        # Rule 4: timestamp must be int
++        if not isinstance(timestamp, int):
++            raise TypeError
++
++        # Rule 5: calculate window index using floor division
++        window_index = timestamp // window_size
++        window_start = window_index * window_size
++        window_end = window_start + window_size
++
++        if window_start not in windows:
++            windows[window_start] = (window_end, [])
++
++        # Rule 8: include all events, even duplicates
++        windows[window_start][1].append(value)
++
++    # Build result list with aggregation
++    result = []
++    for window_start in sorted(windows.keys()):
++        window_end, values = windows[window_start]
++
++        # Apply aggregation based on agg type
++        if agg == "sum":
++            # Rule 9: sum aggregation
++            aggregate = sum(values)
++        elif agg == "avg":
++            # Rule 10: avg as float
++            aggregate = sum(values) / len(values)
++        elif agg == "min":
++            # Rule 11: min
++            aggregate = min(values)
++        elif agg == "max":
++            # Rule 11: max
++            aggregate = max(values)
++        elif agg == "count":
++            # Rule 12: count events (ignore values)
++            aggregate = len(values)
++
++        result.append((window_start, window_end, aggregate))
++
++    # Rule 14: result is sorted by window_start (already sorted due to sorted() call)
++    return result
+modified: path_normalize.py
+--- a/path_normalize.py
++++ b/path_normalize.py
+@@ -44,4 +44,85 @@
+ 
+     Returns the normalized path string.
+     """
+-    raise NotImplementedError
++    # Rule 1: path must be str
++    if not isinstance(path, str):
++        raise TypeError
++
++    # Rule 2: path must not be empty
++    if path == "":
++        raise ValueError
++
++    # Rule 3: no backslashes allowed
++    if "\\" in path:
++        raise ValueError
++
++    # Check if absolute path (starts with /)
++    is_absolute = path.startswith("/")
++
++    # Rule 4: collapse multiple consecutive slashes to single slash
++    # Replace multiple slashes with single slash
++    normalized = ""
++    prev_was_slash = False
++    for char in path:
++        if char == "/":
++            if not prev_was_slash:
++                normalized += char
++            prev_was_slash = True
++        else:
++            normalized += char
++            prev_was_slash = False
++
++    path = normalized
++
++    # Rule 9: remove trailing slash (except for just "/")
++    if path != "/" and path.endswith("/"):
++        path = path[:-1]
++
++    # Rule 10: root path normalizes to "/"
++    if path == "/":
++        return "/"
++
++    # Split into segments
++    segments = path.split("/")
++
++    # If absolute path, first segment is empty string from leading /
++    # We need to process segments carefully
++    if is_absolute:
++        # Remove the empty string at the start from the leading /
++        segments = segments[1:]
++
++    # Process segments according to rules 5, 6, 7, 8
++    stack = []
++    for segment in segments:
++        if segment == "" or segment == ".":
++            # Rule 5: . is removed
++            # Empty segments are skipped (already handled by split)
++            continue
++        elif segment == "..":
++            # Rules 6, 7, 8: handle ..
++            # Check if there's a real segment (non-.., non-.) in the stack to cancel
++            if stack and stack[-1] != "..":
++                # Last segment in stack is a real segment, cancel it
++                stack.pop()
++            elif not is_absolute:
++                # Rule 8: for relative paths, keep .. literally
++                # (either stack is empty, or last segment is already ..)
++                stack.append("..")
++            # else: Rule 7 - for absolute paths, drop .. if no real segment to cancel
++        else:
++            # Rule 13: keep real segments literally
++            stack.append(segment)
++
++    # Build result
++    if is_absolute:
++        # Rule 12: absolute path starts with exactly one /
++        if len(stack) == 0:
++            # Rule 10: just root
++            return "/"
++        return "/" + "/".join(stack)
++    else:
++        # Relative path
++        if len(stack) == 0:
++            # Rule 11: if no segments left, return "."
++            return "."
++        return "/".join(stack)
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -46,4 +46,71 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    # Rule 1: records must be a list
++    if not isinstance(records, list):
++        raise TypeError
++
++    # Rule 2: keys must be a non-empty list
++    if not isinstance(keys, list) or len(keys) == 0:
++        raise ValueError
++
++    # Rule 3 & 4: validate each key pair
++    for key_pair in keys:
++        if not isinstance(key_pair, (tuple, list)) or len(key_pair) != 2:
++            raise ValueError
++        field_name, direction = key_pair
++        if direction not in ("asc", "desc"):
++            raise ValueError
++
++    # Rule 11: create a new list with the same dict objects
++    result = list(records)
++
++    # Helper class to handle reverse comparisons for desc ordering
++    # while preserving None-last semantics
++    class ReverseValue:
++        def __init__(self, val):
++            self.val = val
++        def __eq__(self, other):
++            return self.val == other.val
++        def __lt__(self, other):
++            return self.val > other.val
++        def __le__(self, other):
++            return self.val >= other.val
++        def __gt__(self, other):
++            return self.val < other.val
++        def __ge__(self, other):
++            return self.val <= other.val
++        def __ne__(self, other):
++            return self.val != other.val
++
++    # Process keys in reverse order for stable multi-key sort
++    # (Python's sort is stable, so we apply keys from least to most significant)
++    for i in range(len(keys) - 1, -1, -1):
++        field_name, direction = keys[i]
++
++        # Create a comparison key function
++        def make_sort_key(rec, fn=field_name, d=direction):
++            # Get the value for this field (Rule 5: missing field = None)
++            value = rec.get(fn, None)
++
++            # Rule 6: None values sort AFTER non-None values
++            # We create a tuple (is_none, comparison_value)
++            # is_none=False (0) for non-None values sorts before is_none=True (1)
++            if value is None:
++                return (1, None)
++            else:
++                # For desc direction, wrap the value to reverse its comparison
++                if d == "desc":
++                    return (0, ReverseValue(value))
++                else:
++                    return (0, value)
++
++        # Try to sort and catch TypeError for incomparable types
++        try:
++            result.sort(key=make_sort_key)
++        except TypeError as e:
++            # Rule 8: incomparable types raise TypeError
++            # Re-raise as is since it's already the right error
++            raise TypeError
++
++    return result

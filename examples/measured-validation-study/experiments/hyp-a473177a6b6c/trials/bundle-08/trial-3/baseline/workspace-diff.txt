@@ -1,0 +1,268 @@
+modified: event_windows.py
+--- a/event_windows.py
++++ b/event_windows.py
+@@ -49,4 +49,58 @@
+ 
+     Returns the list of `(window_start, window_end, aggregate)` tuples.
+     """
+-    raise NotImplementedError
++    # Rule 1: Validate window_size
++    if not isinstance(window_size, int) or window_size <= 0:
++        raise ValueError
++
++    # Rule 2: Validate agg
++    valid_aggs = {"sum", "avg", "min", "max", "count"}
++    if agg not in valid_aggs:
++        raise ValueError
++
++    # Rule 3: Validate events is a list
++    if not isinstance(events, list):
++        raise ValueError
++
++    # Rule 13: If events is empty, return empty list
++    if not events:
++        return []
++
++    # Rule 3: Validate each event
++    for event in events:
++        if not isinstance(event, (tuple, list)) or len(event) != 2:
++            raise ValueError
++        # Rule 4: Validate timestamp is int
++        timestamp, value = event
++        if not isinstance(timestamp, int):
++            raise TypeError
++
++    # Group events by window index
++    windows = {}
++    for timestamp, value in events:
++        window_index = timestamp // window_size
++        if window_index not in windows:
++            windows[window_index] = []
++        windows[window_index].append(value)
++
++    # Build result
++    result = []
++    for window_index in sorted(windows.keys()):
++        window_start = window_index * window_size
++        window_end = window_start + window_size
++        values = windows[window_index]
++
++        if agg == "sum":
++            aggregate = sum(values)
++        elif agg == "avg":
++            aggregate = sum(values) / len(values)
++        elif agg == "min":
++            aggregate = min(values)
++        elif agg == "max":
++            aggregate = max(values)
++        elif agg == "count":
++            aggregate = len(values)
++
++        result.append((window_start, window_end, aggregate))
++
++    return result
+modified: path_normalize.py
+--- a/path_normalize.py
++++ b/path_normalize.py
+@@ -44,4 +44,90 @@
+ 
+     Returns the normalized path string.
+     """
+-    raise NotImplementedError
++    # Rule 1: Check type
++    if not isinstance(path, str):
++        raise TypeError
++
++    # Rule 2: Check not empty
++    if path == "":
++        raise ValueError
++
++    # Rule 3: Check no backslashes
++    if "\\" in path:
++        raise ValueError
++
++    # Determine if path is absolute
++    is_absolute = path.startswith("/")
++
++    # Rule 4: Collapse consecutive slashes
++    # Replace multiple slashes with single slash
++    normalized = ""
++    prev_was_slash = False
++    for char in path:
++        if char == "/":
++            if not prev_was_slash:
++                normalized += char
++            prev_was_slash = True
++        else:
++            normalized += char
++            prev_was_slash = False
++
++    # Rule 9: Remove trailing slash (except for root)
++    if normalized.endswith("/") and normalized != "/":
++        normalized = normalized[:-1]
++
++    # Split into segments
++    if normalized == "/":
++        # Rule 10: Root path normalizes to "/"
++        return "/"
++
++    # Split by slash
++    segments = normalized.split("/")
++
++    # For absolute paths, first segment is empty (from leading /)
++    # For relative paths, there's no leading empty segment
++
++    # Process segments
++    result_segments = []
++
++    for segment in segments:
++        if segment == "" or segment == ".":
++            # Rule 5: . is removed
++            # Empty segments from splitting are ignored
++            continue
++        elif segment == "..":
++            # Rule 6, 7, 8: Handle ..
++            # Rule 6: .. cancels the nearest preceding REAL segment (non-., non-..)
++            # Find the last real segment to cancel
++            real_segment_index = None
++            for i in range(len(result_segments) - 1, -1, -1):
++                if result_segments[i] != "..":
++                    real_segment_index = i
++                    break
++
++            if real_segment_index is not None:
++                # There's a preceding real segment to cancel
++                result_segments.pop(real_segment_index)
++            elif is_absolute:
++                # Rule 7: For absolute paths, drop .. that would go above root
++                pass
++            else:
++                # Rule 8: For relative paths, keep .. literally
++                result_segments.append("..")
++        else:
++            # Rule 13: Keep segments literally
++            result_segments.append(segment)
++
++    # Build result
++    if is_absolute:
++        # Rule 12: Absolute path starts with single /
++        if not result_segments:
++            # Rule 10: If no segments, result is /
++            return "/"
++        return "/" + "/".join(result_segments)
++    else:
++        # Relative path
++        if not result_segments:
++            # Rule 11: If no segments left, result is "."
++            return "."
++        return "/".join(result_segments)
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -46,4 +46,105 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    # Rule 1: Validate records is a list
++    if not isinstance(records, list):
++        raise TypeError
++
++    # Rule 2: Validate keys is a non-empty list
++    if not isinstance(keys, list) or len(keys) == 0:
++        raise ValueError
++
++    # Rule 3 & 4: Validate each key
++    for key in keys:
++        if not isinstance(key, (tuple, list)) or len(key) != 2:
++            raise ValueError
++        field_name, direction = key
++        if direction not in ("asc", "desc"):
++            raise ValueError
++
++    # Pre-validate comparability for all keys
++    # Rule 8: Check that non-None values are mutually comparable
++    for field_name, _ in keys:
++        non_none_values = []
++        for record in records:
++            value = record.get(field_name, None)
++            if value is not None:
++                non_none_values.append(value)
++
++        # Check comparability between all pairs
++        if len(non_none_values) > 1:
++            for i, v1 in enumerate(non_none_values):
++                for v2 in non_none_values[i+1:]:
++                    try:
++                        _ = v1 < v2
++                    except TypeError:
++                        raise TypeError
++
++    # Create sort key function that handles all keys
++    def make_sort_key(record):
++        key_values = []
++        for field_name, direction in keys:
++            value = record.get(field_name, None)  # Rule 5
++
++            # Rule 6: None sorts after non-None
++            # Use tuple (is_none, actual_value)
++            if value is None:
++                key_values.append((1, None))
++            else:
++                # For ascending, use (0, value)
++                # For descending, we need to reverse, but we can't negate arbitrary objects
++                # So we'll handle desc separately
++                if direction == "asc":
++                    key_values.append((0, value))
++                else:
++                    # We'll mark this as descending with (0, special_marker, value)
++                    # and handle it in the sort
++                    key_values.append((0, value, True))  # True = descending
++        return tuple(key_values)
++
++    # Process keys in reverse order for stable sort (Python 3 stable sort)
++    result = records[:]  # Create a new list (Rule 11)
++
++    for field_name, direction in reversed(keys):
++        def key_func(record):
++            value = record.get(field_name, None)
++            if value is None:
++                # None always sorts last
++                return (1, None)
++            else:
++                # Non-None values sort first
++                if direction == "asc":
++                    return (0, value)
++                else:
++                    # For descending, we need to reverse the order
++                    # We'll create a wrapper that reverses comparison
++                    return (0, ReverseComparable(value))
++
++        result.sort(key=key_func)
++
++    return result
++
++
++class ReverseComparable:
++    """Wrapper to reverse comparison order for descending sorts."""
++    def __init__(self, value):
++        self.value = value
++
++    def __lt__(self, other):
++        # Reverse the comparison
++        return self.value > other.value
++
++    def __le__(self, other):
++        return self.value >= other.value
++
++    def __gt__(self, other):
++        return self.value < other.value
++
++    def __ge__(self, other):
++        return self.value <= other.value
++
++    def __eq__(self, other):
++        return self.value == other.value
++
++    def __ne__(self, other):
++        return self.value != other.value

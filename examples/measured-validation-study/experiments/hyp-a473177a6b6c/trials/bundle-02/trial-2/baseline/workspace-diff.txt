@@ -1,0 +1,229 @@
+modified: intervals.py
+--- a/intervals.py
++++ b/intervals.py
+@@ -41,4 +41,70 @@
+ 
+     Returns the merged list of `(start, end)` tuples.
+     """
+-    raise NotImplementedError
++    # Rule 9: check lo > hi before processing
++    if lo is not None and hi is not None and lo > hi:
++        raise ValueError("lo > hi")
++
++    # Rule 7: validate lo
++    if lo is not None and not isinstance(lo, int):
++        raise TypeError("lo must be int")
++
++    # Rule 8: validate hi
++    if hi is not None and not isinstance(hi, int):
++        raise TypeError("hi must be int")
++
++    # Rule 11: empty input
++    if not intervals:
++        return []
++
++    # Process intervals
++    processed = []
++    for interval in intervals:
++        # Rule 1: must be tuple or list of exactly 2 elements
++        if not isinstance(interval, (tuple, list)) or len(interval) != 2:
++            raise ValueError("each interval must be a tuple or list of 2 elements")
++
++        start, end = interval
++
++        # Rule 2: start and end must be int
++        if not isinstance(start, int):
++            raise TypeError("start must be int")
++        if not isinstance(end, int):
++            raise TypeError("end must be int")
++
++        # Rule 3: start must not be > end
++        if start > end:
++            raise ValueError("start > end")
++
++        # Rule 7: clamp start to lo
++        if lo is not None:
++            start = max(start, lo)
++
++        # Rule 8: clamp end to hi
++        if hi is not None:
++            end = min(end, hi)
++
++        # Rule 4 & Rule 10: drop zero-length intervals
++        if start < end:
++            processed.append((start, end))
++
++    # Sort by start
++    processed.sort()
++
++    # Merge overlapping/touching intervals
++    if not processed:
++        return []
++
++    merged = [processed[0]]
++    for current_start, current_end in processed[1:]:
++        last_start, last_end = merged[-1]
++
++        # Rule 5: merge if overlapping or touching
++        if current_start <= last_end:
++            # Overlapping or touching, merge them
++            merged[-1] = (last_start, max(last_end, current_end))
++        else:
++            # Rule 6: no overlap or touch, keep separate
++            merged.append((current_start, current_end))
++
++    return merged
+modified: path_normalize.py
+--- a/path_normalize.py
++++ b/path_normalize.py
+@@ -44,4 +44,77 @@
+ 
+     Returns the normalized path string.
+     """
+-    raise NotImplementedError
++    # Rule 1: must be str
++    if not isinstance(path, str):
++        raise TypeError("path must be str")
++
++    # Rule 2: must not be empty
++    if path == "":
++        raise ValueError("path must not be empty")
++
++    # Rule 3: no backslashes
++    if "\\" in path:
++        raise ValueError("backslashes not allowed")
++
++    # Check if absolute
++    is_absolute = path.startswith("/")
++
++    # Rule 4: collapse multiple consecutive slashes
++    normalized = ""
++    i = 0
++    while i < len(path):
++        if path[i] == "/":
++            normalized += "/"
++            i += 1
++            # Skip additional consecutive slashes
++            while i < len(path) and path[i] == "/":
++                i += 1
++        else:
++            normalized += path[i]
++            i += 1
++
++    # Rule 9: remove trailing slash (except for root)
++    if len(normalized) > 1 and normalized.endswith("/"):
++        normalized = normalized[:-1]
++
++    # Split by "/" and process segments
++    if is_absolute:
++        # For absolute paths, first element after split will be empty
++        parts = normalized.split("/")
++        # parts[0] is empty (before first /)
++        segments = parts[1:]
++    else:
++        segments = normalized.split("/")
++
++    # Process . and .. segments
++    result_segments = []
++    for segment in segments:
++        if segment == "" or segment == ".":
++            # Rule 5: remove . segments
++            # Rule 4: empty segments from consecutive slashes are skipped
++            continue
++        elif segment == "..":
++            # Rule 6: .. cancels preceding real segment
++            if result_segments and result_segments[-1] != "..":
++                # Only pop if it's a real segment, not ".."
++                result_segments.pop()
++            elif not is_absolute:
++                # Rule 8: for relative paths, keep .. if no segment to cancel
++                result_segments.append("..")
++            # else: Rule 7: for absolute paths, drop .. with no segment to cancel
++        else:
++            # Rule 13: keep all other segments literally
++            result_segments.append(segment)
++
++    # Build result
++    if is_absolute:
++        # Rule 10: root path
++        if not result_segments:
++            return "/"
++        # Rule 12: absolute path starts with exactly one /
++        return "/" + "/".join(result_segments)
++    else:
++        # Rule 11: relative path with no segments results in .
++        if not result_segments:
++            return "."
++        return "/".join(result_segments)
+modified: record_split.py
+--- a/record_split.py
++++ b/record_split.py
+@@ -44,4 +44,67 @@
+ 
+     Returns a list of field strings, in order.
+     """
+-    raise NotImplementedError
++    # Rule 1: validate sep
++    if not isinstance(sep, str) or len(sep) != 1:
++        raise ValueError("sep must be a string of length 1")
++    if sep == '"':
++        raise ValueError("sep must not be the double-quote character")
++
++    # Rule 2: empty line
++    if line == "":
++        return [""]
++
++    fields = []
++    i = 0
++
++    while i < len(line):
++        # Check if this field is quoted (starts with ")
++        if line[i] == '"':
++            # Quoted field
++            field_value = ""
++            i += 1  # skip opening quote
++
++            while i < len(line):
++                if line[i] == '"':
++                    # Check if it's doubled
++                    if i + 1 < len(line) and line[i + 1] == '"':
++                        # Rule 6: doubled quote represents one literal "
++                        field_value += '"'
++                        i += 2
++                    else:
++                        # Rule 5: closing quote
++                        i += 1
++                        # Rule 9: check what comes after
++                        if i < len(line) and line[i] != sep:
++                            raise ValueError("trailing data after closing quote")
++                        break
++                else:
++                    field_value += line[i]
++                    i += 1
++            else:
++                # Rule 8: quote never terminated
++                raise ValueError("unterminated quoted field")
++
++            fields.append(field_value)
++
++            # Skip separator if present
++            if i < len(line) and line[i] == sep:
++                i += 1
++        else:
++            # Unquoted field
++            field_value = ""
++            while i < len(line) and line[i] != sep:
++                field_value += line[i]
++                i += 1
++
++            fields.append(field_value)
++
++            # Skip separator if present
++            if i < len(line) and line[i] == sep:
++                i += 1
++
++    # Rule 11: trailing separator creates empty field
++    if line and line[-1] == sep:
++        fields.append("")
++
++    return fields

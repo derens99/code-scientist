@@ -1,0 +1,256 @@
+modified: event_windows.py
+--- a/event_windows.py
++++ b/event_windows.py
+@@ -49,4 +49,61 @@
+ 
+     Returns the list of `(window_start, window_end, aggregate)` tuples.
+     """
+-    raise NotImplementedError
++    # Validate window_size
++    if not isinstance(window_size, int) or window_size <= 0:
++        raise ValueError("window_size must be a positive int")
++
++    # Validate agg
++    if agg not in ("sum", "avg", "min", "max", "count"):
++        raise ValueError(f"agg must be one of 'sum', 'avg', 'min', 'max', 'count'")
++
++    # Validate events is a list
++    if not isinstance(events, list):
++        raise ValueError("events must be a list")
++
++    # Early return for empty events
++    if not events:
++        return []
++
++    # Validate each event and collect into windows dict
++    windows = {}
++    for event in events:
++        # Validate element is tuple or list of exactly 2 elements
++        if not isinstance(event, (tuple, list)) or len(event) != 2:
++            raise ValueError("Each event must be a tuple or list of exactly 2 elements")
++
++        timestamp, value = event
++
++        # Validate timestamp is int
++        if not isinstance(timestamp, int):
++            raise TypeError("timestamp must be an int")
++
++        # Calculate window index
++        window_idx = timestamp // window_size
++        window_start = window_idx * window_size
++
++        # Add to windows dict
++        if window_start not in windows:
++            windows[window_start] = []
++        windows[window_start].append(value)
++
++    # Compute aggregates
++    result = []
++    for window_start in sorted(windows.keys()):
++        values = windows[window_start]
++        window_end = window_start + window_size
++
++        if agg == "sum":
++            aggregate = sum(values)
++        elif agg == "avg":
++            aggregate = sum(values) / len(values)
++        elif agg == "min":
++            aggregate = min(values)
++        elif agg == "max":
++            aggregate = max(values)
++        elif agg == "count":
++            aggregate = len(values)
++
++        result.append((window_start, window_end, aggregate))
++
++    return result
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -46,4 +46,82 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    # Validate records is a list
++    if not isinstance(records, list):
++        raise TypeError("records must be a list")
++
++    # Validate keys is a non-empty list
++    if not isinstance(keys, list) or len(keys) == 0:
++        raise ValueError("keys must be a non-empty list")
++
++    # Validate each key
++    for key in keys:
++        if not isinstance(key, (tuple, list)) or len(key) != 2:
++            raise ValueError("Each element of keys must be a tuple or list of exactly two elements")
++        field_name, direction = key
++        if direction not in ("asc", "desc"):
++            raise ValueError("direction must be exactly 'asc' or 'desc'")
++
++    # Create a new list with indices for stable sorting
++    indexed_records = list(enumerate(records))
++
++    # Sort using functools.cmp_to_key with custom comparator
++    from functools import cmp_to_key
++
++    def compare_records(item1, item2):
++        idx1, rec1 = item1
++        idx2, rec2 = item2
++
++        # Iterate through sort keys in order
++        for field_name, direction in keys:
++            val1 = rec1.get(field_name, None)
++            val2 = rec2.get(field_name, None)
++
++            # Handle None values: None always sorts after non-None
++            none1 = val1 is None
++            none2 = val2 is None
++
++            if none1 and none2:
++                # Both None: preserve input order (continue to next key)
++                continue
++            elif none1:
++                # val1 is None, val2 is not: val1 sorts after val2
++                return 1
++            elif none2:
++                # val1 is not None, val2 is None: val1 sorts before val2
++                return -1
++
++            # Both are non-None: compare using <
++            try:
++                if val1 < val2:
++                    cmp_result = -1
++                elif val1 > val2:
++                    cmp_result = 1
++                else:
++                    cmp_result = 0
++            except TypeError:
++                # Incomparable types
++                raise TypeError(f"Incomparable types for field '{field_name}'")
++
++            # Apply direction
++            if direction == "desc":
++                cmp_result = -cmp_result
++
++            # If not equal, return the comparison result
++            if cmp_result != 0:
++                return cmp_result
++
++        # All keys equal: preserve input order using indices
++        if idx1 < idx2:
++            return -1
++        elif idx1 > idx2:
++            return 1
++        else:
++            return 0
++
++    # Sort the indexed records
++    sorted_indexed = sorted(indexed_records, key=cmp_to_key(compare_records))
++
++    # Extract just the records (without indices)
++    result = [rec for idx, rec in sorted_indexed]
++    return result
+modified: table_render.py
+--- a/table_render.py
++++ b/table_render.py
+@@ -55,4 +55,98 @@
+ 
+     Returns the list of rendered lines (no trailing newline characters).
+     """
+-    raise NotImplementedError
++    # Validate headers
++    if not isinstance(headers, list) or len(headers) == 0:
++        raise ValueError("headers must be a non-empty list")
++    for h in headers:
++        if not isinstance(h, str):
++            raise TypeError("All headers must be strings")
++
++    # Validate max_col_width
++    if max_col_width is not None:
++        if not isinstance(max_col_width, int) or max_col_width < 4:
++            raise ValueError("max_col_width must be an integer >= 4")
++
++    # Validate alignments
++    if alignments is None:
++        alignments = ["left"] * len(headers)
++    else:
++        if len(alignments) != len(headers):
++            raise ValueError("alignments length must equal headers length")
++        for a in alignments:
++            if a not in ("left", "right", "center"):
++                raise ValueError("alignment values must be 'left', 'right', or 'center'")
++
++    # Validate rows
++    for row in rows:
++        if not isinstance(row, list) or len(row) != len(headers):
++            raise ValueError("Each row length must equal headers length")
++        for cell in row:
++            if not isinstance(cell, str):
++                raise TypeError("All cells must be strings")
++
++    # Helper function to truncate a cell
++    def truncate_cell(text):
++        if max_col_width is not None and len(text) > max_col_width:
++            return text[:max_col_width - 3] + "..."
++        return text
++
++    # Truncate headers
++    truncated_headers = [truncate_cell(h) for h in headers]
++
++    # Truncate all rows
++    truncated_rows = []
++    for row in rows:
++        truncated_row = [truncate_cell(cell) for cell in row]
++        truncated_rows.append(truncated_row)
++
++    # Calculate column widths
++    col_widths = []
++    for col_idx in range(len(headers)):
++        header_len = len(truncated_headers[col_idx])
++        max_row_len = max((len(truncated_rows[row_idx][col_idx]) for row_idx in range(len(truncated_rows))), default=0)
++        width = max(header_len, max_row_len)
++        col_widths.append(width)
++
++    # Helper function to align and pad a cell
++    def align_cell(text, col_idx):
++        width = col_widths[col_idx]
++        alignment = alignments[col_idx]
++        if alignment == "left":
++            aligned = text.ljust(width)
++        elif alignment == "right":
++            aligned = text.rjust(width)
++        else:  # center
++            aligned = text.center(width)
++        return "| " + aligned + " "
++
++    # Build border line
++    def make_border():
++        parts = ["+"]
++        for width in col_widths:
++            parts.append("-" * (width + 2))
++            parts.append("+")
++        return "".join(parts)
++
++    # Build result
++    result = []
++
++    # Top border
++    result.append(make_border())
++
++    # Header line
++    header_cells = [align_cell(truncated_headers[i], i) for i in range(len(headers))]
++    result.append("".join(header_cells) + "|")
++
++    # Border after header
++    result.append(make_border())
++
++    # Data rows
++    for row in truncated_rows:
++        row_cells = [align_cell(row[i], i) for i in range(len(headers))]
++        result.append("".join(row_cells) + "|")
++
++    # Bottom border
++    result.append(make_border())
++
++    return result

@@ -1,0 +1,291 @@
+modified: glob_match.py
+--- a/glob_match.py
++++ b/glob_match.py
+@@ -45,4 +45,112 @@
+ 
+     Returns `True` or `False`.
+     """
+-    raise NotImplementedError
++    # Validate pattern: check for unterminated escapes and character classes
++    i = 0
++    while i < len(pattern):
++        if pattern[i] == '\\':
++            if i == len(pattern) - 1:
++                raise ValueError("backslash at end of pattern")
++            i += 2
++        elif pattern[i] == '[':
++            j = i + 1
++            if j < len(pattern) and pattern[j] in '!^':
++                j += 1
++            found_close = False
++            while j < len(pattern):
++                if pattern[j] == ']':
++                    found_close = True
++                    break
++                j += 1
++            if not found_close:
++                raise ValueError("unterminated character class")
++            i = j + 1
++        else:
++            i += 1
++
++    def parse_char_class(class_str):
++        """Parse character class content and return (negate, chars_set)."""
++        negate = False
++        idx = 0
++        if class_str and class_str[0] in '!^':
++            negate = True
++            idx = 1
++        body = class_str[idx:]
++        chars = set()
++        i = 0
++        while i < len(body):
++            # Check for range pattern: X-Y
++            if i + 2 < len(body) and body[i + 1] == '-':
++                start_char = body[i]
++                end_char = body[i + 2]
++                if ord(start_char) <= ord(end_char):
++                    # Valid range
++                    for c_code in range(ord(start_char), ord(end_char) + 1):
++                        chars.add(chr(c_code))
++                    i += 3
++                    continue
++            # Not a valid range, just add character
++            chars.add(body[i])
++            i += 1
++        return (negate, chars)
++
++    def match_recursive(pat_idx, text_idx):
++        """Recursively match pattern[pat_idx:] against text[text_idx:]."""
++        # Base cases
++        if pat_idx == len(pattern):
++            return text_idx == len(text)
++        if text_idx == len(text):
++            # Pattern has more, but text is empty
++            # Only OK if remaining pattern is all *
++            while pat_idx < len(pattern) and pattern[pat_idx] == '*':
++                pat_idx += 1
++            return pat_idx == len(pattern)
++
++        if pattern[pat_idx] == '\\':
++            # Escaped character
++            char = pattern[pat_idx + 1]
++            if text_idx >= len(text) or text[text_idx] != char:
++                return False
++            return match_recursive(pat_idx + 2, text_idx + 1)
++
++        elif pattern[pat_idx] == '[':
++            # Character class
++            end_bracket = pattern.index(']', pat_idx + 1)
++            class_content = pattern[pat_idx + 1:end_bracket]
++            negate, chars = parse_char_class(class_content)
++            if text_idx >= len(text):
++                return False
++            char_match = text[text_idx] in chars
++            if negate:
++                char_match = not char_match
++            if not char_match:
++                return False
++            return match_recursive(end_bracket + 1, text_idx + 1)
++
++        elif pattern[pat_idx] == '?':
++            # Match exactly one character
++            if text_idx >= len(text):
++                return False
++            return match_recursive(pat_idx + 1, text_idx + 1)
++
++        elif pattern[pat_idx] == '*':
++            # Skip consecutive *
++            next_pat_idx = pat_idx + 1
++            while next_pat_idx < len(pattern) and pattern[next_pat_idx] == '*':
++                next_pat_idx += 1
++            # Try matching 0 characters
++            if match_recursive(next_pat_idx, text_idx):
++                return True
++            # Try matching 1 or more characters
++            for i in range(text_idx, len(text)):
++                if match_recursive(next_pat_idx, i + 1):
++                    return True
++            return False
++
++        else:
++            # Literal character
++            if text[text_idx] != pattern[pat_idx]:
++                return False
++            return match_recursive(pat_idx + 1, text_idx + 1)
++
++    return match_recursive(0, 0)
+modified: num_format.py
+--- a/num_format.py
++++ b/num_format.py
+@@ -48,4 +48,79 @@
+ 
+     Returns the formatted string.
+     """
+-    raise NotImplementedError
++    # Validate value
++    if isinstance(value, bool) or not isinstance(value, (int, float)):
++        raise TypeError("value must be int or float, not bool")
++
++    # Check if finite
++    if not math.isfinite(value):
++        raise ValueError("value must be finite")
++
++    # Validate decimals
++    if not isinstance(decimals, int) or decimals < 0:
++        raise ValueError("decimals must be non-negative int")
++
++    # Validate width
++    if width is not None:
++        if not isinstance(width, int) or width < 0:
++            raise ValueError("width must be non-negative int")
++
++    # Apply percent conversion BEFORE rounding
++    if percent:
++        value = value * 100
++
++    # Round using banker's rounding (Python's round)
++    rounded_value = round(value, decimals)
++
++    # Handle negative zero - suppress the negative sign
++    if rounded_value == 0:
++        rounded_value = abs(rounded_value)
++
++    # Determine sign
++    is_negative = rounded_value < 0
++
++    # Work with absolute value
++    abs_value = abs(rounded_value)
++
++    # Format with decimals
++    if decimals == 0:
++        int_str = str(int(abs_value))
++        result = int_str
++    else:
++        formatted = f"{abs_value:.{decimals}f}"
++        int_str, frac_str = formatted.split('.')
++        result = int_str + '.' + frac_str
++
++    # Apply thousands separator to integer part
++    if thousands_sep:
++        if decimals == 0:
++            int_part = result
++            frac_part = None
++        else:
++            int_part, frac_part = result.split('.')
++
++        # Insert commas from right to left
++        reversed_int = int_part[::-1]
++        grouped = []
++        for i in range(0, len(reversed_int), 3):
++            grouped.append(reversed_int[i:i+3])
++        int_part = ','.join(grouped)[::-1]
++
++        if frac_part is None:
++            result = int_part
++        else:
++            result = int_part + '.' + frac_part
++
++    # Add sign
++    if is_negative:
++        result = '-' + result
++
++    # Add percent
++    if percent:
++        result = result + '%'
++
++    # Apply width padding
++    if width is not None:
++        result = result.rjust(width)
++
++    return result
+modified: table_render.py
+--- a/table_render.py
++++ b/table_render.py
+@@ -55,4 +55,85 @@
+ 
+     Returns the list of rendered lines (no trailing newline characters).
+     """
+-    raise NotImplementedError
++    # Validate headers
++    if not headers:
++        raise ValueError("headers must be non-empty")
++    for header in headers:
++        if not isinstance(header, str):
++            raise TypeError("all headers must be strings")
++
++    # Validate alignments if provided
++    if alignments is None:
++        alignments = ["left"] * len(headers)
++    else:
++        if len(alignments) != len(headers):
++            raise ValueError("alignments length must equal headers length")
++        for align in alignments:
++            if align not in ("left", "right", "center"):
++                raise ValueError("alignment must be 'left', 'right', or 'center'")
++
++    # Validate max_col_width if provided
++    if max_col_width is not None:
++        if not isinstance(max_col_width, int) or max_col_width < 4:
++            raise ValueError("max_col_width must be an integer >= 4")
++
++    # Validate rows
++    for row in rows:
++        if not isinstance(row, list) or len(row) != len(headers):
++            raise ValueError("every row must be a list with length equal to headers")
++        for cell in row:
++            if not isinstance(cell, str):
++                raise TypeError("all cells must be strings")
++
++    # Apply truncation to headers and rows
++    def truncate_cell(cell):
++        if max_col_width is not None and len(cell) > max_col_width:
++            return cell[:max_col_width - 3] + "..."
++        return cell
++
++    truncated_headers = [truncate_cell(h) for h in headers]
++    truncated_rows = [[truncate_cell(cell) for cell in row] for row in rows]
++
++    # Compute column widths
++    col_widths = []
++    for i in range(len(headers)):
++        width = len(truncated_headers[i])
++        for row in truncated_rows:
++            width = max(width, len(row[i]))
++        col_widths.append(width)
++
++    # Helper to create a border line
++    def make_border():
++        parts = ["+"]
++        for width in col_widths:
++            parts.append("-" * (width + 2))
++            parts.append("+")
++        return "".join(parts)
++
++    # Helper to format a row
++    def format_row(cells):
++        parts = ["|"]
++        for i, cell in enumerate(cells):
++            align = alignments[i]
++            width = col_widths[i]
++            if align == "left":
++                padded = cell.ljust(width)
++            elif align == "right":
++                padded = cell.rjust(width)
++            else:  # center
++                padded = cell.center(width)
++            parts.append(" ")
++            parts.append(padded)
++            parts.append(" |")
++        return "".join(parts)
++
++    # Build result
++    result = []
++    result.append(make_border())
++    result.append(format_row(truncated_headers))
++    result.append(make_border())
++    for row in truncated_rows:
++        result.append(format_row(row))
++    result.append(make_border())
++
++    return result

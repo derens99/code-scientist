@@ -1,0 +1,258 @@
+modified: event_windows.py
+--- a/event_windows.py
++++ b/event_windows.py
+@@ -49,4 +49,60 @@
+ 
+     Returns the list of `(window_start, window_end, aggregate)` tuples.
+     """
+-    raise NotImplementedError
++    # Validate window_size
++    if not isinstance(window_size, int) or window_size <= 0:
++        raise ValueError
++
++    # Validate agg
++    if agg not in ("sum", "avg", "min", "max", "count"):
++        raise ValueError
++
++    # Validate events is a list
++    if not isinstance(events, list):
++        raise ValueError
++
++    # Empty events returns empty list
++    if not events:
++        return []
++
++    # Group events by window
++    windows = {}
++    for event in events:
++        # Validate event is 2-element
++        if not isinstance(event, (tuple, list)) or len(event) != 2:
++            raise ValueError
++
++        timestamp, value = event
++
++        # Validate timestamp is int
++        if not isinstance(timestamp, int):
++            raise TypeError
++
++        # Compute window index
++        window_idx = timestamp // window_size
++
++        if window_idx not in windows:
++            windows[window_idx] = []
++        windows[window_idx].append(value)
++
++    # Compute aggregates
++    result = []
++    for window_idx in sorted(windows.keys()):
++        window_start = window_idx * window_size
++        window_end = window_start + window_size
++        values = windows[window_idx]
++
++        if agg == "sum":
++            aggregate = sum(values)
++        elif agg == "avg":
++            aggregate = sum(values) / len(values)
++        elif agg == "min":
++            aggregate = min(values)
++        elif agg == "max":
++            aggregate = max(values)
++        elif agg == "count":
++            aggregate = len(values)
++
++        result.append((window_start, window_end, aggregate))
++
++    return result
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -1,4 +1,52 @@
+ """Stable multi-key sorter for lists of dict records."""
++
++
++class ReverseCompare:
++    """Wrapper to reverse comparison for a value while preserving comparability checks."""
++    def __init__(self, obj):
++        self.obj = obj
++
++    def __lt__(self, other):
++        if isinstance(other, ReverseCompare):
++            try:
++                return self.obj > other.obj
++            except TypeError:
++                raise TypeError
++        return NotImplemented
++
++    def __le__(self, other):
++        if isinstance(other, ReverseCompare):
++            try:
++                return self.obj >= other.obj
++            except TypeError:
++                raise TypeError
++        return NotImplemented
++
++    def __gt__(self, other):
++        if isinstance(other, ReverseCompare):
++            try:
++                return self.obj < other.obj
++            except TypeError:
++                raise TypeError
++        return NotImplemented
++
++    def __ge__(self, other):
++        if isinstance(other, ReverseCompare):
++            try:
++                return self.obj <= other.obj
++            except TypeError:
++                raise TypeError
++        return NotImplemented
++
++    def __eq__(self, other):
++        if isinstance(other, ReverseCompare):
++            return self.obj == other.obj
++        return NotImplemented
++
++    def __ne__(self, other):
++        if isinstance(other, ReverseCompare):
++            return self.obj != other.obj
++        return NotImplemented
+ 
+ 
+ def sort_records(records, keys):
+@@ -46,4 +94,47 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    # Validate records is list
++    if not isinstance(records, list):
++        raise TypeError
++
++    # Validate keys is non-empty list
++    if not isinstance(keys, list) or len(keys) == 0:
++        raise ValueError
++
++    # Validate each key element
++    for key in keys:
++        if not isinstance(key, (tuple, list)) or len(key) != 2:
++            raise ValueError
++        field_name, direction = key
++        if direction not in ("asc", "desc"):
++            raise ValueError
++
++    # Create indexed records for stable sorting with original order
++    indexed_records = [(i, record) for i, record in enumerate(records)]
++
++    # Build sort key function
++    # Python's sort is stable, so we process keys in reverse order
++    for field_name, direction in reversed(keys):
++        def make_key_func(fn, dir_str):
++            def key_func(item):
++                idx, record = item
++                value = record.get(fn, None)
++                # None always sorts last, regardless of direction
++                # Use (0, value) for non-None, (1, None) for None
++                # When direction is desc, invert non-None comparison but keep None last
++                if value is None:
++                    return (1, 0)  # None sorts last
++                else:
++                    if dir_str == "desc":
++                        # For desc: use a wrapper that reverses the comparison
++                        return (0, ReverseCompare(value))
++                    else:
++                        return (0, value)
++            return key_func
++
++        indexed_records.sort(key=make_key_func(field_name, direction))
++
++    # Extract just the records (without index)
++    result = [record for idx, record in indexed_records]
++    return result
+modified: table_render.py
+--- a/table_render.py
++++ b/table_render.py
+@@ -55,4 +55,83 @@
+ 
+     Returns the list of rendered lines (no trailing newline characters).
+     """
+-    raise NotImplementedError
++    # Validate headers
++    if not isinstance(headers, list) or len(headers) == 0:
++        raise ValueError
++    for header in headers:
++        if not isinstance(header, str):
++            raise TypeError
++
++    # Validate rows
++    if not isinstance(rows, list):
++        raise TypeError
++    for row in rows:
++        if not isinstance(row, list) or len(row) != len(headers):
++            raise ValueError
++        for cell in row:
++            if not isinstance(cell, str):
++                raise TypeError
++
++    # Validate alignments if given
++    if alignments is not None:
++        if len(alignments) != len(headers):
++            raise ValueError
++        for align in alignments:
++            if align not in ("left", "right", "center"):
++                raise ValueError
++    else:
++        alignments = ["left"] * len(headers)
++
++    # Validate max_col_width if given
++    if max_col_width is not None:
++        if not isinstance(max_col_width, int) or max_col_width < 4:
++            raise ValueError
++
++    # Helper function to truncate if needed
++    def truncate(text):
++        if max_col_width is not None and len(text) > max_col_width:
++            return text[:max_col_width - 3] + "..."
++        return text
++
++    # Truncate headers and rows
++    truncated_headers = [truncate(h) for h in headers]
++    truncated_rows = [[truncate(cell) for cell in row] for row in rows]
++
++    # Compute column widths
++    col_widths = []
++    for col_idx in range(len(headers)):
++        width = len(truncated_headers[col_idx])
++        for row in truncated_rows:
++            width = max(width, len(row[col_idx]))
++        col_widths.append(width)
++
++    # Build border line
++    def build_border():
++        parts = []
++        for width in col_widths:
++            parts.append("-" * (width + 2))
++        return "+" + "+".join(parts) + "+"
++
++    # Build a line of cells
++    def build_line(cells):
++        parts = []
++        for cell, width, align in zip(cells, col_widths, alignments):
++            if align == "left":
++                padded = cell.ljust(width)
++            elif align == "right":
++                padded = cell.rjust(width)
++            else:  # center
++                padded = cell.center(width)
++            parts.append(" " + padded + " ")
++        return "|" + "|".join(parts) + "|"
++
++    # Assemble result
++    result = []
++    result.append(build_border())
++    result.append(build_line(truncated_headers))
++    result.append(build_border())
++    for row in truncated_rows:
++        result.append(build_line(row))
++    result.append(build_border())
++
++    return result

@@ -1,0 +1,43 @@
+{
+  "objective": "Find the single appended system-prompt instruction that most improves a small headless coding agent's held-out-test pass rate on short self-contained Python implementation tasks whose prompts do not themselves instruct testing or verification. Hypotheses must be A/B-testable (baseline: no appended instruction; candidate: baseline plus exactly one instruction) and grounded in observed small-model failure modes: incomplete extraction of listed requirements, unverified edge cases, and premature completion. The agent under test already writes and runs its own ad-hoc tests when it chooses to; an intervention must add value beyond that default behavior.",
+  "state_path": "runs/prompt-intervention-study/state.json",
+  "packet_count": 2,
+  "packets": [
+    {
+      "hypothesis_id": "hyp-a473177a6b6c",
+      "title": "Requirement-Checklist Extraction Instruction Raises Held-Out Pass Rate",
+      "elo": 1232.0,
+      "status": "accepted",
+      "path": "hyp-a473177a6b6c.md",
+      "review_ids": [
+        "rev-c04856754956",
+        "rev-10dfc84efcaf",
+        "rev-fc8eb988306d",
+        "rev-bec52b1cbba8"
+      ],
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ]
+    },
+    {
+      "hypothesis_id": "hyp-6208299229f5",
+      "title": "Adversarial Edge-Case Enumeration Instruction Raises Held-Out Pass Rate",
+      "elo": 1200.0,
+      "status": "accepted",
+      "path": "hyp-6208299229f5.md",
+      "review_ids": [
+        "rev-a35f944d84b2",
+        "rev-1c3b38c5bc54",
+        "rev-6b2d287235cf",
+        "rev-530a131423cd"
+      ],
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ]
+    }
+  ]
+}

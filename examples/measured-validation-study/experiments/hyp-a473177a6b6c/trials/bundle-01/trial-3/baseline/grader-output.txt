@@ -1,0 +1,16 @@
+..................................F.                                     [100%]
+=================================== FAILURES ===================================
+__________________________ test_req_09_width_padding ___________________________
+
+    def test_req_09_width_padding():
+        s = format_number(5.0, decimals=1, width=8)
+>       assert s == "     5.0"
+E       AssertionError: assert '5.0     ' == '     5.0'
+E         
+E         -      5.0
+E         + 5.0
+
+test_grader_number_formatter.py:55: AssertionError
+=========================== short test summary info ============================
+FAILED test_grader_number_formatter.py::test_req_09_width_padding - Assertion...
+1 failed, 35 passed in 0.05s

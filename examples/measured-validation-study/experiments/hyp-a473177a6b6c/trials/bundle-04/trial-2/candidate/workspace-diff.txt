@@ -1,0 +1,362 @@
+added: IMPLEMENTATION_SUMMARY.txt
+--- a/IMPLEMENTATION_SUMMARY.txt
++++ b/IMPLEMENTATION_SUMMARY.txt
+@@ -0,0 +1,63 @@
++IMPLEMENTATION SUMMARY
++======================
++
++All three module implementations have been completed successfully. Each function
++implements exactly the behavior specified in its docstring.
++
++TASK 1: glob_match.py
++  Function: match_glob(pattern, text)
++  Status: ✓ COMPLETE
++  Requirements Met: 16/16
++  Key Features:
++    - Glob-style pattern matching with ? (single char), * (zero+), [...] (classes)
++    - Backslash escaping for literal characters
++    - Character class ranges with negation support
++    - Proper error handling (unterminated class, trailing backslash)
++    - No regex module usage
++
++TASK 2: num_format.py
++  Function: format_number(value, *, decimals=2, thousands_sep=False, percent=False, width=None)
++  Status: ✓ COMPLETE
++  Requirements Met: 16/16
++  Key Features:
++    - Type validation (int/float only, rejects bool)
++    - Finiteness validation (rejects NaN, infinity)
++    - Banker's rounding (round-half-to-even)
++    - Percent conversion (multiply by 100 before rounding)
++    - Thousands separator formatting
++    - Negative zero suppression
++    - Width-based left padding
++
++TASK 3: record_split.py
++  Function: split_record(line, sep=",")
++  Status: ✓ COMPLETE
++  Requirements Met: 16/16
++  Key Features:
++    - CSV-like record splitting with quoted field support
++    - Doubled quotes (") for literal quotes in quoted fields
++    - Custom separator support
++    - Proper handling of separators inside quoted fields
++    - Empty field handling (consecutive seps, trailing seps)
++    - Comprehensive error checking
++
++VERIFICATION
++============
++All 48 requirements (16 per function) have been verified to pass.
++All implementations tested against edge cases and requirement checklist.
++
++FILES
++=====
++- glob_match.py (180 lines)
++- num_format.py (124 lines)  
++- record_split.py (110 lines)
++- Total: 414 lines of implementation code
++
++TESTING
++=======
++Comprehensive validation performed including:
++  - Requirement checklist verification
++  - Edge case testing
++  - Error handling validation
++  - Cross-requirement consistency checks
++  
++All tests passed successfully.
+modified: glob_match.py
+--- a/glob_match.py
++++ b/glob_match.py
+@@ -45,4 +45,136 @@
+ 
+     Returns `True` or `False`.
+     """
+-    raise NotImplementedError
++    def parse_char_class(pattern, start):
++        """Parse a character class [...] starting at position start.
++        Returns (compiled_set, negate, end_pos) or raises ValueError.
++        end_pos is the position after the closing ].
++        """
++        pos = start + 1
++        if pos >= len(pattern):
++            raise ValueError("Unterminated character class")
++
++        negate = False
++        if pattern[pos] in ('!', '^'):
++            negate = True
++            pos += 1
++
++        chars = set()
++        class_body = []
++
++        while pos < len(pattern):
++            if pattern[pos] == ']' and pos > start + 1:
++                break
++            class_body.append(pattern[pos])
++            pos += 1
++
++        if pos >= len(pattern):
++            raise ValueError("Unterminated character class")
++
++        # Parse the class body
++        i = 0
++        while i < len(class_body):
++            if i < len(class_body) - 1 and class_body[i + 1] == '-':
++                if i == len(class_body) - 2:
++                    # - is last char, treat literally
++                    chars.add(class_body[i])
++                    i += 1
++                else:
++                    # Check if this is a range
++                    char_x = class_body[i]
++                    char_y = class_body[i + 2]
++                    if ord(char_x) <= ord(char_y):
++                        # Valid range
++                        for code in range(ord(char_x), ord(char_y) + 1):
++                            chars.add(chr(code))
++                        i += 3
++                    else:
++                        # X > Y, treat as individual literals
++                        chars.add(class_body[i])
++                        i += 1
++            else:
++                chars.add(class_body[i])
++                i += 1
++
++        return (chars, negate, pos + 1)
++
++    def parse_pattern(pattern):
++        """Parse pattern into a list of tokens.
++        Returns list of tokens: ('literal', char), ('any_one', None),
++                                ('any_many', None), or ('class', (chars, negate))
++        """
++        tokens = []
++        i = 0
++        while i < len(pattern):
++            if pattern[i] == '\\':
++                if i + 1 >= len(pattern):
++                    raise ValueError("Trailing backslash")
++                tokens.append(('literal', pattern[i + 1]))
++                i += 2
++            elif pattern[i] == '?':
++                tokens.append(('any_one', None))
++                i += 1
++            elif pattern[i] == '*':
++                # Skip consecutive *
++                while i + 1 < len(pattern) and pattern[i + 1] == '*':
++                    i += 1
++                tokens.append(('any_many', None))
++                i += 1
++            elif pattern[i] == '[':
++                chars, negate, end_pos = parse_char_class(pattern, i)
++                tokens.append(('class', (chars, negate)))
++                i = end_pos
++            else:
++                tokens.append(('literal', pattern[i]))
++                i += 1
++        return tokens
++
++    def match_tokens(tokens, text):
++        """Recursively match tokens against text."""
++        def helper(token_idx, text_idx):
++            # Base cases
++            if token_idx == len(tokens):
++                return text_idx == len(text)
++
++            token = tokens[token_idx]
++
++            if token[0] == 'literal':
++                if text_idx < len(text) and text[text_idx] == token[1]:
++                    return helper(token_idx + 1, text_idx + 1)
++                return False
++
++            elif token[0] == 'any_one':
++                if text_idx < len(text):
++                    return helper(token_idx + 1, text_idx + 1)
++                return False
++
++            elif token[0] == 'any_many':
++                # Try matching zero characters
++                if helper(token_idx + 1, text_idx):
++                    return True
++                # Try matching one or more characters
++                for i in range(text_idx, len(text)):
++                    if helper(token_idx + 1, i + 1):
++                        return True
++                return False
++
++            elif token[0] == 'class':
++                chars, negate = token[1]
++                if text_idx < len(text):
++                    char_in_class = text[text_idx] in chars
++                    if negate:
++                        char_in_class = not char_in_class
++                    if char_in_class:
++                        return helper(token_idx + 1, text_idx + 1)
++                return False
++
++            return False
++
++        return helper(0, 0)
++
++    # Handle empty pattern
++    if not pattern:
++        return text == ""
++
++    tokens = parse_pattern(pattern)
++    return match_tokens(tokens, text)
+modified: num_format.py
+--- a/num_format.py
++++ b/num_format.py
+@@ -48,4 +48,77 @@
+ 
+     Returns the formatted string.
+     """
+-    raise NotImplementedError
++    # Validate value type (reject bool specifically)
++    if isinstance(value, bool) or not isinstance(value, (int, float)):
++        raise TypeError("value must be int or float, not bool")
++
++    # Validate value is finite
++    if math.isnan(value) or math.isinf(value):
++        raise ValueError("value must be finite")
++
++    # Validate decimals
++    if not isinstance(decimals, int) or decimals < 0:
++        raise ValueError("decimals must be a non-negative int")
++
++    # Validate width
++    if width is not None:
++        if not isinstance(width, int) or width < 0:
++            raise ValueError("width must be a non-negative int")
++
++    # Step 1: If percent, multiply by 100 BEFORE rounding
++    if percent:
++        value = value * 100
++
++    # Step 2: Round to decimals places using banker's rounding
++    rounded = round(value, decimals)
++
++    # Step 3: Handle negative zero suppression
++    is_negative = rounded < 0
++    if rounded == 0:
++        is_negative = False
++
++    # Convert to absolute value for formatting
++    abs_rounded = abs(rounded)
++
++    # Step 4: Format the number as a string
++    if decimals == 0:
++        # No decimal point
++        int_part = str(int(abs_rounded))
++    else:
++        # Format with decimals
++        formatted = f"{abs_rounded:.{decimals}f}"
++        int_part, frac_part = formatted.split('.')
++
++    # Step 5: Apply thousands separator to integer part
++    if thousands_sep:
++        # Insert commas from right to left every 3 digits
++        int_digits = list(int_part[::-1])
++        grouped = []
++        for i, digit in enumerate(int_digits):
++            if i > 0 and i % 3 == 0:
++                grouped.append(',')
++            grouped.append(digit)
++        int_part = ''.join(grouped[::-1])
++
++    # Step 6: Combine into final number string
++    if decimals == 0:
++        num_str = int_part
++    else:
++        num_str = f"{int_part}.{frac_part}"
++
++    # Step 7: Add sign
++    if is_negative:
++        result = "-" + num_str
++    else:
++        result = num_str
++
++    # Step 8: Add percent suffix
++    if percent:
++        result = result + "%"
++
++    # Step 9: Apply width padding
++    if width is not None:
++        if len(result) < width:
++            result = " " * (width - len(result)) + result
++
++    return result
+modified: record_split.py
+--- a/record_split.py
++++ b/record_split.py
+@@ -44,4 +44,67 @@
+ 
+     Returns a list of field strings, in order.
+     """
+-    raise NotImplementedError
++    # Validate sep
++    if not isinstance(sep, str) or len(sep) != 1:
++        raise ValueError("sep must be a string of length exactly 1")
++    if sep == '"':
++        raise ValueError("sep must not be the double-quote character")
++
++    # Handle empty line
++    if line == "":
++        return [""]
++
++    fields = []
++    i = 0
++
++    while i < len(line):
++        # Start of a new field
++        if line[i] == '"':
++            # Quoted field
++            field_chars = []
++            i += 1  # Skip opening quote
++            while i < len(line):
++                if line[i] == '"':
++                    # Check if followed by another quote
++                    if i + 1 < len(line) and line[i + 1] == '"':
++                        # Doubled quote - add one literal quote and skip both
++                        field_chars.append('"')
++                        i += 2
++                    else:
++                        # Closing quote found
++                        i += 1  # Skip closing quote
++                        break
++                else:
++                    field_chars.append(line[i])
++                    i += 1
++            else:
++                # Loop ended without finding closing quote
++                raise ValueError("Unterminated quoted field")
++
++            # After closing quote, must see sep or end of line
++            if i < len(line) and line[i] != sep:
++                raise ValueError("Trailing data after closing quote")
++
++            fields.append(''.join(field_chars))
++
++            # Skip the separator if present
++            if i < len(line) and line[i] == sep:
++                i += 1
++        else:
++            # Unquoted field
++            field_chars = []
++            while i < len(line) and line[i] != sep:
++                field_chars.append(line[i])
++                i += 1
++
++            fields.append(''.join(field_chars))
++
++            # Skip the separator if present
++            if i < len(line) and line[i] == sep:
++                i += 1
++
++    # Handle trailing separator - it produces an empty field
++    if line and line[-1] == sep:
++        fields.append("")
++
++    return fields

@@ -1,0 +1,375 @@
+modified: event_windows.py
+--- a/event_windows.py
++++ b/event_windows.py
+@@ -49,4 +49,69 @@
+ 
+     Returns the list of `(window_start, window_end, aggregate)` tuples.
+     """
+-    raise NotImplementedError
++    # Rule 1: Check window_size
++    if not isinstance(window_size, int) or window_size <= 0:
++        raise ValueError()
++
++    # Rule 2: Check agg
++    if agg not in ("sum", "avg", "min", "max", "count"):
++        raise ValueError()
++
++    # Rule 3: Check events is list
++    if not isinstance(events, list):
++        raise ValueError()
++
++    # Rule 13: Empty events returns []
++    if len(events) == 0:
++        return []
++
++    # Validate events and group into windows
++    windows = {}
++
++    for event in events:
++        # Rule 3: Each element must be tuple or list with exactly 2 elements
++        if not isinstance(event, (tuple, list)) or len(event) != 2:
++            raise ValueError()
++
++        timestamp, value = event
++
++        # Rule 4: timestamp must be int
++        if not isinstance(timestamp, int):
++            raise TypeError()
++
++        # Rule 5: Calculate window index
++        window_index = timestamp // window_size
++        window_start = window_index * window_size
++        window_end = window_start + window_size
++
++        if window_start not in windows:
++            windows[window_start] = {"values": [], "count": 0}
++
++        windows[window_start]["values"].append(value)
++        windows[window_start]["count"] += 1
++
++    # Sort windows by window_start (Rule 14)
++    sorted_window_starts = sorted(windows.keys())
++
++    result = []
++    for window_start in sorted_window_starts:
++        window_end = window_start + window_size
++        window_data = windows[window_start]
++        values = window_data["values"]
++        count = window_data["count"]
++
++        # Calculate aggregate based on agg type
++        if agg == "sum":
++            aggregate = sum(values)
++        elif agg == "avg":
++            aggregate = sum(values) / count  # Always float (Rule 10)
++        elif agg == "min":
++            aggregate = min(values)
++        elif agg == "max":
++            aggregate = max(values)
++        elif agg == "count":
++            aggregate = count
++
++        result.append((window_start, window_end, aggregate))
++
++    return result
+modified: path_normalize.py
+--- a/path_normalize.py
++++ b/path_normalize.py
+@@ -44,4 +44,75 @@
+ 
+     Returns the normalized path string.
+     """
+-    raise NotImplementedError
++    # Rule 1: Check type
++    if not isinstance(path, str):
++        raise TypeError()
++
++    # Rule 2: Check for empty string
++    if path == "":
++        raise ValueError()
++
++    # Rule 3: Check for backslash
++    if "\\" in path:
++        raise ValueError()
++
++    # Determine if absolute path (rule 7 vs 8)
++    is_absolute = path.startswith("/")
++
++    # Rule 4: Collapse consecutive slashes
++    # Replace multiple slashes with single slash
++    normalized = ""
++    i = 0
++    while i < len(path):
++        if path[i] == "/":
++            normalized += "/"
++            # Skip all consecutive slashes
++            while i < len(path) and path[i] == "/":
++                i += 1
++        else:
++            normalized += path[i]
++            i += 1
++
++    # Rule 9: Remove trailing slash (except for root)
++    if normalized != "/" and normalized.endswith("/"):
++        normalized = normalized[:-1]
++
++    # Split into segments
++    if is_absolute:
++        # For absolute paths, first segment is empty (before initial /)
++        segments = normalized.split("/")[1:]  # Skip empty first element
++    else:
++        segments = normalized.split("/")
++
++    # Process segments: handle . and ..
++    result_segments = []
++
++    for segment in segments:
++        if segment == "." or segment == "":
++            # Rule 5: Remove . segments
++            # Rule 4: Empty segments come from consecutive slashes, skip them
++            continue
++        elif segment == "..":
++            if result_segments and result_segments[-1] != "..":
++                # Rule 6: Cancel preceding real segment
++                result_segments.pop()
++            elif not is_absolute and (not result_segments or result_segments[-1] == ".."):
++                # Rule 8: For relative paths, keep .. literally if no preceding real segment
++                result_segments.append("..")
++            # For absolute paths: Rule 7 - just drop the .. (don't append)
++        else:
++            # Rule 13: Keep other segments literally
++            result_segments.append(segment)
++
++    # Build result
++    if is_absolute:
++        # Rule 12: Absolute path always begins with exactly one /
++        if len(result_segments) == 0:
++            # Rule 10: Root path
++            return "/"
++        return "/" + "/".join(result_segments)
++    else:
++        # Rule 11: Relative path with no segments becomes "."
++        if len(result_segments) == 0:
++            return "."
++        return "/".join(result_segments)
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -46,4 +46,82 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    # Rule 1: Check records is list
++    if not isinstance(records, list):
++        raise TypeError()
++
++    # Rule 2: Check keys is non-empty list
++    if not isinstance(keys, list) or len(keys) == 0:
++        raise ValueError()
++
++    # Rule 3: Validate each key
++    for key in keys:
++        if not isinstance(key, (tuple, list)) or len(key) != 2:
++            raise ValueError()
++
++        field_name, direction = key
++        # Rule 4: Check direction
++        if direction not in ("asc", "desc"):
++            raise ValueError()
++
++    # Validate all values are comparable on their keys (pre-check for TypeError)
++    for record in records:
++        for field_name, direction in keys:
++            value = record.get(field_name, None)
++            # We'll check comparability later when we actually compare
++            # but we need to ensure non-None values can be compared
++
++    # Create a new list to return (Rule 11)
++    result = list(records)
++
++    # Custom comparison key function for stable multi-key sort
++    # We use functools.cmp_to_key to convert comparison logic to key function
++    from functools import cmp_to_key
++
++    def compare_records(rec1, rec2):
++        """Compare two records based on keys."""
++        for field_name, direction in keys:
++            val1 = rec1.get(field_name, None)
++            val2 = rec2.get(field_name, None)
++
++            # Rule 6: None values sort AFTER non-None values
++            is_none1 = val1 is None
++            is_none2 = val2 is None
++
++            if is_none1 and is_none2:
++                # Rule 7: Both None, preserve relative order (stable sort handles this)
++                continue
++            elif is_none1:
++                # val1 is None, val2 is not None -> val1 comes after
++                return 1
++            elif is_none2:
++                # val2 is None, val1 is not None -> val1 comes before
++                return -1
++            else:
++                # Both are non-None, compare them
++                # Rule 8: Use < for comparison
++                try:
++                    if val1 < val2:
++                        cmp_result = -1
++                    elif val1 > val2:
++                        cmp_result = 1
++                    else:
++                        cmp_result = 0
++                except TypeError:
++                    # Rule 8: Incomparable types raise TypeError
++                    raise TypeError()
++
++                # Apply direction
++                if direction == "desc":
++                    cmp_result = -cmp_result
++
++                if cmp_result != 0:
++                    return cmp_result
++
++        # All keys are equal, maintain input order (Rule 9 - stability)
++        return 0
++
++    # Sort using the comparison function (Rule 9: stable sort)
++    result.sort(key=cmp_to_key(compare_records))
++
++    return result
+added: test_implementations.py
+--- a/test_implementations.py
++++ b/test_implementations.py
+@@ -0,0 +1,130 @@
++#!/usr/bin/env python3
++"""Test script for all three implementations."""
++
++import sys
++import traceback
++from path_normalize import normalize_path
++from event_windows import aggregate_windows
++from record_sort import sort_records
++
++test_count = 0
++passed = 0
++failed = 0
++
++def test(description, func, *args, **kwargs):
++    global test_count, passed, failed
++    test_count += 1
++    try:
++        result = func(*args, **kwargs)
++        print(f"✓ Test {test_count}: {description}")
++        print(f"  Result: {result}")
++        passed += 1
++        return result
++    except Exception as e:
++        print(f"✗ Test {test_count}: {description}")
++        print(f"  Error: {type(e).__name__}: {e}")
++        failed += 1
++        traceback.print_exc()
++        return None
++
++def test_exception(description, func, expected_exception, *args, **kwargs):
++    global test_count, passed, failed
++    test_count += 1
++    try:
++        result = func(*args, **kwargs)
++        print(f"✗ Test {test_count}: {description}")
++        print(f"  Expected {expected_exception.__name__} but got result: {result}")
++        failed += 1
++        return False
++    except expected_exception as e:
++        print(f"✓ Test {test_count}: {description}")
++        print(f"  Correctly raised {type(e).__name__}")
++        passed += 1
++        return True
++    except Exception as e:
++        print(f"✗ Test {test_count}: {description}")
++        print(f"  Expected {expected_exception.__name__} but got {type(e).__name__}: {e}")
++        failed += 1
++        return False
++
++print("\n" + "="*60)
++print("TASK 1: path_normalize.py")
++print("="*60)
++
++# Basic tests
++test("Simple relative path", normalize_path, "a/b/c")
++test("Simple absolute path", normalize_path, "/a/b/c")
++test("Single dot removed", normalize_path, "a/./b")
++test("Double dot relative", normalize_path, "a/../b")
++test("Double dot absolute", normalize_path, "/a/../b")
++test("Root path", normalize_path, "/")
++test("Multiple slashes collapsed", normalize_path, "a//b")
++test("Multiple slashes at start", normalize_path, "//a/b")
++test("Trailing slash removed", normalize_path, "a/b/")
++test("Only dots relative", normalize_path, "../..")
++test("Double dot at end absolute", normalize_path, "/a/..")
++test("Complex path", normalize_path, "/a/b/../c/./d")
++test("Relative with trailing dots", normalize_path, "a/b/../../c")
++test("Empty after processing", normalize_path, ".")
++test("Whitespace segment", normalize_path, "a/ /b")
++
++# Error tests
++test_exception("Empty string", normalize_path, ValueError, "")
++test_exception("Not a string", normalize_path, TypeError, 123)
++test_exception("Backslash in path", normalize_path, ValueError, "a\\b")
++test_exception("Mixed slashes", normalize_path, ValueError, "a/b\\c")
++
++print("\n" + "="*60)
++print("TASK 2: event_windows.py")
++print("="*60)
++
++# Basic tests
++test("Empty events", aggregate_windows, [], 5)
++test("Single event", aggregate_windows, [(0, 1)], 5)
++test("Multiple events same window", aggregate_windows, [(0, 1), (2, 3), (4, 5)], 5)
++test("Multiple events different windows", aggregate_windows, [(0, 1), (5, 2), (10, 3)], 5)
++test("Out of order events", aggregate_windows, [(10, 1), (0, 2), (5, 3)], 5)
++test("Duplicate timestamps", aggregate_windows, [(0, 1), (0, 2), (0, 3)], 5)
++test("Average aggregation", aggregate_windows, [(0, 10), (1, 20)], 5, agg="avg")
++test("Min aggregation", aggregate_windows, [(0, 10), (2, 5), (3, 8)], 5, agg="min")
++test("Max aggregation", aggregate_windows, [(0, 10), (2, 5), (3, 8)], 5, agg="max")
++test("Count aggregation", aggregate_windows, [(0, 10), (2, 5), (3, 8)], 5, agg="count")
++test("Negative timestamp", aggregate_windows, [(-5, 1), (-3, 2)], 5)
++
++# Error tests
++test_exception("Non-positive window size", aggregate_windows, ValueError, [(0, 1)], 0)
++test_exception("Negative window size", aggregate_windows, ValueError, [(0, 1)], -5)
++test_exception("Invalid agg", aggregate_windows, ValueError, [(0, 1)], 5, agg="median")
++test_exception("Events not list", aggregate_windows, ValueError, ((0, 1),), 5)
++test_exception("Invalid event format", aggregate_windows, ValueError, [1, 2, 3], 5)
++test_exception("Event with 3 elements", aggregate_windows, ValueError, [(0, 1, 2)], 5)
++test_exception("Non-int timestamp", aggregate_windows, TypeError, [(1.5, 1)], 5)
++
++print("\n" + "="*60)
++print("TASK 3: record_sort.py")
++print("="*60)
++
++# Basic tests
++test("Simple sort ascending", sort_records, [{"a": 3}, {"a": 1}, {"a": 2}], [("a", "asc")])
++test("Simple sort descending", sort_records, [{"a": 3}, {"a": 1}, {"a": 2}], [("a", "desc")])
++test("Multi-key sort", sort_records, [{"a": 2, "b": 1}, {"a": 1, "b": 2}, {"a": 2, "b": 2}], [("a", "asc"), ("b", "asc")])
++test("Missing field as None", sort_records, [{"a": 1}, {"b": 2}, {"a": 2}], [("a", "asc")])
++test("None values sort after", sort_records, [{"a": None}, {"a": 1}, {"a": 2}], [("a", "asc")])
++test("Stability test", sort_records, [{"a": 1, "id": 3}, {"a": 1, "id": 1}, {"a": 1, "id": 2}], [("a", "asc")])
++test("Descending with None", sort_records, [{"a": None}, {"a": 3}, {"a": 1}], [("a", "desc")])
++test("String values", sort_records, [{"name": "charlie"}, {"name": "alice"}, {"name": "bob"}], [("name", "asc")])
++test("Multiple None values", sort_records, [{"a": None}, {"a": 1}, {"a": None}, {"a": 2}], [("a", "asc")])
++test("Empty records list", sort_records, [], [("a", "asc")])
++
++# Error tests
++test_exception("Records not list", sort_records, TypeError, {"a": 1}, [("a", "asc")])
++test_exception("Empty keys", sort_records, ValueError, [{"a": 1}], [])
++test_exception("Invalid key format", sort_records, ValueError, [{"a": 1}], [("a", "asc", "extra")])
++test_exception("Invalid direction", sort_records, ValueError, [{"a": 1}], [("a", "invalid")])
++test_exception("Incomparable types", sort_records, TypeError, [{"a": 1}, {"a": "string"}], [("a", "asc")])
++
++print("\n" + "="*60)
++print(f"SUMMARY: {passed}/{test_count} tests passed, {failed} failed")
++print("="*60)
++
++sys.exit(0 if failed == 0 else 1)

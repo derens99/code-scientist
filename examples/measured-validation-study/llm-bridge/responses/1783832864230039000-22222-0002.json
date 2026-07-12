@@ -1,0 +1,4 @@
+{
+  "id": "1783832864230039000-22222-0002",
+  "response": "{\"allowed\": true, \"reason\": \"The goal studies prompt-level instructions for an isolated benchmark agent, evaluated by pre-registered A/B experiments on local held-out-graded tasks. No source-code mutation, deployment, credential access, or hidden execution is requested; measurement claims are gated on executed benchmark evidence and human review.\", \"flags\": []}"
+}

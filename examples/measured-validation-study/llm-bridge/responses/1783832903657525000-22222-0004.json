@@ -1,0 +1,4 @@
+{
+  "id": "1783832903657525000-22222-0004",
+  "response": "{\"reviews\": [{\"index\": 1, \"allowed\": true, \"reason\": \"Context-memory design note from the paper; informational.\", \"flags\": []}, {\"index\": 2, \"allowed\": true, \"reason\": \"Safety-and-audit design note; benign.\", \"flags\": []}, {\"index\": 3, \"allowed\": true, \"reason\": \"Stated limitations of the approach; benign and useful for calibration.\", \"flags\": []}]}"
+}

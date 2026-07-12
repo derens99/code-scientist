@@ -1,0 +1,298 @@
+modified: glob_match.py
+--- a/glob_match.py
++++ b/glob_match.py
+@@ -45,4 +45,116 @@
+ 
+     Returns `True` or `False`.
+     """
+-    raise NotImplementedError
++    # Rule 6: empty pattern matches only empty text
++    if not pattern:
++        return not text
++
++    def char_in_class(ch, class_body, negated):
++        """Check if character is in character class"""
++        i = 0
++        found = False
++        while i < len(class_body):
++            # Look ahead to see if this forms a range
++            if i + 2 < len(class_body) and class_body[i + 1] == '-':
++                # Potential range X-Y
++                x = class_body[i]
++                y = class_body[i + 2]
++                if x <= y:
++                    # It's a valid range
++                    if x <= ch <= y:
++                        found = True
++                        break
++                    i += 3
++                    continue
++
++            # Not a range; treat current char as literal
++            if class_body[i] == ch:
++                found = True
++                break
++            i += 1
++
++        return found != negated
++
++    def parse_pattern(pat):
++        """Parse pattern into tokens, validating as we go"""
++        tokens = []
++        i = 0
++        while i < len(pat):
++            if pat[i] == '*':
++                # Collapse multiple consecutive *
++                while i < len(pat) and pat[i] == '*':
++                    i += 1
++                tokens.append(('*',))
++            elif pat[i] == '?':
++                tokens.append(('?',))
++                i += 1
++            elif pat[i] == '[':
++                # Parse character class
++                j = i + 1
++                negated = False
++                if j < len(pat) and pat[j] in '!^':
++                    negated = True
++                    j += 1
++                # Find closing ]
++                class_body_start = j
++                found_close = False
++                while j < len(pat):
++                    if pat[j] == ']':
++                        found_close = True
++                        break
++                    j += 1
++                if not found_close:
++                    raise ValueError("unterminated character class")
++                class_body = pat[class_body_start:j]
++                tokens.append(('class', class_body, negated))
++                i = j + 1
++            elif pat[i] == '\\':
++                # Escape sequence
++                if i + 1 >= len(pat):
++                    raise ValueError("backslash at end of pattern")
++                tokens.append(('literal', pat[i + 1]))
++                i += 2
++            else:
++                tokens.append(('literal', pat[i]))
++                i += 1
++        return tokens
++
++    def match_tokens(tokens, text, t_idx, tok_idx):
++        """Recursively match tokens against text"""
++        if tok_idx == len(tokens):
++            return t_idx == len(text)
++
++        token = tokens[tok_idx]
++
++        if token[0] == '*':
++            # * can match 0 or more characters
++            # Try matching 0 chars
++            if match_tokens(tokens, text, t_idx, tok_idx + 1):
++                return True
++            # Try matching 1+ chars
++            while t_idx < len(text):
++                t_idx += 1
++                if match_tokens(tokens, text, t_idx, tok_idx + 1):
++                    return True
++            return False
++        elif token[0] == '?':
++            # ? matches exactly 1 character
++            if t_idx >= len(text):
++                return False
++            return match_tokens(tokens, text, t_idx + 1, tok_idx + 1)
++        elif token[0] == 'class':
++            # [...] matches exactly 1 character in class
++            if t_idx >= len(text):
++                return False
++            ch = text[t_idx]
++            if not char_in_class(ch, token[1], token[2]):
++                return False
++            return match_tokens(tokens, text, t_idx + 1, tok_idx + 1)
++        else:  # literal
++            # Must match exact character
++            if t_idx >= len(text) or text[t_idx] != token[1]:
++                return False
++            return match_tokens(tokens, text, t_idx + 1, tok_idx + 1)
++
++    tokens = parse_pattern(pattern)
++    return match_tokens(tokens, text, 0, 0)
+modified: num_format.py
+--- a/num_format.py
++++ b/num_format.py
+@@ -48,4 +48,74 @@
+ 
+     Returns the formatted string.
+     """
+-    raise NotImplementedError
++    # Rule 1: Validate value type (not bool)
++    if isinstance(value, bool) or not isinstance(value, (int, float)):
++        raise TypeError("value must be int or float, not bool or other type")
++
++    # Rule 2: Check for NaN/infinity
++    if math.isnan(value) or math.isinf(value):
++        raise ValueError("value must be finite")
++
++    # Rule 3: Validate decimals
++    if not isinstance(decimals, int) or decimals < 0:
++        raise ValueError("decimals must be a non-negative int")
++
++    # Rule 9: Validate width
++    if width is not None:
++        if not isinstance(width, int) or width < 0:
++            raise ValueError("width must be a non-negative int")
++
++    # Rule 4: If percent, multiply by 100 BEFORE rounding
++    if percent:
++        value = value * 100
++
++    # Rule 5: Round using banker's rounding
++    rounded = round(value, decimals)
++
++    # Rule 6: Suppress negative zero
++    if rounded == 0:
++        rounded = 0  # This ensures we have positive zero
++
++    # Determine sign
++    is_negative = rounded < 0
++    abs_value = abs(rounded)
++
++    # Rule 7: Format the number with proper decimal places
++    if decimals == 0:
++        # No decimal point
++        int_part = str(int(abs_value))
++    else:
++        # Format with decimals
++        formatted = f"{abs_value:.{decimals}f}"
++        int_part, frac_part = formatted.split('.')
++
++    # Rule 8: Apply thousands separator (only to integer part)
++    if thousands_sep:
++        # Insert commas from right every 3 digits
++        int_part_list = list(int_part)
++        result_parts = []
++        for i, digit in enumerate(reversed(int_part_list)):
++            if i > 0 and i % 3 == 0:
++                result_parts.append(',')
++            result_parts.append(digit)
++        int_part = ''.join(reversed(result_parts))
++
++    # Build the number string
++    if decimals == 0:
++        number_str = int_part
++    else:
++        number_str = f"{int_part}.{frac_part}"
++
++    # Add sign if negative
++    if is_negative:
++        number_str = '-' + number_str
++
++    # Rule 4: Add percent sign if requested
++    if percent:
++        number_str = number_str + '%'
++
++    # Rule 9: Pad with spaces if width specified
++    if width is not None:
++        number_str = number_str.rjust(width)
++
++    return number_str
+modified: table_render.py
+--- a/table_render.py
++++ b/table_render.py
+@@ -55,4 +55,93 @@
+ 
+     Returns the list of rendered lines (no trailing newline characters).
+     """
+-    raise NotImplementedError
++    # Rule 1: validate headers
++    if not isinstance(headers, list) or len(headers) == 0:
++        raise ValueError("headers must be a non-empty list")
++    for h in headers:
++        if not isinstance(h, str):
++            raise TypeError("all headers must be strings")
++
++    # Rule 3: validate alignments if provided
++    if alignments is not None:
++        if len(alignments) != len(headers):
++            raise ValueError("alignments must have same length as headers")
++        for align in alignments:
++            if align not in ("left", "right", "center"):
++                raise ValueError("alignments must be 'left', 'right', or 'center'")
++    else:
++        alignments = ["left"] * len(headers)
++
++    # Rule 4: validate max_col_width
++    if max_col_width is not None:
++        if not isinstance(max_col_width, int) or max_col_width < 4:
++            raise ValueError("max_col_width must be an integer >= 4")
++
++    # Rule 2: validate rows and cells
++    for row in rows:
++        if not isinstance(row, list) or len(row) != len(headers):
++            raise ValueError("every row must be a list with length equal to headers")
++        for cell in row:
++            if not isinstance(cell, str):
++                raise TypeError("every cell must be a string")
++
++    # Rule 6: Apply truncation BEFORE computing column widths
++    truncated_headers = []
++    for h in headers:
++        if max_col_width is not None and len(h) > max_col_width:
++            truncated_headers.append(h[:max_col_width - 3] + "...")
++        else:
++            truncated_headers.append(h)
++
++    truncated_rows = []
++    for row in rows:
++        truncated_row = []
++        for cell in row:
++            if max_col_width is not None and len(cell) > max_col_width:
++                truncated_row.append(cell[:max_col_width - 3] + "...")
++            else:
++                truncated_row.append(cell)
++        truncated_rows.append(truncated_row)
++
++    # Rule 7: Compute column widths
++    col_widths = []
++    for i in range(len(headers)):
++        header_len = len(truncated_headers[i])
++        max_cell_len = 0
++        for row in truncated_rows:
++            max_cell_len = max(max_cell_len, len(row[i]))
++        col_widths.append(max(header_len, max_cell_len))
++
++    # Rule 9: Create horizontal border
++    border_parts = ["+"]
++    for width in col_widths:
++        border_parts.append("-" * (width + 2))
++        border_parts.append("+")
++    border_line = "".join(border_parts)
++
++    # Rule 8: Create header line
++    header_parts = ["|"]
++    for i, header in enumerate(truncated_headers):
++        align_func = str.ljust if alignments[i] == "left" else (str.rjust if alignments[i] == "right" else str.center)
++        padded = align_func(header, col_widths[i])
++        header_parts.append(" " + padded + " ")
++        header_parts.append("|")
++    header_line = "".join(header_parts)
++
++    # Create data rows
++    data_lines = []
++    for row in truncated_rows:
++        row_parts = ["|"]
++        for i, cell in enumerate(row):
++            align_func = str.ljust if alignments[i] == "left" else (str.rjust if alignments[i] == "right" else str.center)
++            padded = align_func(cell, col_widths[i])
++            row_parts.append(" " + padded + " ")
++            row_parts.append("|")
++        data_lines.append("".join(row_parts))
++
++    # Rule 10: Build output in exact order
++    result = [border_line, header_line, border_line]
++    result.extend(data_lines)
++    result.append(border_line)
++
++    return result

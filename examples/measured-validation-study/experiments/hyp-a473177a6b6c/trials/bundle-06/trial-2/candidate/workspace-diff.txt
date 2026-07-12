@@ -1,0 +1,381 @@
+modified: glob_match.py
+--- a/glob_match.py
++++ b/glob_match.py
+@@ -45,4 +45,130 @@
+ 
+     Returns `True` or `False`.
+     """
+-    raise NotImplementedError
++    # Rule 6: Empty pattern matches only empty text
++    if pattern == "" and text == "":
++        return True
++    if pattern == "":
++        return False
++
++    # Parse the pattern into tokens
++    tokens = []
++    i = 0
++    while i < len(pattern):
++        if pattern[i] == "\\":
++            # Rule 4: Backslash escapes next character
++            if i + 1 >= len(pattern):
++                raise ValueError
++            tokens.append(("literal", pattern[i + 1]))
++            i += 2
++        elif pattern[i] == "*":
++            # Rule 2: Consecutive * behave like single *
++            if tokens and tokens[-1][0] == "star":
++                # Skip consecutive *
++                i += 1
++            else:
++                tokens.append(("star", None))
++                i += 1
++        elif pattern[i] == "?":
++            # Rule 1: ? matches exactly one character
++            tokens.append(("question", None))
++            i += 1
++        elif pattern[i] == "[":
++            # Rule 3: Character class
++            # Find the closing ]
++            close_idx = pattern.find("]", i + 1)
++            if close_idx == -1:
++                raise ValueError
++            class_body = pattern[i + 1:close_idx]
++            tokens.append(("class", class_body))
++            i = close_idx + 1
++        else:
++            # Rule 5: Any other character matches literally
++            tokens.append(("literal", pattern[i]))
++            i += 1
++
++    # Recursive matching function
++    def match_tokens(token_idx, text_idx):
++        # If we've consumed all tokens, we match only if we've consumed all text
++        if token_idx >= len(tokens):
++            return text_idx >= len(text)
++
++        token_type, token_val = tokens[token_idx]
++
++        if token_type == "literal":
++            # Must match this exact character at current position
++            if text_idx >= len(text) or text[text_idx] != token_val:
++                return False
++            return match_tokens(token_idx + 1, text_idx + 1)
++
++        elif token_type == "question":
++            # Rule 1: Match exactly one character
++            if text_idx >= len(text):
++                return False
++            return match_tokens(token_idx + 1, text_idx + 1)
++
++        elif token_type == "star":
++            # Rule 2: Match zero or more characters
++            # Try matching zero characters first, then one, then two, etc.
++            # This is greedy but we backtrack
++            for i in range(text_idx, len(text) + 1):
++                if match_tokens(token_idx + 1, i):
++                    return True
++            return False
++
++        elif token_type == "class":
++            # Rule 3: Character class matching
++            if text_idx >= len(text):
++                return False
++
++            char = text[text_idx]
++            if char_in_class(char, token_val):
++                return match_tokens(token_idx + 1, text_idx + 1)
++            return False
++
++        return False
++
++    def char_in_class(char, class_body):
++        # Parse the character class
++        # Check for negation
++        negated = False
++        if class_body and class_body[0] in ("!", "^"):
++            negated = True
++            class_body = class_body[1:]
++
++        # Build set of matching characters
++        matches = set()
++        i = 0
++        while i < len(class_body):
++            if i + 2 < len(class_body) and class_body[i + 1] == "-":
++                # Potential range: X-Y
++                x = class_body[i]
++                y = class_body[i + 2]
++                if ord(x) <= ord(y):
++                    # Valid range
++                    for code in range(ord(x), ord(y) + 1):
++                        matches.add(chr(code))
++                    i += 3
++                else:
++                    # X > Y: treat as literal characters
++                    matches.add(x)
++                    i += 1
++            elif i == 0 and class_body[i] == "-":
++                # - at start is literal
++                matches.add("-")
++                i += 1
++            elif i == len(class_body) - 1 and class_body[i] == "-":
++                # - at end is literal
++                matches.add("-")
++                i += 1
++            else:
++                # Regular character
++                matches.add(class_body[i])
++                i += 1
++
++        if negated:
++            return char not in matches
++        else:
++            return char in matches
++
++    return match_tokens(0, 0)
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -46,4 +46,134 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    # Rule 1: records must be a list
++    if not isinstance(records, list):
++        raise TypeError
++
++    # Rule 2: keys must be a non-empty list
++    if not isinstance(keys, list) or len(keys) == 0:
++        raise ValueError
++
++    # Rule 3 & 4: validate each key element
++    for key in keys:
++        if not isinstance(key, (tuple, list)) or len(key) != 2:
++            raise ValueError
++        field_name, direction = key
++        if direction not in ("asc", "desc"):
++            raise ValueError
++
++    # Create a list with original indices for stability
++    indexed_records = [(i, rec) for i, rec in enumerate(records)]
++
++    # Sort using a key function that handles multi-key sorting
++    def make_sort_key(record, keys):
++        result = []
++        for field_name, direction in keys:
++            value = record.get(field_name)
++
++            # Rule 5 & 6: None values sort after non-None
++            # Use a tuple: (is_none, value_or_original_order)
++            if value is None:
++                # None sorts after all non-None values
++                result.append((1, 0))  # 1 means it's None
++            else:
++                # Non-None values sort before None
++                result.append((0, value))
++
++        return result
++
++    # We need to handle the sorting with proper comparison
++    # Build tuples that can be compared
++    def build_sort_key(indexed_record):
++        idx, record = indexed_record
++        key_parts = []
++
++        for field_name, direction in keys:
++            value = record.get(field_name)
++
++            if value is None:
++                # None sorts last: use (1,) for None values
++                key_parts.append((1,))
++            else:
++                # Non-None sorts first: (0, value) but need to handle direction
++                # For desc, we need to reverse the order
++                if direction == "asc":
++                    key_parts.append((0, value, 0))  # 0 for asc
++                else:
++                    key_parts.append((0, value, 1))  # 1 for desc
++
++        return (key_parts, idx)  # idx for stability
++
++    # Create a custom comparison that handles None values and direction
++    def custom_sort(indexed_record):
++        idx, record = indexed_record
++        key_parts = []
++
++        for field_name, direction in keys:
++            value = record.get(field_name)
++
++            if value is None:
++                # None always sorts last, regardless of direction
++                key_parts.append((1, 0))
++            else:
++                # Check type compatibility for comparison
++                # We'll add validation during sort
++                if direction == "asc":
++                    key_parts.append((0, 0, value))
++                else:
++                    # For desc, we need to use a wrapper that reverses comparison
++                    key_parts.append((0, 1, value))
++
++        return (key_parts, idx)
++
++    # Actually, let's use a simpler approach with functools.cmp_to_key
++    import functools
++
++    def compare_records(item1, item2):
++        idx1, rec1 = item1
++        idx2, rec2 = item2
++
++        for field_name, direction in keys:
++            val1 = rec1.get(field_name)
++            val2 = rec2.get(field_name)
++
++            # Rule 6: None values always sort after non-None
++            if val1 is None and val2 is None:
++                # Both None: maintain stability (continue to next key)
++                continue
++            elif val1 is None:
++                # val1 is None, val2 is not: val1 sorts after
++                return 1
++            elif val2 is None:
++                # val2 is None, val1 is not: val1 sorts before
++                return -1
++            else:
++                # Both non-None: compare using <
++                # Rule 8: Check for incomparable types
++                try:
++                    if val1 < val2:
++                        cmp_result = -1
++                    elif val1 > val2:
++                        cmp_result = 1
++                    else:
++                        cmp_result = 0
++                except TypeError:
++                    # Incomparable types
++                    raise TypeError
++
++                if cmp_result != 0:
++                    if direction == "asc":
++                        return cmp_result
++                    else:
++                        return -cmp_result
++
++        # All keys equal: maintain original order (stability)
++        return 0
++
++    # Sort with the custom comparator
++    sorted_records = sorted(indexed_records, key=functools.cmp_to_key(compare_records))
++
++    # Rule 11: Extract the record objects in new list
++    result = [rec for idx, rec in sorted_records]
++
++    return result
+modified: table_render.py
+--- a/table_render.py
++++ b/table_render.py
+@@ -55,4 +55,102 @@
+ 
+     Returns the list of rendered lines (no trailing newline characters).
+     """
+-    raise NotImplementedError
++    # Rule 1: Validate headers
++    if not isinstance(headers, list) or len(headers) == 0:
++        raise ValueError
++    for header in headers:
++        if not isinstance(header, str):
++            raise TypeError
++
++    # Rule 2: Validate rows
++    for row in rows:
++        if not isinstance(row, list) or len(row) != len(headers):
++            raise ValueError
++        for cell in row:
++            if not isinstance(cell, str):
++                raise TypeError
++
++    # Rule 3: Validate alignments if provided
++    if alignments is None:
++        alignments = ["left"] * len(headers)
++    else:
++        if len(alignments) != len(headers):
++            raise ValueError
++        for alignment in alignments:
++            if alignment not in ("left", "right", "center"):
++                raise ValueError
++
++    # Rule 4: Validate max_col_width if provided
++    if max_col_width is not None:
++        if not isinstance(max_col_width, int) or max_col_width < 4:
++            raise ValueError
++
++    # Rule 5 & 6: Truncate headers and rows if max_col_width is set
++    processed_headers = []
++    for header in headers:
++        if max_col_width is not None and len(header) > max_col_width:
++            header = header[:max_col_width - 3] + "..."
++        processed_headers.append(header)
++
++    processed_rows = []
++    for row in rows:
++        processed_row = []
++        for cell in row:
++            if max_col_width is not None and len(cell) > max_col_width:
++                cell = cell[:max_col_width - 3] + "..."
++            processed_row.append(cell)
++        processed_rows.append(processed_row)
++
++    # Rule 7: Compute column widths
++    col_widths = []
++    for col_idx in range(len(processed_headers)):
++        width = len(processed_headers[col_idx])
++        for row in processed_rows:
++            width = max(width, len(row[col_idx]))
++        col_widths.append(width)
++
++    # Rule 8 & 9: Generate border line
++    def make_border():
++        border_parts = []
++        for width in col_widths:
++            border_parts.append("-" * (width + 2))
++        return "+" + "+".join(border_parts) + "+"
++
++    border_line = make_border()
++
++    # Rule 8: Generate header line
++    def make_line(cells, alignments):
++        line_parts = []
++        for cell, width, alignment in zip(cells, col_widths, alignments):
++            if alignment == "left":
++                padded = cell.ljust(width)
++            elif alignment == "right":
++                padded = cell.rjust(width)
++            else:  # center
++                padded = cell.center(width)
++            line_parts.append("| " + padded + " ")
++        return "|".join(line_parts) + "|"
++
++    # Alternative simpler approach for line generation
++    def make_line_simple(cells, alignments):
++        line = "|"
++        for cell, width, alignment in zip(cells, col_widths, alignments):
++            if alignment == "left":
++                padded = cell.ljust(width)
++            elif alignment == "right":
++                padded = cell.rjust(width)
++            else:  # center
++                padded = cell.center(width)
++            line += " " + padded + " |"
++        return line
++
++    # Rule 10: Build result
++    result = []
++    result.append(border_line)
++    result.append(make_line_simple(processed_headers, alignments))
++    result.append(border_line)
++    for row in processed_rows:
++        result.append(make_line_simple(row, alignments))
++    result.append(border_line)
++
++    return result

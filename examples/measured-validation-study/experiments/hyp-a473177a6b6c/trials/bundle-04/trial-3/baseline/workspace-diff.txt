@@ -1,0 +1,270 @@
+modified: glob_match.py
+--- a/glob_match.py
++++ b/glob_match.py
+@@ -45,4 +45,115 @@
+ 
+     Returns `True` or `False`.
+     """
+-    raise NotImplementedError
++    # First, parse the pattern to extract meta-tokens
++    tokens = []
++    i = 0
++    while i < len(pattern):
++        if pattern[i] == '\\':
++            if i + 1 >= len(pattern):
++                raise ValueError("Backslash at end of pattern with nothing to escape")
++            tokens.append(('literal', pattern[i + 1]))
++            i += 2
++        elif pattern[i] == '*':
++            # Collapse consecutive stars
++            if not tokens or tokens[-1][0] != 'star':
++                tokens.append(('star',))
++            i += 1
++        elif pattern[i] == '?':
++            tokens.append(('question',))
++            i += 1
++        elif pattern[i] == '[':
++            # Parse character class
++            i += 1
++            negate = False
++            if i < len(pattern) and pattern[i] in '!^':
++                negate = True
++                i += 1
++
++            class_body = []
++            start = i
++            while i < len(pattern) and pattern[i] != ']':
++                i += 1
++
++            if i >= len(pattern):
++                raise ValueError("Unterminated character class")
++
++            class_body = pattern[start:i]
++            tokens.append(('class', class_body, negate))
++            i += 1
++        else:
++            tokens.append(('literal', pattern[i]))
++            i += 1
++
++    # Now match text against the tokens using dynamic programming
++    # memo[t_idx][text_idx] = whether tokens[t_idx:] matches text[text_idx:]
++    memo = {}
++
++    def matches(t_idx, text_idx):
++        if (t_idx, text_idx) in memo:
++            return memo[(t_idx, text_idx)]
++
++        # Base case: end of both
++        if t_idx >= len(tokens) and text_idx >= len(text):
++            return True
++
++        # End of pattern but text remains
++        if t_idx >= len(tokens):
++            return False
++
++        # End of text but pattern remains (only valid if remaining is all stars)
++        if text_idx >= len(text):
++            while t_idx < len(tokens) and tokens[t_idx][0] == 'star':
++                t_idx += 1
++            return t_idx >= len(tokens)
++
++        token = tokens[t_idx]
++        result = False
++
++        if token[0] == 'literal':
++            if text[text_idx] == token[1]:
++                result = matches(t_idx + 1, text_idx + 1)
++        elif token[0] == 'question':
++            result = matches(t_idx + 1, text_idx + 1)
++        elif token[0] == 'star':
++            # Try matching 0 or more characters
++            # First try 0 characters
++            result = matches(t_idx + 1, text_idx)
++            if not result:
++                # Try 1 or more characters
++                result = matches(t_idx, text_idx + 1)
++        elif token[0] == 'class':
++            class_body, negate = token[1], token[2]
++            char = text[text_idx]
++            in_class = char_in_class(char, class_body)
++            if (in_class and not negate) or (not in_class and negate):
++                result = matches(t_idx + 1, text_idx + 1)
++
++        memo[(t_idx, text_idx)] = result
++        return result
++
++    def char_in_class(char, class_body):
++        """Check if char is in the character class."""
++        i = 0
++        while i < len(class_body):
++            # Check for range: valid range is when - is not first or last and start <= end
++            if i + 2 < len(class_body) and class_body[i + 1] == '-':
++                start_char = class_body[i]
++                end_char = class_body[i + 2]
++                if start_char <= end_char:
++                    # Valid range
++                    if start_char <= char <= end_char:
++                        return True
++                    i += 3
++                else:
++                    # Invalid range (X > Y), treat as literals
++                    if class_body[i] == char:
++                        return True
++                    i += 1
++            else:
++                if class_body[i] == char:
++                    return True
++                i += 1
++        return False
++
++    return matches(0, 0)
+modified: num_format.py
+--- a/num_format.py
++++ b/num_format.py
+@@ -48,4 +48,77 @@
+ 
+     Returns the formatted string.
+     """
+-    raise NotImplementedError
++    # Rule 1: Check type
++    if isinstance(value, bool) or not isinstance(value, (int, float)):
++        raise TypeError("value must be int or float, not bool")
++
++    # Rule 2: Check finite
++    if math.isnan(value) or math.isinf(value):
++        raise ValueError("value must be finite")
++
++    # Rule 3: Check decimals
++    if not isinstance(decimals, int) or decimals < 0:
++        raise ValueError("decimals must be a non-negative int")
++
++    # Rule 9: Check width
++    if width is not None:
++        if not isinstance(width, int) or width < 0:
++            raise ValueError("width must be a non-negative int")
++
++    # Rule 4: Apply percent multiplier BEFORE rounding
++    if percent:
++        value = value * 100
++
++    # Rule 5: Round using banker's rounding
++    rounded = round(value, decimals)
++
++    # Rule 6: Suppress negative zero
++    if rounded == 0:
++        rounded = 0  # This ensures it's positive zero
++
++    # Build the number string
++    is_negative = rounded < 0
++    abs_rounded = abs(rounded)
++
++    # Format the number string with the appropriate decimal places
++    if decimals == 0:
++        num_str = str(int(abs_rounded))
++    else:
++        # Format with decimals
++        format_str = f"{{:.{decimals}f}}"
++        num_str = format_str.format(abs_rounded)
++
++    # Rule 8: Apply thousands separator
++    if thousands_sep:
++        # Split into integer and fractional parts
++        if '.' in num_str:
++            int_part, frac_part = num_str.split('.')
++        else:
++            int_part = num_str
++            frac_part = None
++
++        # Add thousands separators to integer part
++        int_part_with_sep = ""
++        for i, digit in enumerate(reversed(int_part)):
++            if i > 0 and i % 3 == 0:
++                int_part_with_sep = ',' + int_part_with_sep
++            int_part_with_sep = digit + int_part_with_sep
++
++        if frac_part is not None:
++            num_str = int_part_with_sep + '.' + frac_part
++        else:
++            num_str = int_part_with_sep
++
++    # Add sign
++    if is_negative:
++        num_str = '-' + num_str
++
++    # Rule 4: Add percent sign
++    if percent:
++        num_str = num_str + '%'
++
++    # Rule 9: Apply width padding
++    if width is not None and len(num_str) < width:
++        num_str = ' ' * (width - len(num_str)) + num_str
++
++    return num_str
+modified: record_split.py
+--- a/record_split.py
++++ b/record_split.py
+@@ -44,4 +44,63 @@
+ 
+     Returns a list of field strings, in order.
+     """
+-    raise NotImplementedError
++    # Rule 1: Validate sep
++    if not isinstance(sep, str) or len(sep) != 1:
++        raise ValueError("sep must be a string of length exactly 1")
++    if sep == '"':
++        raise ValueError("sep must not be the double-quote character")
++
++    # Rule 2: Empty line
++    if line == "":
++        return [""]
++
++    fields = []
++    i = 0
++
++    while i < len(line):
++        # Check if this is a quoted field
++        if line[i] == '"':
++            # Quoted field
++            field_value = ""
++            i += 1  # Skip opening quote
++            while i < len(line):
++                if line[i] == '"':
++                    # Check if next character is also a quote
++                    if i + 1 < len(line) and line[i + 1] == '"':
++                        # Doubled quote - represents one literal quote
++                        field_value += '"'
++                        i += 2
++                    else:
++                        # This is the closing quote
++                        i += 1
++                        # Rule 9: Check what comes after closing quote
++                        if i < len(line) and line[i] != sep:
++                            raise ValueError("Trailing data after closing quote")
++                        # Move past separator if present
++                        if i < len(line) and line[i] == sep:
++                            i += 1
++                        fields.append(field_value)
++                        break
++                else:
++                    field_value += line[i]
++                    i += 1
++            else:
++                # Rule 8: Reached end without closing quote
++                raise ValueError("Unterminated quoted field")
++        else:
++            # Unquoted field
++            field_value = ""
++            while i < len(line) and line[i] != sep:
++                field_value += line[i]
++                i += 1
++            fields.append(field_value)
++            # Move past separator if present
++            if i < len(line) and line[i] == sep:
++                i += 1
++
++    # Rule 11: Handle trailing separator
++    # If line ends with separator, add empty field
++    if len(line) > 0 and line[-1] == sep:
++        fields.append("")
++
++    return fields

@@ -1,0 +1,269 @@
+modified: glob_match.py
+--- a/glob_match.py
++++ b/glob_match.py
+@@ -45,4 +45,112 @@
+ 
+     Returns `True` or `False`.
+     """
+-    raise NotImplementedError
++    def parse_pattern(p):
++        """Parse pattern into tokens."""
++        tokens = []
++        i = 0
++        while i < len(p):
++            if p[i] == '\\':
++                if i + 1 >= len(p):
++                    raise ValueError("Backslash at end of pattern")
++                tokens.append(('literal', p[i + 1]))
++                i += 2
++            elif p[i] == '*':
++                # Skip consecutive *
++                while i < len(p) and p[i] == '*':
++                    i += 1
++                tokens.append(('star', None))
++            elif p[i] == '?':
++                tokens.append(('question', None))
++                i += 1
++            elif p[i] == '[':
++                # Parse character class
++                i += 1
++                if i >= len(p):
++                    raise ValueError("Unterminated character class")
++                negated = False
++                if p[i] in '!^':
++                    negated = True
++                    i += 1
++                chars = []
++                while i < len(p) and p[i] != ']':
++                    if i + 2 < len(p) and p[i + 1] == '-' and p[i + 2] != ']':
++                        # Range
++                        start_char = p[i]
++                        end_char = p[i + 2]
++                        if ord(start_char) <= ord(end_char):
++                            for code in range(ord(start_char), ord(end_char) + 1):
++                                chars.append(chr(code))
++                            i += 3
++                        else:
++                            # Treat as literals
++                            chars.append(p[i])
++                            i += 1
++                    else:
++                        chars.append(p[i])
++                        i += 1
++                if i >= len(p):
++                    raise ValueError("Unterminated character class")
++                i += 1  # consume ]
++                tokens.append(('class', (negated, ''.join(chars))))
++            else:
++                tokens.append(('literal', p[i]))
++                i += 1
++        return tokens
++
++    def match_tokens(tokens, text):
++        """Recursively match tokens against text."""
++        memo = {}
++
++        def helper(ti, texti):
++            if (ti, texti) in memo:
++                return memo[(ti, texti)]
++
++            # Base case: both exhausted
++            if ti >= len(tokens) and texti >= len(text):
++                result = True
++            # Only tokens exhausted, text remains
++            elif ti >= len(tokens):
++                result = False
++            # Only text exhausted, tokens remain
++            elif texti >= len(text):
++                # Check if remaining tokens are all stars
++                result = all(tokens[j][0] == 'star' for j in range(ti, len(tokens)))
++            else:
++                token_type, token_data = tokens[ti]
++                if token_type == 'literal':
++                    if text[texti] == token_data:
++                        result = helper(ti + 1, texti + 1)
++                    else:
++                        result = False
++                elif token_type == 'question':
++                    # Consume exactly one character
++                    result = helper(ti + 1, texti + 1)
++                elif token_type == 'star':
++                    # Try matching 0 or more characters
++                    # First try matching 0 characters
++                    result = helper(ti + 1, texti)
++                    if not result:
++                        # Try matching more characters
++                        result = helper(ti, texti + 1)
++                elif token_type == 'class':
++                    negated, chars = token_data
++                    char_matches = text[texti] in chars
++                    if negated:
++                        char_matches = not char_matches
++                    if char_matches:
++                        result = helper(ti + 1, texti + 1)
++                    else:
++                        result = False
++
++            memo[(ti, texti)] = result
++            return result
++
++        return helper(0, 0)
++
++    try:
++        tokens = parse_pattern(pattern)
++    except ValueError:
++        raise
++
++    return match_tokens(tokens, text)
+modified: num_format.py
+--- a/num_format.py
++++ b/num_format.py
+@@ -48,4 +48,75 @@
+ 
+     Returns the formatted string.
+     """
+-    raise NotImplementedError
++    # Validate value type
++    if isinstance(value, bool) or not isinstance(value, (int, float)):
++        raise TypeError("value must be int or float, not bool")
++
++    # Validate value is finite
++    if math.isnan(value) or math.isinf(value):
++        raise ValueError("value must be finite")
++
++    # Validate decimals
++    if not isinstance(decimals, int) or decimals < 0:
++        raise ValueError("decimals must be non-negative int")
++
++    # Validate width
++    if width is not None:
++        if not isinstance(width, int) or width < 0:
++            raise ValueError("width must be non-negative int")
++
++    # Apply percent scaling before rounding
++    if percent:
++        value = value * 100
++
++    # Round to specified decimals
++    rounded = round(value, decimals)
++
++    # Suppress negative zero
++    if rounded == 0:
++        rounded = abs(rounded)
++
++    # Handle sign
++    is_negative = rounded < 0
++    abs_value = abs(rounded)
++
++    # Format the number
++    if decimals == 0:
++        # No decimal point
++        int_part = str(int(abs_value))
++    else:
++        # Format with decimals
++        formatted = f"{abs_value:.{decimals}f}"
++        int_part, frac_part = formatted.split('.')
++
++    # Add thousands separator if needed
++    if thousands_sep:
++        # Add commas to integer part from right to left
++        int_digits = list(int_part[::-1])
++        with_commas = []
++        for i, digit in enumerate(int_digits):
++            if i > 0 and i % 3 == 0:
++                with_commas.append(',')
++            with_commas.append(digit)
++        int_part = ''.join(with_commas[::-1])
++
++    # Build result
++    if decimals == 0:
++        result = int_part
++    else:
++        result = f"{int_part}.{frac_part}"
++
++    # Add negative sign if needed
++    if is_negative:
++        result = '-' + result
++
++    # Add percent suffix
++    if percent:
++        result = result + '%'
++
++    # Apply width padding
++    if width is not None:
++        if len(result) < width:
++            result = ' ' * (width - len(result)) + result
++
++    return result
+modified: record_split.py
+--- a/record_split.py
++++ b/record_split.py
+@@ -44,4 +44,67 @@
+ 
+     Returns a list of field strings, in order.
+     """
+-    raise NotImplementedError
++    # Validate sep
++    if not isinstance(sep, str) or len(sep) != 1:
++        raise ValueError("sep must be a string of length exactly 1")
++    if sep == '"':
++        raise ValueError("sep must not be the double-quote character")
++
++    # Handle empty line
++    if line == "":
++        return [""]
++
++    fields = []
++    i = 0
++    last_was_sep = False
++
++    while i < len(line):
++        # Check if this field is quoted
++        if line[i] == '"':
++            # Quoted field
++            field_chars = []
++            i += 1  # Skip opening quote
++            while i < len(line):
++                if line[i] == '"':
++                    # Check if it's doubled
++                    if i + 1 < len(line) and line[i + 1] == '"':
++                        # Doubled quote: add single quote to field
++                        field_chars.append('"')
++                        i += 2
++                    else:
++                        # Closing quote
++                        i += 1
++                        # Check what comes after
++                        if i < len(line) and line[i] != sep:
++                            raise ValueError("Trailing data after closing quote")
++                        fields.append(''.join(field_chars))
++                        last_was_sep = False
++                        # Move past the sep if present
++                        if i < len(line) and line[i] == sep:
++                            last_was_sep = True
++                            i += 1
++                        break
++                else:
++                    field_chars.append(line[i])
++                    i += 1
++            else:
++                # Reached end of line without closing quote
++                raise ValueError("Unclosed quoted field")
++        else:
++            # Unquoted field
++            field_chars = []
++            while i < len(line) and line[i] != sep:
++                field_chars.append(line[i])
++                i += 1
++            fields.append(''.join(field_chars))
++            last_was_sep = False
++            # Move past the sep if present
++            if i < len(line) and line[i] == sep:
++                last_was_sep = True
++                i += 1
++
++    # If we ended with a sep, add one more empty field
++    if last_was_sep:
++        fields.append("")
++
++    return fields

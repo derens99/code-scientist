@@ -1,0 +1,413 @@
+modified: glob_match.py
+--- a/glob_match.py
++++ b/glob_match.py
+@@ -45,4 +45,126 @@
+ 
+     Returns `True` or `False`.
+     """
+-    raise NotImplementedError
++    # Parse pattern into tokens
++    def parse_pattern(pattern):
++        tokens = []
++        i = 0
++        while i < len(pattern):
++            if pattern[i] == "\\":
++                # Escape sequence
++                if i + 1 >= len(pattern):
++                    raise ValueError
++                tokens.append(("literal", pattern[i + 1]))
++                i += 2
++            elif pattern[i] == "*":
++                # Collapse consecutive *
++                tokens.append(("star", None))
++                i += 1
++                while i < len(pattern) and pattern[i] == "*":
++                    i += 1
++            elif pattern[i] == "?":
++                tokens.append(("question", None))
++                i += 1
++            elif pattern[i] == "[":
++                # Character class
++                close_idx = pattern.find("]", i + 1)
++                if close_idx == -1:
++                    raise ValueError
++                class_body = pattern[i + 1:close_idx]
++                tokens.append(("class", class_body))
++                i = close_idx + 1
++            else:
++                tokens.append(("literal", pattern[i]))
++                i += 1
++        return tokens
++
++    def parse_class(class_body):
++        """Parse character class and return (negated, char_set)"""
++        negated = False
++        if len(class_body) > 0 and class_body[0] in ("!", "^"):
++            negated = True
++            class_body = class_body[1:]
++
++        # Build character set from class_body
++        char_set = set()
++        i = 0
++        while i < len(class_body):
++            if i + 2 < len(class_body) and class_body[i + 1] == "-":
++                # Possible range
++                start_char = class_body[i]
++                end_char = class_body[i + 2]
++                if ord(start_char) <= ord(end_char):
++                    # Valid range
++                    for code in range(ord(start_char), ord(end_char) + 1):
++                        char_set.add(chr(code))
++                    i += 3
++                else:
++                    # Not a range, treat as individual characters
++                    char_set.add(start_char)
++                    i += 1
++            elif i == len(class_body) - 1 and class_body[i] == "-":
++                # Trailing dash, treat as literal
++                char_set.add(class_body[i])
++                i += 1
++            elif i == 0 and class_body[i] == "-":
++                # Leading dash, treat as literal
++                char_set.add(class_body[i])
++                i += 1
++            else:
++                char_set.add(class_body[i])
++                i += 1
++
++        return negated, char_set
++
++    def match_tokens(tokens, text, t_idx=0, tok_idx=0, memo=None):
++        """Recursive match with memoization"""
++        if memo is None:
++            memo = {}
++
++        key = (t_idx, tok_idx)
++        if key in memo:
++            return memo[key]
++
++        # Base cases
++        if tok_idx == len(tokens):
++            result = t_idx == len(text)
++        elif t_idx == len(text):
++            # Check if remaining tokens can match empty string
++            remaining = tokens[tok_idx:]
++            can_match_empty = all(tok[0] == "star" for tok in remaining)
++            result = can_match_empty
++        else:
++            token_type, token_val = tokens[tok_idx]
++
++            if token_type == "literal":
++                # Must match literal character
++                if text[t_idx] == token_val:
++                    result = match_tokens(tokens, text, t_idx + 1, tok_idx + 1, memo)
++                else:
++                    result = False
++            elif token_type == "question":
++                # Match exactly one character
++                result = match_tokens(tokens, text, t_idx + 1, tok_idx + 1, memo)
++            elif token_type == "star":
++                # Try matching 0 characters (skip star), or 1+ characters
++                # Try 0 characters
++                result = match_tokens(tokens, text, t_idx, tok_idx + 1, memo)
++                # Try 1+ characters
++                if not result:
++                    result = match_tokens(tokens, text, t_idx + 1, tok_idx, memo)
++            elif token_type == "class":
++                negated, char_set = parse_class(token_val)
++                char_matches = text[t_idx] in char_set
++                if negated:
++                    char_matches = not char_matches
++                if char_matches:
++                    result = match_tokens(tokens, text, t_idx + 1, tok_idx + 1, memo)
++                else:
++                    result = False
++
++        memo[key] = result
++        return result
++
++    # Parse and match
++    tokens = parse_pattern(pattern)
++    return match_tokens(tokens, text)
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -46,4 +46,165 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    # Rule 1: records must be a list
++    if not isinstance(records, list):
++        raise TypeError
++
++    # Rule 2: keys must be a non-empty list
++    if not isinstance(keys, list) or len(keys) == 0:
++        raise ValueError
++
++    # Rule 3 & 4: validate keys structure and direction
++    for key_spec in keys:
++        if not isinstance(key_spec, (tuple, list)) or len(key_spec) != 2:
++            raise ValueError
++        field_name, direction = key_spec
++        if direction not in ("asc", "desc"):
++            raise ValueError
++
++    # Check for type incompatibility in non-None values
++    # We need to validate this by examining the values
++    for key_spec in keys:
++        field_name, direction = key_spec
++        first_type = None
++        for record in records:
++            val = record.get(field_name)
++            if val is not None:
++                if first_type is None:
++                    first_type = type(val)
++                else:
++                    # Try to compare to check if types are compatible
++                    try:
++                        _ = val < val  # Self-comparison to test type compatibility
++                        # Also test with first type value
++                        first_val = None
++                        for r in records:
++                            v = r.get(field_name)
++                            if v is not None and type(v) == first_type:
++                                first_val = v
++                                break
++                        if first_val is not None and type(val) != first_type:
++                            # Try comparing different types
++                            try:
++                                _ = first_val < val
++                            except TypeError:
++                                raise TypeError
++                    except TypeError:
++                        raise TypeError
++
++    # Create a copy and sort
++    result = list(records)
++
++    # Sort using multiple passes in reverse order (stable sort)
++    # or use a complex key function
++    def make_key(record):
++        key_values = []
++        for field_name, direction in keys:
++            val = record.get(field_name)
++            # None values sort last, so we use a tuple:
++            # (is_none, value_if_not_none, reversed_if_desc)
++            if val is None:
++                # Put None values at the end
++                key_values.append((1, None))
++            else:
++                if direction == "desc":
++                    # For descending, we need to negate or use reverse
++                    # We'll handle this with a wrapper
++                    key_values.append((0, (direction == "desc", val)))
++                else:
++                    key_values.append((0, (direction == "desc", val)))
++        return key_values
++
++    # Use a different approach: multiple stable sorts in reverse order
++    for field_name, direction in reversed(keys):
++        reverse = (direction == "desc")
++
++        def sort_key_func(record, fn=field_name, rev=reverse):
++            val = record.get(fn)
++            if val is None:
++                # None values always sort to the end
++                # Return a tuple where None sorts last
++                return (1, None)
++            else:
++                return (0, val)
++
++        # For descending on non-None, we need special handling
++        # Split into None and non-None
++        none_records = [r for r in result if result.index(r) and r.get(field_name) is None]
++        non_none_records = [r for r in result if r.get(field_name) is not None]
++
++        # Actually use Python's stable sort properly
++        # We need to sort all records, but None values sort last
++        try:
++            result.sort(key=lambda r, fn=field_name: (r.get(fn) is None, r.get(fn) if r.get(fn) is not None else 0),
++                       reverse=False)
++        except TypeError as e:
++            raise TypeError
++
++        # Actually, let's use a cleaner approach with proper None handling
++
++    # Better implementation using proper multi-key sort
++    def make_sort_key(record):
++        key_parts = []
++        for field_name, direction in keys:
++            val = record.get(field_name)
++            is_none = val is None
++
++            # Create a sortable key
++            if is_none:
++                # None values sort to the end
++                key_parts.append((1, 0))
++            else:
++                # Non-None values sort normally
++                if direction == "asc":
++                    key_parts.append((0, val))
++                else:
++                    # For descending, we need to reverse the sort
++                    # This is tricky because we can't negate all types
++                    # We'll sort all non-None values first, then handle desc
++                    key_parts.append((0, val))
++
++        return key_parts
++
++    # Use a custom comparison approach
++    # Sort with None handling
++    from functools import cmp_to_key
++
++    def compare_records(r1, r2):
++        for field_name, direction in keys:
++            v1 = r1.get(field_name)
++            v2 = r2.get(field_name)
++
++            # Both None: continue to next key
++            if v1 is None and v2 is None:
++                continue
++
++            # One is None: None sorts to end
++            if v1 is None:
++                return 1
++            if v2 is None:
++                return -1
++
++            # Both non-None: compare
++            try:
++                if v1 < v2:
++                    cmp_result = -1
++                elif v1 > v2:
++                    cmp_result = 1
++                else:
++                    cmp_result = 0
++            except TypeError:
++                raise TypeError
++
++            # Apply direction
++            if cmp_result != 0:
++                if direction == "desc":
++                    return -cmp_result
++                else:
++                    return cmp_result
++
++        # All keys equal
++        return 0
++
++    result.sort(key=cmp_to_key(compare_records))
++    return result
+modified: table_render.py
+--- a/table_render.py
++++ b/table_render.py
+@@ -55,4 +55,107 @@
+ 
+     Returns the list of rendered lines (no trailing newline characters).
+     """
+-    raise NotImplementedError
++    # Rule 1: Validate headers
++    if not isinstance(headers, list) or len(headers) == 0:
++        raise ValueError
++    for h in headers:
++        if not isinstance(h, str):
++            raise TypeError
++
++    # Rule 2: Validate rows
++    for row in rows:
++        if not isinstance(row, list) or len(row) != len(headers):
++            raise ValueError
++        for cell in row:
++            if not isinstance(cell, str):
++                raise TypeError
++
++    # Rule 3: Validate alignments
++    if alignments is None:
++        alignments = ["left"] * len(headers)
++    else:
++        if len(alignments) != len(headers):
++            raise ValueError
++        for align in alignments:
++            if align not in ("left", "right", "center"):
++                raise ValueError
++
++    # Rule 4: Validate max_col_width
++    if max_col_width is not None:
++        if not isinstance(max_col_width, int) or max_col_width < 4:
++            raise ValueError
++
++    # Rule 6: Truncate headers and rows if max_col_width is set
++    truncated_headers = []
++    for h in headers:
++        if max_col_width and len(h) > max_col_width:
++            truncated_headers.append(h[:max_col_width - 3] + "...")
++        else:
++            truncated_headers.append(h)
++
++    truncated_rows = []
++    for row in rows:
++        truncated_row = []
++        for cell in row:
++            if max_col_width and len(cell) > max_col_width:
++                truncated_row.append(cell[:max_col_width - 3] + "...")
++            else:
++                truncated_row.append(cell)
++        truncated_rows.append(truncated_row)
++
++    # Rule 7: Compute column widths
++    col_widths = []
++    for i in range(len(headers)):
++        header_len = len(truncated_headers[i])
++        max_cell_len = max([len(truncated_rows[j][i]) for j in range(len(truncated_rows))]) if truncated_rows else 0
++        col_widths.append(max(header_len, max_cell_len))
++
++    # Rule 9: Create horizontal border line
++    def make_border():
++        parts = ["+"]
++        for width in col_widths:
++            parts.append("-" * (width + 2))
++            parts.append("+")
++        return "".join(parts)
++
++    # Rule 8: Format and pad cells
++    def make_header_line():
++        parts = ["|"]
++        for i, header in enumerate(truncated_headers):
++            width = col_widths[i]
++            align = alignments[i]
++            if align == "left":
++                padded = header.ljust(width)
++            elif align == "right":
++                padded = header.rjust(width)
++            else:  # center
++                padded = header.center(width)
++            parts.append(" " + padded + " ")
++            parts.append("|")
++        return "".join(parts)
++
++    def make_row_line(row):
++        parts = ["|"]
++        for i, cell in enumerate(row):
++            width = col_widths[i]
++            align = alignments[i]
++            if align == "left":
++                padded = cell.ljust(width)
++            elif align == "right":
++                padded = cell.rjust(width)
++            else:  # center
++                padded = cell.center(width)
++            parts.append(" " + padded + " ")
++            parts.append("|")
++        return "".join(parts)
++
++    # Rule 10: Build the output
++    result = []
++    result.append(make_border())
++    result.append(make_header_line())
++    result.append(make_border())
++    for row in truncated_rows:
++        result.append(make_row_line(row))
++    result.append(make_border())
++
++    return result
