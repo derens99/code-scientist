@@ -73,8 +73,8 @@ from code_scientist.safety import (
 from code_scientist.study_assets import write_paper_study_kit, write_paper_study_materials
 from code_scientist.supervisor import (
     _apply_pending_goal_commands,
-    _write_state,
     load_state,
+    mutate_state,
     run_continuous_research,
     run_research_cycle,
 )
@@ -573,12 +573,14 @@ def main(argv: list[str] | None = None) -> int:
         )
         applied = state.run_status in {"completed", "stopped", "blocked"}
         if applied:
-            state = _apply_pending_goal_commands(
-                run_dir,
-                state,
-                safety_policies=load_safety_policies(args.safety_policy),
+            state = mutate_state(
+                state_path,
+                lambda current: _apply_pending_goal_commands(
+                    run_dir,
+                    current,
+                    safety_policies=load_safety_policies(args.safety_policy),
+                ),
             )
-            _write_state(state_path, state)
         print(json.dumps({"sequence": sequence, "applied": applied}))
         return 0
     if args.command == "run":
@@ -684,32 +686,37 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "evaluation-return":
         run_dir = Path(args.run_dir)
-        state = load_state(run_dir / "state.json")
-        state = _append_capability_evaluations(state, args.capability_eval_fixture)
-        state = _append_capability_review_evaluations(state, args.capability_review_fixture)
-        state = _append_preference_review_evaluations(state, args.preference_review_fixture)
-        state = _append_prospective_evaluations(state, args.prospective_eval_fixture)
-        state = _append_feedback_loop_evaluations(
-            state,
-            args.feedback_loop_eval_fixture,
-            args.feedback_loop_review_fixture,
-        )
+        state_path = run_dir / "state.json"
+
+        def append_evaluations(current):
+            current = _append_capability_evaluations(current, args.capability_eval_fixture)
+            current = _append_capability_review_evaluations(current, args.capability_review_fixture)
+            current = _append_preference_review_evaluations(current, args.preference_review_fixture)
+            current = _append_prospective_evaluations(current, args.prospective_eval_fixture)
+            return _append_feedback_loop_evaluations(
+                current,
+                args.feedback_loop_eval_fixture,
+                args.feedback_loop_review_fixture,
+            )
+
         run_dir.mkdir(parents=True, exist_ok=True)
-        (run_dir / "state.json").write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+        state = mutate_state(state_path, append_evaluations)
         (run_dir / "report.md").write_text(render_report(state), encoding="utf-8")
         print(f"Wrote {run_dir / 'state.json'}")
         print(f"Wrote {run_dir / 'report.md'}")
         return 0
     if args.command == "source-attachment":
         run_dir = Path(args.run_dir)
-        state = load_state(run_dir / "state.json")
-        state = _append_source_attachments(
-            state,
-            evidence_paths=args.evidence_path,
-            evidence_index_paths=args.evidence_index,
+        state_path = run_dir / "state.json"
+        state = mutate_state(
+            state_path,
+            lambda current: _append_source_attachments(
+                current,
+                evidence_paths=args.evidence_path,
+                evidence_index_paths=args.evidence_index,
+            ),
         )
         run_dir.mkdir(parents=True, exist_ok=True)
-        (run_dir / "state.json").write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
         (run_dir / "report.md").write_text(render_report(state), encoding="utf-8")
         print(f"Wrote {run_dir / 'state.json'}")
         print(f"Wrote {run_dir / 'report.md'}")
@@ -803,9 +810,14 @@ def main(argv: list[str] | None = None) -> int:
             progress=lambda message: print(message, flush=True),
         )
         benchmark = benchmark_result_from_experiment(protocol, result)
-        state = replace(state, benchmark_results=[*state.benchmark_results, benchmark])
         run_dir = state_path.parent
-        (run_dir / "state.json").write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+        state = mutate_state(
+            state_path,
+            lambda current: replace(
+                current,
+                benchmark_results=[*current.benchmark_results, benchmark],
+            ),
+        )
         (run_dir / "report.md").write_text(render_report(state), encoding="utf-8")
         stats = result.stats
         print(f"Wrote {out_dir / 'experiment.json'}")
@@ -827,10 +839,15 @@ def main(argv: list[str] | None = None) -> int:
             grades = json.loads(Path(args.grades).read_text(encoding="utf-8"))
         correctness = grade_hypotheses(benchmark, state.hypotheses, grades=grades)
         result = compute_elo_concordance(benchmark.name, benchmark.question, state.hypotheses, correctness)
-        state = replace(state, elo_concordance=[*state.elo_concordance, result])
         run_dir = state_path.parent
         run_dir.mkdir(parents=True, exist_ok=True)
-        (run_dir / "state.json").write_text(json.dumps(state.to_dict(), indent=2), encoding="utf-8")
+        state = mutate_state(
+            state_path,
+            lambda current: replace(
+                current,
+                elo_concordance=[*current.elo_concordance, result],
+            ),
+        )
         (run_dir / "report.md").write_text(render_report(state), encoding="utf-8")
         print(f"Overall accuracy: {result.overall_accuracy}")
         print(f"Top hypothesis correct: {result.top_hypothesis_correct}")

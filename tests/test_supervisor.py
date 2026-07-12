@@ -38,6 +38,7 @@ from code_scientist.supervisor import (
     fail_task,
     pick_next_task,
     prepare_task_queue_for_resume,
+    mutate_state,
     rescore_task_queue,
     run_continuous_research,
     run_research_cycle,
@@ -144,12 +145,51 @@ def test_supervisor_writes_state(tmp_path):
     assert all(trace.task_id in task_ids for trace in restored.agent_traces)
 
 
-def test_ranking_elo_accounting_chains_across_repeated_matches(tmp_path):
+def test_mutate_state_serializes_concurrent_append_updates(tmp_path):
+    state_path = tmp_path / "run" / "state.json"
+    supervisor_module._write_state(
+        state_path,
+        RunState(goal=ResearchGoal.from_objective("Concurrent state updates")),
+    )
+    barrier = threading.Barrier(2)
+    failures: list[BaseException] = []
+
+    def append_feedback(index: int) -> None:
+        try:
+            barrier.wait(timeout=2)
+
+            def update(current: RunState) -> RunState:
+                time.sleep(0.05)
+                feedback = UserFeedback(
+                    id=f"feedback-{index}",
+                    kind="test",
+                    target_id=current.goal.id,
+                    content=f"update {index}",
+                )
+                return replace(current, user_feedback=[*current.user_feedback, feedback])
+
+            mutate_state(state_path, update)
+        except BaseException as exc:  # pragma: no cover - surfaced below
+            failures.append(exc)
+
+    threads = [threading.Thread(target=append_feedback, args=(index,)) for index in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert not failures
+    restored = supervisor_module.load_state(state_path)
+    assert {item.id for item in restored.user_feedback} == {"feedback-0", "feedback-1"}
+
+
+def test_ranking_elo_accounting_chains_across_repeated_matches(tmp_path, monkeypatch):
     # Regression: a hypothesis that appears in more than one scheduled pair in
     # one ranking pass must carry its running Elo from match to match. Before the
     # fix the loop compared stale schedule-time snapshots, so a competitor's
     # second match was scored from — and its state overwritten by — its
     # pre-loop rating, discarding the first match's delta.
+    monkeypatch.setattr(ProximityAgent, "compute_goal_aware", lambda *_args, **_kwargs: [])
     state = run_research_cycle(
         objective="Find testable ideas to improve LLM coding agents",
         cycles=1,
@@ -1108,6 +1148,25 @@ def test_prepare_task_queue_for_resume_requeues_interrupted_running_tasks():
     assert resumed_proximity.error == "resumed from deferred control task"
 
 
+def test_prepare_task_queue_fails_interrupted_provider_review_without_replay():
+    goal = ResearchGoal.from_objective("Prevent provider review replay")
+    plan = ResearchPlanConfig.from_goal(goal)
+    interrupted = start_task(
+        create_task(
+            cycle=1,
+            plan=plan,
+            kind="review",
+            payload={"packet_type": "provider_review"},
+        )
+    )
+
+    resumed = prepare_task_queue_for_resume([interrupted])
+
+    assert resumed[0].status == "failed"
+    assert resumed[0].worker_state["retryable"] is False
+    assert "manual review" in resumed[0].error
+
+
 def test_task_worker_picks_priority_and_persists_retry_transitions():
     goal = ResearchGoal.from_objective("Find testable ideas to improve LLM coding agents")
     plan = replace(
@@ -1151,6 +1210,26 @@ def test_task_worker_picks_priority_and_persists_retry_transitions():
     assert any(("generate", "running", 1, "") in snapshot for snapshot in snapshots)
     assert any(("generate", "queued", 1, "temporary provider error") in snapshot for snapshot in snapshots)
     assert any(("meta_review", "running", 1, "") in snapshot for snapshot in snapshots)
+
+
+def test_task_worker_persists_terminal_failure_before_reraising():
+    goal = ResearchGoal.from_objective("Persist terminal task failures")
+    plan = ResearchPlanConfig.from_goal(goal)
+    task = create_task(cycle=1, plan=plan, kind="generate", payload={})
+    snapshots: list[list[Task]] = []
+
+    with pytest.raises(RuntimeError, match="terminal failure"):
+        run_task_worker(
+            [task],
+            execute=lambda _task: (_ for _ in ()).throw(RuntimeError("terminal failure")),
+            persist=lambda queue: snapshots.append(list(queue)),
+            max_attempts=1,
+            raise_on_failed=True,
+            max_concurrency=1,
+        )
+
+    assert snapshots[-1][0].status == "failed"
+    assert snapshots[-1][0].error == "terminal failure"
 
 
 def test_task_worker_defers_queued_work_after_control_request():
@@ -3580,7 +3659,8 @@ def test_supervisor_uses_multi_round_debate_when_plan_requests_simulated_debate(
     assert ranking_tasks[-1].payload["comparison_mode"] == "deterministic_multi_round_debate_judge"
 
 
-def test_top_tier_pairs_use_multi_round_debate_and_others_single_turn(tmp_path):
+def test_top_tier_pairs_use_multi_round_debate_and_others_single_turn(tmp_path, monkeypatch):
+    monkeypatch.setattr(ProximityAgent, "compute_goal_aware", lambda *_args, **_kwargs: [])
     state = run_research_cycle(
         objective="Find testable ideas to improve LLM coding agents",
         cycles=2,
@@ -3651,7 +3731,7 @@ def test_task_queue_priorities_reflect_scheduler_weights(tmp_path):
     assert generation_priority > meta_priority
 
 
-def test_scheduler_runs_ready_tasks_by_priority_instead_of_fixed_phase_order(tmp_path):
+def test_scheduler_deduplicates_before_ranking_even_when_ranking_weight_is_higher(tmp_path):
     objective = "Find testable ideas to improve LLM coding agents"
     goal = ResearchGoal.from_objective(objective)
     plan = replace(
@@ -3678,14 +3758,15 @@ def test_scheduler_runs_ready_tasks_by_priority_instead_of_fixed_phase_order(tmp
     executed_agents = [trace.agent for trace in state.agent_traces]
     assert "ranking" in executed_agents
     assert "proximity" in executed_agents
-    assert executed_agents.index("ranking") < executed_agents.index("proximity")
+    assert executed_agents.index("proximity") < executed_agents.index("ranking")
     ranking_task = next(task for task in state.task_queue if task.kind == "ranking")
     proximity_task = next(task for task in state.task_queue if task.kind == "proximity")
     assert ranking_task.worker_state["scheduler_decision"]["rank"] == 1
-    assert ranking_task.worker_state["scheduler_decision"]["candidate_count"] == 2
+    assert ranking_task.worker_state["scheduler_decision"]["candidate_count"] == 1
     assert "weight:ranking" in ranking_task.worker_state["scheduler_decision"]["signals"]
     assert proximity_task.worker_state["scheduler_decision"]["rank"] == 1
     assert proximity_task.worker_state["scheduler_decision"]["candidate_count"] == 1
+    assert proximity_task.id in ranking_task.depends_on
 
 
 def test_supervisor_persists_dependency_aware_cross_kind_task_graph(tmp_path):
@@ -3713,7 +3794,7 @@ def test_supervisor_persists_dependency_aware_cross_kind_task_graph(tmp_path):
     assert review_ids
     assert all(task.depends_on == [generation_id] for task in tasks_by_kind["review"])
     assert set(proximity.depends_on) == review_ids
-    assert set(ranking.depends_on) == review_ids
+    assert set(ranking.depends_on) == {*review_ids, proximity.id}
     assert set(evolution.depends_on) == {ranking.id, proximity.id}
     assert meta_review.depends_on == [ranking.id]
     assert set(overview.depends_on) == {meta_review.id, evolution.id, proximity.id}

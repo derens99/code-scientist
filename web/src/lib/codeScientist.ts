@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, open, readdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { RunState, RunSummary } from "./types";
 
@@ -635,28 +635,28 @@ export function buildRunArgs(input: StartRunInput) {
     );
   }
 
-  for (const goalBriefPath of cleanList(input.goalBriefPaths)) {
+  for (const goalBriefPath of confinedInputPaths(input.goalBriefPaths, "goal brief")) {
     args.push("--goal-brief", goalBriefPath);
   }
 
-  for (const safetyPolicyPath of cleanList(input.safetyPolicyPaths)) {
+  for (const safetyPolicyPath of confinedInputPaths(input.safetyPolicyPaths, "safety policy")) {
     args.push("--safety-policy", safetyPolicyPath);
   }
 
-  for (const evidencePath of cleanList(input.evidencePaths)) {
+  for (const evidencePath of confinedInputPaths(input.evidencePaths, "evidence")) {
     args.push("--evidence-path", evidencePath);
   }
 
-  for (const evidenceIndexPath of cleanList(input.evidenceIndexPaths)) {
+  for (const evidenceIndexPath of confinedInputPaths(input.evidenceIndexPaths, "evidence index")) {
     args.push("--evidence-index", evidenceIndexPath);
   }
 
-  for (const repoSearchPath of cleanList(input.repoSearchPaths)) {
+  for (const repoSearchPath of confinedInputPaths(input.repoSearchPaths, "repository search")) {
     args.push("--repo-search-path", repoSearchPath);
   }
 
   for (const webEvidenceUrl of cleanList(input.webEvidenceUrls)) {
-    args.push("--web-evidence-url", webEvidenceUrl);
+    args.push("--web-evidence-url", allowedFetchUrl(webEvidenceUrl));
   }
 
   const webCrawlDepth = Math.max(0, Math.trunc(Number(input.webCrawlDepth ?? 0)));
@@ -685,7 +685,10 @@ export function buildRunArgs(input: StartRunInput) {
     args.push("--literature-full-text");
   }
 
-  const agentValidationManifestPaths = cleanList(input.agentValidationManifestPaths);
+  const agentValidationManifestPaths = confinedInputPaths(
+    input.agentValidationManifestPaths,
+    "agent validation manifest"
+  );
   if (input.agentRetrieval || agentValidationManifestPaths.length > 0) {
     args.push("--agent-retrieval");
     const retrievalIterations = Math.min(
@@ -694,7 +697,7 @@ export function buildRunArgs(input: StartRunInput) {
     );
     args.push("--agent-retrieval-iterations", String(retrievalIterations));
     for (const domain of cleanList(input.agentFetchDomains)) {
-      args.push("--agent-fetch-domain", domain);
+      args.push("--agent-fetch-domain", allowedFetchDomain(domain));
     }
     const toolBudget = Math.max(0, Math.trunc(Number(input.toolBudget ?? 0)));
     if (toolBudget > 0) {
@@ -706,23 +709,23 @@ export function buildRunArgs(input: StartRunInput) {
     args.push("--agent-validation-manifest", manifestPath);
   }
 
-  for (const capabilityEvaluationPath of cleanList(input.capabilityEvaluationPaths)) {
+  for (const capabilityEvaluationPath of confinedInputPaths(input.capabilityEvaluationPaths, "capability evaluation")) {
     args.push("--capability-eval-fixture", capabilityEvaluationPath);
   }
 
-  for (const preferenceReviewPath of cleanList(input.preferenceReviewPaths)) {
+  for (const preferenceReviewPath of confinedInputPaths(input.preferenceReviewPaths, "preference review")) {
     args.push("--preference-review-fixture", preferenceReviewPath);
   }
 
-  for (const prospectiveEvaluationPath of cleanList(input.prospectiveEvaluationPaths)) {
+  for (const prospectiveEvaluationPath of confinedInputPaths(input.prospectiveEvaluationPaths, "prospective evaluation")) {
     args.push("--prospective-eval-fixture", prospectiveEvaluationPath);
   }
 
-  for (const feedbackLoopEvaluationPath of cleanList(input.feedbackLoopEvaluationPaths)) {
+  for (const feedbackLoopEvaluationPath of confinedInputPaths(input.feedbackLoopEvaluationPaths, "feedback-loop evaluation")) {
     args.push("--feedback-loop-eval-fixture", feedbackLoopEvaluationPath);
   }
 
-  for (const feedbackLoopReviewPath of cleanList(input.feedbackLoopReviewPaths)) {
+  for (const feedbackLoopReviewPath of confinedInputPaths(input.feedbackLoopReviewPaths, "feedback-loop review")) {
     args.push("--feedback-loop-review-fixture", feedbackLoopReviewPath);
   }
 
@@ -768,27 +771,27 @@ export function buildEvaluationReturnArgs(runId: string, input: EvaluationReturn
   assertSafeRunId(runId);
   const args = ["run", "code-scientist", "evaluation-return", path.join("runs", runId)];
 
-  for (const capabilityEvaluationPath of cleanList(input.capabilityEvaluationPaths)) {
+  for (const capabilityEvaluationPath of confinedInputPaths(input.capabilityEvaluationPaths, "capability evaluation")) {
     args.push("--capability-eval-fixture", capabilityEvaluationPath);
   }
 
-  for (const capabilityReviewPath of cleanList(input.capabilityReviewPaths)) {
+  for (const capabilityReviewPath of confinedInputPaths(input.capabilityReviewPaths, "capability review")) {
     args.push("--capability-review-fixture", capabilityReviewPath);
   }
 
-  for (const preferenceReviewPath of cleanList(input.preferenceReviewPaths)) {
+  for (const preferenceReviewPath of confinedInputPaths(input.preferenceReviewPaths, "preference review")) {
     args.push("--preference-review-fixture", preferenceReviewPath);
   }
 
-  for (const prospectiveEvaluationPath of cleanList(input.prospectiveEvaluationPaths)) {
+  for (const prospectiveEvaluationPath of confinedInputPaths(input.prospectiveEvaluationPaths, "prospective evaluation")) {
     args.push("--prospective-eval-fixture", prospectiveEvaluationPath);
   }
 
-  for (const feedbackLoopEvaluationPath of cleanList(input.feedbackLoopEvaluationPaths)) {
+  for (const feedbackLoopEvaluationPath of confinedInputPaths(input.feedbackLoopEvaluationPaths, "feedback-loop evaluation")) {
     args.push("--feedback-loop-eval-fixture", feedbackLoopEvaluationPath);
   }
 
-  for (const feedbackLoopReviewPath of cleanList(input.feedbackLoopReviewPaths)) {
+  for (const feedbackLoopReviewPath of confinedInputPaths(input.feedbackLoopReviewPaths, "feedback-loop review")) {
     args.push("--feedback-loop-review-fixture", feedbackLoopReviewPath);
   }
 
@@ -805,11 +808,11 @@ export function buildSourceAttachmentArgs(runId: string, input: SourceAttachment
   assertSafeRunId(runId);
   const args = ["run", "code-scientist", "source-attachment", path.join("runs", runId)];
 
-  for (const evidencePath of cleanList(input.evidencePaths)) {
+  for (const evidencePath of confinedInputPaths(input.evidencePaths, "evidence")) {
     args.push("--evidence-path", evidencePath);
   }
 
-  for (const evidenceIndexPath of cleanList(input.evidenceIndexPaths)) {
+  for (const evidenceIndexPath of confinedInputPaths(input.evidenceIndexPaths, "evidence index")) {
     args.push("--evidence-index", evidenceIndexPath);
   }
 
@@ -825,10 +828,132 @@ export async function appendSourceAttachments(runId: string, input: SourceAttach
 async function updateRunState(runId: string, updater: (state: RunState) => RunState): Promise<RunState> {
   assertSafeRunId(runId);
   const statePath = path.join(runsRoot(), runId, "state.json");
-  const state = await readRunState(runId);
-  const updated = updater(state);
-  await writeFile(statePath, JSON.stringify(updated, null, 2), "utf8");
-  return updated;
+  return withStateLock(statePath, async () => {
+    const state = JSON.parse(await readFile(statePath, "utf8")) as RunState;
+    const updated = updater(state);
+    await atomicWriteState(statePath, updated);
+    return updated;
+  });
+}
+
+async function withStateLock<T>(statePath: string, action: () => Promise<T>): Promise<T> {
+  const lockPath = path.join(path.dirname(statePath), `.${path.basename(statePath)}.lock`);
+  const owner = `${process.pid}-${randomUUID()}`;
+  const deadline = Date.now() + 30_000;
+  while (true) {
+    try {
+      const handle = await open(lockPath, "wx", 0o600);
+      try {
+        await handle.writeFile(JSON.stringify({ owner, created_at: Date.now() / 1000 }), "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw error;
+      }
+      try {
+        const lockStat = await stat(lockPath);
+        if (Date.now() - lockStat.mtimeMs > 300_000) {
+          await unlink(lockPath);
+          continue;
+        }
+      } catch (statError) {
+        if ((statError as NodeJS.ErrnoException).code === "ENOENT") {
+          continue;
+        }
+        throw statError;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for state lock: ${lockPath}`);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  try {
+    return await action();
+  } finally {
+    try {
+      const payload = JSON.parse(await readFile(lockPath, "utf8")) as { owner?: string };
+      if (payload.owner === owner) {
+        await unlink(lockPath);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+}
+
+async function atomicWriteState(statePath: string, state: RunState): Promise<void> {
+  const temporary = path.join(
+    path.dirname(statePath),
+    `.${path.basename(statePath)}.${process.pid}.${randomUUID()}.tmp`
+  );
+  const handle = await open(temporary, "wx", 0o600);
+  try {
+    await handle.writeFile(JSON.stringify(state, null, 2), "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  try {
+    await rename(temporary, statePath);
+  } finally {
+    await unlink(temporary).catch(() => undefined);
+  }
+}
+
+function confinedInputPaths(values: string[] | undefined, label: string): string[] {
+  return cleanList(values).map((value) => {
+    const resolved = path.resolve(repoRoot(), value);
+    if (!allowedInputRoots().some((root) => isWithinRoot(root, resolved))) {
+      throw new Error(`${label} path is outside the configured allowed roots.`);
+    }
+    return resolved;
+  });
+}
+
+function allowedInputRoots(): string[] {
+  const configured = (process.env.CODE_SCIENTIST_ALLOWED_ROOTS ?? "")
+    .split(path.delimiter)
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return [repoRoot(), ...configured].map((value) => path.resolve(value));
+}
+
+function isWithinRoot(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative));
+}
+
+function allowedFetchUrl(value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("Web evidence URL must be a valid HTTPS URL.");
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error("Web evidence URL must use HTTPS.");
+  }
+  allowedFetchDomain(parsed.hostname);
+  return parsed.toString();
+}
+
+function allowedFetchDomain(value: string): string {
+  const domain = value.trim().toLowerCase().replace(/^\.+|\.+$/g, "");
+  const allowed = (process.env.CODE_SCIENTIST_ALLOWED_FETCH_DOMAINS ?? "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+  if (!domain || !allowed.some((item) => domain === item || domain.endsWith(`.${item}`))) {
+    throw new Error("Fetch domain is not in CODE_SCIENTIST_ALLOWED_FETCH_DOMAINS.");
+  }
+  return domain;
 }
 
 function assertSafeRunId(runId: string) {

@@ -5,14 +5,76 @@ import os
 import sqlite3
 import time
 from collections.abc import Iterable
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from code_scientist.models import Task
 
 
 class CoordinationError(RuntimeError):
     pass
+
+
+@contextmanager
+def state_file_lock(
+    path: str | Path,
+    *,
+    timeout_seconds: float = 30.0,
+    stale_after_seconds: float = 300.0,
+):
+    """Serialize state mutations across Python and Node processes.
+
+    The lock-file protocol intentionally uses only O_EXCL creation, mtime-based
+    stale recovery, and owner tokens so the web workbench can implement the
+    same contract without a platform-specific advisory-lock dependency.
+    """
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = destination.with_name(f".{destination.name}.lock")
+    owner = f"{os.getpid()}-{uuid4().hex}"
+    deadline = time.monotonic() + max(float(timeout_seconds), 0.1)
+    stale_after = max(float(stale_after_seconds), 1.0)
+    acquired = False
+    while not acquired:
+        try:
+            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            try:
+                stat = lock_path.stat()
+                observed_mtime = stat.st_mtime_ns
+            except FileNotFoundError:
+                continue
+            if time.time() - stat.st_mtime > stale_after:
+                try:
+                    if lock_path.stat().st_mtime_ns == observed_mtime:
+                        lock_path.unlink()
+                except FileNotFoundError:
+                    pass
+                continue
+            if time.monotonic() >= deadline:
+                raise CoordinationError(f"Timed out waiting for state lock: {lock_path}")
+            time.sleep(0.025)
+            continue
+        try:
+            os.write(
+                descriptor,
+                json.dumps({"owner": owner, "created_at": time.time()}).encode("utf-8"),
+            )
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        acquired = True
+    try:
+        yield
+    finally:
+        try:
+            payload = json.loads(lock_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
+            payload = {}
+        if payload.get("owner") == owner:
+            lock_path.unlink(missing_ok=True)
 
 
 class SQLiteTaskCoordinator:
@@ -119,19 +181,27 @@ class SQLiteTaskCoordinator:
                             priority=excluded.priority,
                             payload_json=excluded.payload_json,
                             status=CASE
+                                WHEN tasks.status IN ('completed', 'failed', 'superseded')
+                                THEN tasks.status
                                 WHEN tasks.status='running'
                                   AND tasks.lease_expires_at > excluded.updated_at
                                 THEN tasks.status ELSE excluded.status END,
                             attempts=MAX(tasks.attempts, excluded.attempts),
                             result_refs_json=CASE
+                                WHEN tasks.status IN ('completed', 'failed', 'superseded')
+                                THEN tasks.result_refs_json
                                 WHEN tasks.status='running'
                                   AND tasks.lease_expires_at > excluded.updated_at
                                 THEN tasks.result_refs_json ELSE excluded.result_refs_json END,
                             error=CASE
+                                WHEN tasks.status IN ('completed', 'failed', 'superseded')
+                                THEN tasks.error
                                 WHEN tasks.status='running'
                                   AND tasks.lease_expires_at > excluded.updated_at
                                 THEN tasks.error ELSE excluded.error END,
                             worker_state_json=CASE
+                                WHEN tasks.status IN ('completed', 'failed', 'superseded')
+                                THEN tasks.worker_state_json
                                 WHEN tasks.status='running'
                                   AND tasks.lease_expires_at > excluded.updated_at
                                 THEN tasks.worker_state_json ELSE excluded.worker_state_json END,

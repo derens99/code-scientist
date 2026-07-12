@@ -23,7 +23,7 @@ from code_scientist.agents import (
     RankingAgent,
     ReflectionAgent,
 )
-from code_scientist.coordination import SQLiteTaskCoordinator, atomic_write_json
+from code_scientist.coordination import SQLiteTaskCoordinator, atomic_write_json, state_file_lock
 from code_scientist.evaluation import (
     load_capability_evaluation_fixtures,
     run_agent_validation_manifest,
@@ -1221,7 +1221,7 @@ def run_research_cycle(
                     "agent_feedback": ranking_feedback,
                 },
                 execute_ranking,
-                depends_on=[task.id for task in review_tasks],
+                depends_on=[*(task.id for task in review_tasks), proximity_task.id],
                 resource_class="state_mutation",
             )
 
@@ -1913,6 +1913,11 @@ def apply_goal_revision_to_state(
 
 
 def _write_state(path: Path, state: RunState) -> None:
+    with state_file_lock(path):
+        _write_state_unlocked(path, state)
+
+
+def _write_state_unlocked(path: Path, state: RunState) -> None:
     _write_agent_transcripts(path.parent, state)
     _write_activity_ledger(path.parent / "activity.jsonl", state)
     coordinator = SQLiteTaskCoordinator(path.parent / "coordination.sqlite3")
@@ -1924,6 +1929,15 @@ def _write_state(path: Path, state: RunState) -> None:
             used=state.tool_budget.used,
         )
     atomic_write_json(path, state.to_dict())
+
+
+def mutate_state(path: Path, updater: Callable[[RunState], RunState]) -> RunState:
+    """Reload and update a run state while holding the shared state lock."""
+    with state_file_lock(path):
+        current = load_state(path)
+        updated = updater(current)
+        _write_state_unlocked(path, updated)
+        return updated
 
 
 def _reconcile_coordinator_results(run_dir: Path, state: RunState) -> RunState:
@@ -2127,20 +2141,20 @@ def _run_review_packet_processes(
         if assignment
     ]
     failures: list[str] = []
-    for assignment, process in processes:
-        try:
-            stdout, stderr = process.communicate(timeout=300)
-        except subprocess.TimeoutExpired:
-            process.terminate()
+    try:
+        for assignment, process in processes:
             try:
-                process.communicate(timeout=5)
+                stdout, stderr = process.communicate(timeout=300)
             except subprocess.TimeoutExpired:
-                process.kill()
-                process.communicate()
-            failures.append(f"worker timed out for tasks: {', '.join(assignment)}")
-            continue
-        if process.returncode != 0:
-            failures.append(stderr.strip() or stdout.strip() or f"exit {process.returncode}")
+                _terminate_process(process)
+                failures.append(f"worker timed out for tasks: {', '.join(assignment)}")
+                continue
+            if process.returncode != 0:
+                failures.append(stderr.strip() or stdout.strip() or f"exit {process.returncode}")
+    finally:
+        for _assignment, process in processes:
+            if process.poll() is None:
+                _terminate_process(process)
     incomplete = [
         task_id
         for task_id in unique_task_ids
@@ -2150,6 +2164,15 @@ def _run_review_packet_processes(
         failures.append(f"review tasks did not complete: {', '.join(incomplete)}")
     if failures:
         raise RuntimeError(f"Review worker process failed: {'; '.join(failures)}")
+
+
+def _terminate_process(process: subprocess.Popen[str]) -> None:
+    process.terminate()
+    try:
+        process.communicate(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.communicate()
 
 
 def _write_activity_ledger(path: Path, state: RunState) -> None:
@@ -2578,9 +2601,10 @@ def _ensure_continuous_state(
 
 
 def _set_run_status(state_path: Path, status: str) -> RunState:
-    state = replace(load_state(state_path), run_status=status)
-    _write_state(state_path, state)
-    return state
+    return mutate_state(
+        state_path,
+        lambda state: replace(state, run_status=status),
+    )
 
 
 def _merge_evidence_safety_findings(
@@ -4322,6 +4346,18 @@ def prepare_task_queue_for_resume(tasks: list[Task]) -> list[Task]:
 
 def _resume_task(task: Task) -> Task:
     if task.status == "running":
+        if task.payload.get("packet_type") == "provider_review":
+            return replace(
+                task,
+                status="failed",
+                error="interrupted provider review requires manual review before replay",
+                worker_state=_task_worker_state(
+                    task,
+                    phase="failed",
+                    last_event="provider_review_interrupted",
+                    retryable=False,
+                ),
+            )
         return replace(task, status="queued", error="resumed from interrupted running task")
     if task.status == "deferred" and "requested by control file" in task.error:
         return replace(task, status="queued", error="resumed from deferred control task")
@@ -4329,10 +4365,11 @@ def _resume_task(task: Task) -> Task:
 
 
 def _prefer_resume_task(current: Task, candidate: Task) -> Task:
-    if current.status == "completed" and candidate.status != "completed":
-        return candidate
-    if candidate.status == "completed" and current.status != "completed":
+    terminal = {"completed", "failed", "superseded"}
+    if current.status in terminal and candidate.status not in terminal:
         return current
+    if candidate.status in terminal and current.status not in terminal:
+        return candidate
     if candidate.attempts > current.attempts:
         return candidate
     return current
@@ -4426,6 +4463,7 @@ def run_task_worker(
                 execute=execute,
                 max_attempts=max_attempts,
                 raise_on_failed=raise_on_failed,
+                persist=persist,
             )
             if persist:
                 persist(task_queue)
@@ -4457,6 +4495,7 @@ def _execute_running_task(
     execute: Callable[[Task], list[str] | None],
     max_attempts: int,
     raise_on_failed: bool,
+    persist: Callable[[list[Task]], None] | None = None,
 ) -> list[Task]:
     try:
         result_refs = execute(running) or []
@@ -4464,6 +4503,8 @@ def _execute_running_task(
         updated = fail_task(running, str(exc), max_attempts=max_attempts)
         task_queue = _replace_task(task_queue, updated)
         if updated.status == "failed" and raise_on_failed:
+            if persist:
+                persist(task_queue)
             raise
         return task_queue
     completed = complete_task(running, result_refs)

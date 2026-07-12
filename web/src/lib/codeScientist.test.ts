@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   appendManualHypothesis,
   appendManualReview,
@@ -20,7 +20,14 @@ import {
 } from "./codeScientist";
 
 const originalRoot = process.env.CODE_SCIENTIST_ROOT;
+const originalAllowedRoots = process.env.CODE_SCIENTIST_ALLOWED_ROOTS;
+const originalAllowedFetchDomains = process.env.CODE_SCIENTIST_ALLOWED_FETCH_DOMAINS;
 let tempRoot: string | null = null;
+
+beforeEach(() => {
+  process.env.CODE_SCIENTIST_ALLOWED_ROOTS = [os.tmpdir(), "/tmp"].join(path.delimiter);
+  process.env.CODE_SCIENTIST_ALLOWED_FETCH_DOMAINS = "example.test,arxiv.org,example.org";
+});
 
 afterEach(async () => {
   if (tempRoot) {
@@ -31,6 +38,16 @@ afterEach(async () => {
     delete process.env.CODE_SCIENTIST_ROOT;
   } else {
     process.env.CODE_SCIENTIST_ROOT = originalRoot;
+  }
+  if (originalAllowedRoots === undefined) {
+    delete process.env.CODE_SCIENTIST_ALLOWED_ROOTS;
+  } else {
+    process.env.CODE_SCIENTIST_ALLOWED_ROOTS = originalAllowedRoots;
+  }
+  if (originalAllowedFetchDomains === undefined) {
+    delete process.env.CODE_SCIENTIST_ALLOWED_FETCH_DOMAINS;
+  } else {
+    process.env.CODE_SCIENTIST_ALLOWED_FETCH_DOMAINS = originalAllowedFetchDomains;
   }
 });
 
@@ -233,6 +250,28 @@ describe("buildRunArgs", () => {
     expect(args).toContain("2");
     expect(args).not.toContain(" ");
   });
+
+  it("rejects paths outside configured roots and non-allowlisted fetch domains", () => {
+    process.env.CODE_SCIENTIST_ALLOWED_ROOTS = path.join(os.tmpdir(), "allowed-only");
+    process.env.CODE_SCIENTIST_ALLOWED_FETCH_DOMAINS = "trusted.example";
+    const base = {
+      objective: "Security boundary",
+      cycles: 1,
+      maxHypotheses: 2,
+      maxMatches: 0,
+      runName: "security-boundary"
+    };
+
+    expect(() => buildRunArgs({ ...base, evidencePaths: ["/etc/passwd"] })).toThrow(
+      "outside the configured allowed roots"
+    );
+    expect(() =>
+      buildRunArgs({ ...base, webEvidenceUrls: ["https://attacker.example/file"] })
+    ).toThrow("CODE_SCIENTIST_ALLOWED_FETCH_DOMAINS");
+    expect(() =>
+      buildRunArgs({ ...base, webEvidenceUrls: ["http://trusted.example/file"] })
+    ).toThrow("must use HTTPS");
+  });
 });
 
 describe("buildEvaluationReturnArgs", () => {
@@ -307,6 +346,30 @@ describe("writeRunControl", () => {
 });
 
 describe("human run inputs", () => {
+  it("serializes concurrent workbench state updates without losing feedback", async ({ task }) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), `${task.id}-`));
+    tempRoot = root;
+    process.env.CODE_SCIENTIST_ROOT = root;
+    const runDir = path.join(root, "runs", "concurrent-loop");
+    await mkdir(runDir, { recursive: true });
+    await writeFile(path.join(runDir, "state.json"), JSON.stringify(runState("Concurrent loop")), "utf8");
+
+    await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        appendUserFeedback("concurrent-loop", {
+          targetId: "hyp-1",
+          kind: "verification_request",
+          influence: "scheduler_boost",
+          content: `concurrent update ${index}`
+        })
+      )
+    );
+
+    const state = JSON.parse(await readFile(path.join(runDir, "state.json"), "utf8"));
+    expect(state.user_feedback).toHaveLength(8);
+    expect(new Set(state.user_feedback.map((item: { content: string }) => item.content)).size).toBe(8);
+  });
+
   it("persists structured feedback, manual hypotheses, and manual reviews", async ({ task }) => {
     const root = await mkdtemp(path.join(os.tmpdir(), `${task.id}-`));
     tempRoot = root;

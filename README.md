@@ -43,6 +43,14 @@ npm run dev
 
 The workbench shells out to `uv run code-scientist` in the repository root (override with `CODE_SCIENTIST_ROOT`) and lists run directories under `runs/`.
 
+The workbench binds to `127.0.0.1` by default. File inputs are confined to the
+repository root plus optional roots in `CODE_SCIENTIST_ALLOWED_ROOTS` (separated
+with the platform path delimiter). Direct web evidence and agent fetch domains
+must be explicitly allowlisted with a comma-separated
+`CODE_SCIENTIST_ALLOWED_FETCH_DOMAINS`. Mutating API routes reject cross-origin
+browser requests. These controls harden local use; they do not turn the
+workbench into an authenticated multi-user service.
+
 ## Providers
 
 `--provider` selects who answers the engine's LLM calls:
@@ -368,6 +376,7 @@ cd web
 npm install
 npm test                 # web test suite
 npm run typecheck
+npm run build
 ```
 
 Design notes and implementation plans live in `docs/`, including the paper-alignment audits that track how closely the engine reproduces the co-scientist paper's mechanisms.
@@ -385,3 +394,6 @@ Design notes and implementation plans live in `docs/`, including the paper-align
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Please report
+security issues privately as described in [SECURITY.md](SECURITY.md).
