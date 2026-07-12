@@ -11,7 +11,7 @@ The run state mirrors the paper's control loop with a parsed research plan confi
 Requirements: Python 3.11+ managed with [uv](https://docs.astral.sh/uv/). Node 22 is only needed for the optional web workbench. Claude Code or Codex is only needed for research-grade `host-agent` runs.
 
 ```bash
-git clone <this-repository> && cd code-scientist
+git clone https://github.com/derens99/code-scientist.git && cd code-scientist
 uv sync
 uv run code-scientist run "Find testable ideas to improve LLM coding agents" --cycles 2 --max-hypotheses 8 --out runs/demo
 uv run code-scientist report runs/demo/state.json

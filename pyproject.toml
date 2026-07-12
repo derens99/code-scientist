@@ -14,6 +14,11 @@ dependencies = [
     "rapidocr>=3.9,<4",
 ]
 
+[project.urls]
+Homepage = "https://github.com/derens99/code-scientist"
+Repository = "https://github.com/derens99/code-scientist"
+Issues = "https://github.com/derens99/code-scientist/issues"
+
 [project.scripts]
 code-scientist = "code_scientist.cli:main"
 
