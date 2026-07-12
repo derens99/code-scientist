@@ -1,0 +1,6 @@
+{
+  "id": "text-wrap-justify",
+  "title": "Implement greedy word-wrapping",
+  "prompt": "You are working in the current directory. There is a file `textwrap_util.py` containing a function `wrap_text(text, width)` that raises `NotImplementedError`. Implement it exactly according to the docstring already written in the file. Do not change the function's name or signature.",
+  "timeout_seconds": 240
+}

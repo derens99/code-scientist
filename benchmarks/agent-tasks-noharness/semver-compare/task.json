@@ -1,0 +1,6 @@
+{
+  "id": "semver-compare",
+  "title": "Implement semantic version comparison",
+  "prompt": "You are working in the current directory. There is a file `semver.py` containing a function `compare_versions(a, b)` that raises `NotImplementedError`. Implement it exactly according to the docstring already written in the file. Do not change the function's name or signature.",
+  "timeout_seconds": 240
+}

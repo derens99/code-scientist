@@ -129,6 +129,31 @@ Use `--benchmark-fixture` to attach measured baseline and candidate metrics to a
 uv run code-scientist run "Find testable ideas to improve LLM coding agents" --benchmark-fixture benchmark.json --out runs/benchmarked-demo
 ```
 
+Fixtures are asserted evidence: the engine records the metrics you supply and labels their provenance accordingly. For metrics the engine itself executes, see Measured Validation.
+
+## Measured Validation
+
+`code-scientist validate` closes the loop the fixtures leave open: it takes one hypothesis from a saved state and runs it as a pre-registered, paired, baseline-vs-candidate experiment on a real coding agent. Both arms solve the same tasks from [benchmarks/agent-tasks](benchmarks/agent-tasks) under identical limits; the only difference is the candidate arm's appended system prompt (the intervention derived from the hypothesis). Each trial arm gets a fresh copy of the task workspace, and held-out grader tests — never visible to the agent — are copied in afterwards and decide pass/fail.
+
+```bash
+uv run code-scientist validate runs/my-run/state.json \
+  --hypothesis hyp-xxxxxxxxxxxx \
+  --intervention-file intervention.txt \
+  --executor host-agent \
+  --trials 3 --trial-concurrency 4 \
+  --out runs/my-run/experiments/hyp-xxxxxxxxxxxx
+```
+
+The protocol (intervention text, task ids, trials, seed, model, limits, decision rule, cost budget) is written to `protocol.json` and hashed before the first trial runs; `--dry-run` stops there. Results embed the protocol hash, so a result can always be checked against what was registered, and a completed experiment directory is never silently overwritten.
+
+Executors:
+
+- `host-agent` (no API key): the experiment analogue of the host-agent provider. The engine posts whole trial batches to `<experiment>/agent-bridge/requests/<id>.json` — each request carries the complete trial input (`prompt`, `system_append`, `workspace`, `timeout_seconds`) — and the launching session runs each request as a fresh subagent from a fixed template, writing `responses/<id>.json` with `{"id", "status", "duration_seconds", "num_turns", "cost_usd"}`. Answered requests are removed, `agent-bridge/stop` cancels, and two consecutive fully-unanswered batches abandon the run.
+- `claude-cli`: one headless Claude Code process per trial arm (`claude -p --output-format json --max-turns N [--append-system-prompt ...]`) with cwd set to the trial workspace. `--agent-auth login` reuses the local CLI login; `--agent-auth api-key` passes the key from `--env-file` explicitly (session-injected proxy variables are never trusted).
+- `deterministic`: offline scripted scaffolding for tests and demos, like every other deterministic path.
+
+The primary analysis is pre-registered: a one-sided exact McNemar test over discordant (task, trial) pairs at the registered alpha, with a minimum-discordant-pairs floor below which the verdict is `inconclusive` regardless of the point estimate. A seeded bootstrap CI on the pass-rate delta and a task-level sign test (robustness against within-task clustering) are reported alongside. Verdicts are `supported`, `refuted`, `inconclusive`, or `incomplete` (budget stop or abort) — never a bare point estimate. The measured `BenchmarkResult` lands in `state.json` with `provenance: measured:agent-experiment`, its verdict and stats attached, and `report.md`/`findings.md` display it as executed evidence, distinct from asserted fixtures. Execution policy is `trusted_local`, the same honesty contract as `prospective-validation-run`: trials run as local subprocesses in temporary workspace copies and no sandbox isolation is claimed.
+
 ## Grounded Evidence Reviews
 
 Use `--goal-brief` to attach researcher-supplied planning briefs before a run starts. Briefs can include Markdown sections such as `Preferences`, `Constraints`, `Metrics`, `Safety notes`, `Allowed sources`, `Allowed tools`, `Output formats`, and `Termination criteria`; those sections augment the persisted goal and derived research plan. When a brief provides explicit allowed sources or tools, requested evidence collectors that do not match the plan are skipped and recorded as source-policy findings in the run's evidence safety review.
@@ -345,7 +370,8 @@ Design notes and implementation plans live in `docs/`, including the paper-align
 
 ## Known Limitations
 
-- Hypotheses are candidates, not validated results. Reviews, Elo, and the findings digest are auto-evaluation proxies; the reports label them as such, and nothing should be treated as a measured improvement without benchmark or human-review evidence.
+- Hypotheses are candidates, not validated results. Reviews, Elo, and the findings digest are auto-evaluation proxies; the reports label them as such. `code-scientist validate` can attach a measured verdict to a specific hypothesis, but that verdict is scoped to the experiment's task suite, model, and limits — every hypothesis without one remains an unvalidated candidate.
+- The agent-task suite is small (10 tasks) and stdlib-only; measured experiments on it detect large effects, not subtle ones, and pair-level McNemar is mildly anticonservative under within-task clustering (the task-level sign test is reported as the robustness check).
 - Reviews within one run usually share a single judge (the session model answering the bridge, or one API model), so cross-review agreement cannot certify correctness. Independent packet-reviewer subagents mitigate but do not remove this.
 - `codex exec` can hang when invoked from inside another agent's sandbox; use `--provider codex-cli` from a normal shell. `claude-cli` fails with 401 when the standalone `claude` login has expired — run `claude /login` first.
 - `--pdf-vision` requires `--provider anthropic`; host-CLI and host-agent providers cannot carry image payloads.

@@ -1,0 +1,6 @@
+{
+  "id": "lru-cache-bound",
+  "title": "Add an LRU eviction bound to an existing cache class",
+  "prompt": "You are working in the current directory. There is a file `cache.py` containing a class `SimpleCache` with `get(key)` and `put(key, value)` methods, currently backed by an unbounded dict (it never evicts anything). Modify `SimpleCache` so its constructor accepts a required `capacity` parameter (a positive integer): the maximum number of entries the cache may hold. When `put` is called and adding a new key would exceed `capacity`, evict the LEAST RECENTLY USED entry first (an entry counts as 'used' when it is read via `get` or written via `put`; the most recently used entry is never evicted while other entries remain). Existing behavior of `get` and `put` must not change: `get(key)` returns the stored value, or `None` if the key is not present (and does not count as a 'use' if the key is missing); `put(key, value)` inserts or overwrites the value for `key` (an overwrite of an existing key counts as a use of that key and does not by itself trigger eviction of that key). Do not change the class name or the `get`/`put` method names or their signatures other than adding `capacity` to `__init__`.",
+  "timeout_seconds": 240
+}

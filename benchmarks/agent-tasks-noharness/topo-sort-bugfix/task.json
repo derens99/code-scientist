@@ -1,0 +1,6 @@
+{
+  "id": "topo-sort-bugfix",
+  "title": "Fix missing cycle detection in topological sort",
+  "prompt": "You are working in the current directory. There is a file `taskorder.py` containing a function `topological_order(dependencies)`. `dependencies` is a dict mapping each task name to a list of prerequisite task names that must appear earlier in the returned order. Every task name mentioned anywhere (as a dict key or inside a dependency list) must appear exactly once in the output list. When multiple tasks are simultaneously ready to be placed (all their prerequisites already placed), they must appear in the output in alphabetical order, for determinism. If the dependencies contain a cycle (making a valid order impossible), the function must raise `ValueError`. There is a bug: currently, when a cycle is present, the function does not raise `ValueError` and instead silently returns an incomplete order. Find and fix the bug in `taskorder.py` so cycles are always detected and raise `ValueError`, while non-cyclic input still returns the correct alphabetically-tie-broken order. Do not change the function's name or signature.",
+  "timeout_seconds": 240
+}

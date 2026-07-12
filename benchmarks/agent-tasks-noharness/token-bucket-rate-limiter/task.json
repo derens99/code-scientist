@@ -1,0 +1,6 @@
+{
+  "id": "token-bucket-rate-limiter",
+  "title": "Implement a deterministic token-bucket rate limiter",
+  "prompt": "You are working in the current directory. There is a file `rate_limiter.py` containing a class `TokenBucket` whose `__init__` and `allow` methods raise `NotImplementedError`. Implement both methods exactly according to the docstrings already written in the file. The class must never read a real clock (no `time.time()` or similar); the current time is always supplied by the caller as the `now` argument to `allow`. Do not change the class name, method names, or signatures.",
+  "timeout_seconds": 240
+}
