@@ -123,6 +123,23 @@ describe("buildRunArgs", () => {
     ]);
   });
 
+  it("passes host CLI providers through with a call budget but keeps pdf vision anthropic-only", () => {
+    const args = buildRunArgs({
+      objective: "Research subagent orchestration",
+      cycles: 1,
+      maxHypotheses: 6,
+      maxMatches: 4,
+      runName: "claude-cli-demo",
+      provider: "claude-cli",
+      continuous: false,
+      pdfVision: true
+    });
+
+    expect(args[args.indexOf("--provider") + 1]).toBe("claude-cli");
+    expect(args[args.indexOf("--provider-call-budget") + 1]).toBe("100");
+    expect(args).not.toContain("--pdf-vision");
+  });
+
   it("includes selected evidence, repository search, web evidence, and literature search sources", () => {
     const args = buildRunArgs({
       objective: "Research repo-grounded coding-agent ideas",

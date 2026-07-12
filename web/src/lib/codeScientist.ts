@@ -10,7 +10,7 @@ export type StartRunInput = {
   maxHypotheses: number;
   maxMatches: number;
   runName: string;
-  provider?: "deterministic" | "anthropic";
+  provider?: "deterministic" | "anthropic" | "claude-cli" | "codex-cli";
   continuous?: boolean;
   intervalSeconds?: number;
   maxWallMinutes?: number;
@@ -616,23 +616,23 @@ export function buildRunArgs(input: StartRunInput) {
   if (reviewProcesses > 0) {
     args.push("--review-processes", String(reviewProcesses));
   }
-  if (input.provider === "anthropic") {
+  if (input.provider && input.provider !== "deterministic") {
     const providerCallBudget = Math.max(
       1,
       Math.trunc(Number(input.providerCallBudget ?? 100))
     );
     args.push("--provider-call-budget", String(providerCallBudget));
-    if (input.pdfVision) {
-      args.push("--pdf-vision");
-      args.push(
-        "--pdf-vision-max-regions",
-        String(Math.max(0, Math.min(100, Math.trunc(Number(input.pdfVisionMaxRegions ?? 10)))))
-      );
-      args.push(
-        "--pdf-vision-call-budget",
-        String(Math.max(1, Math.trunc(Number(input.pdfVisionCallBudget ?? 10))))
-      );
-    }
+  }
+  if (input.provider === "anthropic" && input.pdfVision) {
+    args.push("--pdf-vision");
+    args.push(
+      "--pdf-vision-max-regions",
+      String(Math.max(0, Math.min(100, Math.trunc(Number(input.pdfVisionMaxRegions ?? 10)))))
+    );
+    args.push(
+      "--pdf-vision-call-budget",
+      String(Math.max(1, Math.trunc(Number(input.pdfVisionCallBudget ?? 10))))
+    );
   }
 
   for (const goalBriefPath of cleanList(input.goalBriefPaths)) {

@@ -3,15 +3,33 @@ import { clampInteger, sanitizeRunName, startRun } from "@/lib/codeScientist";
 
 export const runtime = "nodejs";
 
+const WORKBENCH_PROVIDERS = ["deterministic", "anthropic", "claude-cli", "codex-cli"] as const;
+type WorkbenchProvider = (typeof WORKBENCH_PROVIDERS)[number];
+
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+    const requestedProvider = String(body.provider ?? "deterministic");
+    if (requestedProvider === "host-agent") {
+      return NextResponse.json(
+        {
+          error:
+            "The host-agent provider needs a live agent session answering the run's llm-bridge requests; start it from Claude Code or Codex instead of the workbench."
+        },
+        { status: 400 }
+      );
+    }
+    const provider: WorkbenchProvider = (WORKBENCH_PROVIDERS as readonly string[]).includes(
+      requestedProvider
+    )
+      ? (requestedProvider as WorkbenchProvider)
+      : "deterministic";
     const run = await startRun({
       objective: String(body.objective ?? ""),
       cycles: clampInteger(body.cycles, 1, 5, 1),
       maxHypotheses: clampInteger(body.maxHypotheses, 2, 20, 6),
       maxMatches: clampInteger(body.maxMatches, 0, 40, 4),
-      provider: body.provider === "anthropic" ? "anthropic" : "deterministic",
+      provider,
       continuous: Boolean(body.continuous),
       intervalSeconds: clampInteger(body.intervalSeconds, 1, 3600, 60),
       maxWallMinutes: clampInteger(body.maxWallMinutes, 1, 1440, 120),

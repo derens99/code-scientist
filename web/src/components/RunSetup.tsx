@@ -16,7 +16,9 @@ export function RunSetup({ onRunCreated, onError }: RunSetupProps) {
   const [maxHypotheses, setMaxHypotheses] = useState(6);
   const [maxMatches, setMaxMatches] = useState(4);
   const [runName, setRunName] = useState("ui-demo");
-  const [provider, setProvider] = useState<"deterministic" | "anthropic">("deterministic");
+  const [provider, setProvider] = useState<
+    "deterministic" | "anthropic" | "claude-cli" | "codex-cli"
+  >("deterministic");
   const [continuous, setContinuous] = useState(false);
   const [intervalSeconds, setIntervalSeconds] = useState(60);
   const [maxWallMinutes, setMaxWallMinutes] = useState(120);
@@ -133,11 +135,20 @@ export function RunSetup({ onRunCreated, onError }: RunSetupProps) {
 
       <Select
         label="Provider"
+        description="Host-agent bridge runs must be started from Claude Code or Codex, not the workbench."
         value={provider}
-        onChange={(value) => setProvider(value === "anthropic" ? "anthropic" : "deterministic")}
+        onChange={(value) =>
+          setProvider(
+            value === "anthropic" || value === "claude-cli" || value === "codex-cli"
+              ? value
+              : "deterministic"
+          )
+        }
         data={[
           { value: "deterministic", label: "Deterministic" },
-          { value: "anthropic", label: "Anthropic" }
+          { value: "anthropic", label: "Anthropic API" },
+          { value: "claude-cli", label: "Claude CLI (local claude login)" },
+          { value: "codex-cli", label: "Codex CLI (local codex login)" }
         ]}
       />
 
@@ -180,7 +191,7 @@ export function RunSetup({ onRunCreated, onError }: RunSetupProps) {
         description="Hard process-safe request limit. Failed provider requests remain consumed."
         min={1}
         max={10000}
-        disabled={provider !== "anthropic"}
+        disabled={provider === "deterministic"}
         value={providerCallBudget}
         onChange={(value) => setProviderCallBudget(toNumber(value, 100))}
       />

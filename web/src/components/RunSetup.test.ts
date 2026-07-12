@@ -5,6 +5,21 @@ import { describe, expect, it } from "vitest";
 import { RunSetup } from "./RunSetup";
 
 describe("RunSetup", () => {
+  it("explains that host-agent bridge runs belong to the agent hosts", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        MantineProvider,
+        {},
+        React.createElement(RunSetup, {
+          onRunCreated: () => undefined,
+          onError: () => undefined
+        })
+      )
+    );
+
+    expect(markup).toContain("Host-agent bridge runs must be started from Claude Code or Codex");
+  });
+
   it("renders source corpus selectors for evidence, indexes, repository search, web search, literature queries, full text, and evaluation fixtures", () => {
     const markup = renderToStaticMarkup(
       React.createElement(

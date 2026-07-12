@@ -6,7 +6,7 @@ export type StartRunPayload = {
   maxHypotheses: number;
   maxMatches: number;
   runName: string;
-  provider: "deterministic" | "anthropic";
+  provider: "deterministic" | "anthropic" | "claude-cli" | "codex-cli";
   continuous: boolean;
   intervalSeconds: number;
   maxWallMinutes: number;
