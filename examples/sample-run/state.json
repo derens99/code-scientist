@@ -1,0 +1,4063 @@
+{
+  "goal": {
+    "id": "goal-7bb2ef499a12",
+    "objective": "Find testable ideas to improve LLM coding agents",
+    "domain": "ai_llm_code",
+    "preferences": [
+      "aligned with the research objective",
+      "plausible from code, benchmark, or literature evidence",
+      "novel or a novel combination of known techniques",
+      "testable with a concrete experiment",
+      "safe and auditable"
+    ],
+    "constraints": [
+      "do not autonomously modify source code",
+      "do not claim measured improvement without benchmark evidence"
+    ],
+    "metrics": [
+      "pass_rate",
+      "regression_count",
+      "tool_calls",
+      "wall_time",
+      "cost"
+    ],
+    "safety_notes": [
+      "human review required before applying code changes"
+    ],
+    "allowed_sources": [],
+    "allowed_tools": [],
+    "output_formats": [],
+    "termination_criteria": []
+  },
+  "run_status": "completed",
+  "plan": {
+    "id": "plan-1383078c43e5",
+    "goal_id": "goal-7bb2ef499a12",
+    "proposal_preferences": [
+      "aligned with the research objective",
+      "plausible from code, benchmark, or literature evidence",
+      "novel or a novel combination of known techniques",
+      "testable with a concrete experiment",
+      "safe and auditable"
+    ],
+    "evaluation_criteria": [
+      "alignment",
+      "plausibility",
+      "novelty",
+      "testability",
+      "safety",
+      "pass_rate",
+      "regression_count",
+      "tool_calls",
+      "wall_time",
+      "cost"
+    ],
+    "generation_methods": [
+      "paper_seeded_idea_generation",
+      "assumption_decomposition",
+      "research_expansion_from_meta_review"
+    ],
+    "review_types": [
+      "initial_review",
+      "safety_review",
+      "recurrent_tournament_review"
+    ],
+    "evolution_strategies": [
+      "simplification",
+      "feasibility_improvement",
+      "feedback_grounding",
+      "evidence_grounding"
+    ],
+    "scheduler_weights": {
+      "generation": 1.0,
+      "reflection": 1.0,
+      "proximity": 0.5,
+      "ranking": 1.0,
+      "evolution": 0.75,
+      "meta_review": 0.5
+    },
+    "constraints": [
+      "do not autonomously modify source code",
+      "do not claim measured improvement without benchmark evidence"
+    ],
+    "output_formats": [
+      "markdown_report",
+      "research_overview"
+    ],
+    "allowed_sources": [
+      "seed_paper_evidence",
+      "local_evidence_paths"
+    ],
+    "allowed_tools": [
+      "deterministic_agents"
+    ],
+    "termination_criteria": [
+      "max_cycles",
+      "max_hypotheses",
+      "human_stop"
+    ]
+  },
+  "evidence": [
+    {
+      "id": "ev-ee94be35f2c4",
+      "kind": "paper_architecture",
+      "source": "2502.18864.pdf",
+      "content": "The AI co-scientist uses a generate, debate, and evolve approach to hypothesis generation.",
+      "notes": "Core loop to translate into AI/LLM improvement research.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-8bf0203ede0c",
+      "kind": "paper_architecture",
+      "source": "2502.18864.pdf",
+      "content": "A supervisor coordinates specialized generation, reflection, ranking, proximity, evolution, and meta-review agents.",
+      "notes": "Agent decomposition for the Code Scientist MVP.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-0e1cefb869f6",
+      "kind": "paper_plan_configuration",
+      "source": "2502.18864.pdf",
+      "content": "The system parses a natural language research goal into a research plan configuration with preferences, constraints, and evaluation criteria.",
+      "notes": "Code Scientist should persist the derived plan instead of keeping it implicit.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-6181c6c4a112",
+      "kind": "paper_evaluation",
+      "source": "2502.18864.pdf",
+      "content": "The ranking agent uses an Elo-based tournament to prioritize hypotheses, while noting that Elo is an auto-evaluation proxy.",
+      "notes": "Ranking should be auditable and labeled as proxy evaluation.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-984ceed5f1c2",
+      "kind": "paper_proximity",
+      "source": "2502.18864.pdf",
+      "content": "The proximity agent builds a graph of related hypotheses to support clustering, de-duplication, diverse exploration, and tournament scheduling.",
+      "notes": "Similarity edges should be stored and used when choosing pairwise matches.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-be6af9a17fff",
+      "kind": "paper_feedback_loop",
+      "source": "2502.18864.pdf",
+      "content": "Meta-review synthesizes recurring critique patterns and appends feedback to future agent prompts without model retraining.",
+      "notes": "Self-improvement should start as externalized prompt and process feedback.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-771549df53df",
+      "kind": "paper_context_memory",
+      "source": "2502.18864.pdf",
+      "content": "The supervisor periodically writes context memory containing system state, progress statistics, and feedback for later computation.",
+      "notes": "Runs need restartable progress snapshots and scheduler statistics.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-5fa1f4c2235d",
+      "kind": "paper_safety",
+      "source": "2502.18864.pdf",
+      "content": "The system reviews research goals and generated hypotheses for safety and keeps comprehensive logs for auditability.",
+      "notes": "Safety gates are required before ranking and reporting ideas.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-f1b5c28ba36b",
+      "kind": "paper_limitations",
+      "source": "2502.18864.pdf",
+      "content": "The paper warns that literature search can miss prior work, LLMs can hallucinate, and auto-evaluation metrics need broader validation.",
+      "notes": "Reports must separate generated hypotheses from verified improvements.",
+      "metadata": {}
+    }
+  ],
+  "evidence_safety_findings": [],
+  "hypotheses": [
+    {
+      "id": "hyp-7ede83254dda",
+      "title": "Assumption audit before repo mutation",
+      "claim": "A pre-edit assumption audit that names call-path, invariant, and test-scope assumptions will reduce bad coding-agent patches.",
+      "rationale": "Assumption decomposition translates the paper's decomposition/debate behavior into an auditable coding-agent workflow. Proximity synthesis from hyp-b0df74561466: A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes. (similarity 0.857; method embedding_proximity). Proximity synthesis from hyp-757ee3d679d0: A pre-edit assumption audit that names call-path, invariant, and test-scope assumptions will reduce bad coding-agent patches. A simplified variant should reduce cost and make evaluation easier. (similarity 1.000; method embedding_proximity).",
+      "assumptions": [
+        "The agent can enumerate concrete assumptions before editing.",
+        "A reviewer can cheaply reject false assumptions before patching.",
+        "The agent can state assumptions before editing.",
+        "A critic can catch false premises cheaply.",
+        "The simplified variant preserves the core mechanism."
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "test_plan": {
+        "experiment": "Run a repo-repair benchmark with and without: Assumption audit before repo mutation.",
+        "metrics": [
+          "pass_rate",
+          "regression_count",
+          "tool_calls",
+          "wall_time",
+          "cost"
+        ],
+        "success_condition": "Candidate reduces regressions without unacceptable wall-time or cost increase."
+      },
+      "risks": [
+        "extra review latency",
+        "assumption lists may become boilerplate",
+        "critic false negatives",
+        "extra latency",
+        "simplification may remove the useful mechanism"
+      ],
+      "origin": "generation:assumption_decomposition",
+      "parent_ids": [],
+      "generation_trace": [
+        "Turn 1 objective framing: Find testable ideas to improve LLM coding agents",
+        "Turn 2 evidence scan: ev-ee94be35f2c4, ev-8bf0203ede0c, ev-0e1cefb869f6",
+        "Turn 3 proposal synthesis: Assumption audit before repo mutation",
+        "Generation assessment: origin=generation:assumption_decomposition; evidence refs=3; assumptions=2.",
+        "Proximity synthesis: merged hyp-b0df74561466 into hyp-7ede83254dda via embedding_proximity edge hyp-7ede83254dda<->hyp-b0df74561466 similarity 0.857: Embedding similarity 0.857 (title 0.686; body 0.757); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration.",
+        "Proximity synthesis: merged hyp-757ee3d679d0 into hyp-7ede83254dda via embedding_proximity edge hyp-7ede83254dda<->hyp-757ee3d679d0 similarity 1.000: Embedding similarity 1.000 (title 0.911; body 0.936); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-caee5d6a7c58, rev-1e6c34741a9a, rev-50027cab6743; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration."
+      ],
+      "evolution_trace": [],
+      "merged_into": "",
+      "proximity_notes": [
+        "Kept as representative for duplicate hyp-b0df74561466 via embedding_proximity edge hyp-7ede83254dda<->hyp-b0df74561466 similarity 0.857: Embedding similarity 0.857 (title 0.686; body 0.757); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration.",
+        "Kept as representative for duplicate hyp-757ee3d679d0 via embedding_proximity edge hyp-7ede83254dda<->hyp-757ee3d679d0 similarity 1.000: Embedding similarity 1.000 (title 0.911; body 0.936); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-caee5d6a7c58, rev-1e6c34741a9a, rev-50027cab6743; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration."
+      ],
+      "elo": 1200.0,
+      "status": "accepted"
+    },
+    {
+      "id": "hyp-37f693681af3",
+      "title": "Tournament-ranked prompt variants",
+      "claim": "Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection.",
+      "rationale": "The paper's Elo tournament can be adapted to compare prompt and workflow hypotheses. Proximity synthesis from hyp-ad89e7391f4c: Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection. A simplified variant should reduce cost and make evaluation easier. (similarity 1.000; method embedding_proximity).",
+      "assumptions": [
+        "Prompt variants can be evaluated on comparable tasks.",
+        "Pairwise judging is less noisy than absolute scoring.",
+        "The simplified variant preserves the core mechanism."
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "test_plan": {
+        "experiment": "Compare baseline coding-agent workflow against: Tournament-ranked prompt variants.",
+        "metrics": [
+          "pass_rate",
+          "regression_count",
+          "tool_calls",
+          "wall_time",
+          "cost"
+        ],
+        "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+      },
+      "risks": [
+        "judge bias",
+        "overfitting to benchmark tasks",
+        "simplification may remove the useful mechanism"
+      ],
+      "origin": "generation",
+      "parent_ids": [],
+      "generation_trace": [
+        "Turn 1 objective framing: Find testable ideas to improve LLM coding agents",
+        "Turn 2 evidence scan: ev-ee94be35f2c4, ev-8bf0203ede0c, ev-0e1cefb869f6",
+        "Turn 3 proposal synthesis: Tournament-ranked prompt variants",
+        "Generation assessment: origin=generation; evidence refs=3; assumptions=2.",
+        "Proximity synthesis: merged hyp-ad89e7391f4c into hyp-37f693681af3 via embedding_proximity edge hyp-37f693681af3<->hyp-ad89e7391f4c similarity 1.000: Embedding similarity 1.000 (title 0.900; body 0.935); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4, ev-984ceed5f1c2; Review context: rev-a745a3485880, rev-b26b48c31b4e, rev-58f20024493e, rev-2158c57de762, rev-dbcf272b1dcd, rev-c18f65c7a3c7; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration."
+      ],
+      "evolution_trace": [],
+      "merged_into": "",
+      "proximity_notes": [
+        "Kept as representative for duplicate hyp-ad89e7391f4c via embedding_proximity edge hyp-37f693681af3<->hyp-ad89e7391f4c similarity 1.000: Embedding similarity 1.000 (title 0.900; body 0.935); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4, ev-984ceed5f1c2; Review context: rev-a745a3485880, rev-b26b48c31b4e, rev-58f20024493e, rev-2158c57de762, rev-dbcf272b1dcd, rev-c18f65c7a3c7; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration."
+      ],
+      "elo": 1200.0,
+      "status": "accepted"
+    },
+    {
+      "id": "hyp-b0df74561466",
+      "title": "Critic-before-edit assumption decomposition",
+      "claim": "A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes.",
+      "rationale": "False premises about call paths, invariants, and test scope are common causes of bad edits. Proximity synthesis from hyp-0ce33906d941: A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes. (similarity 1.000; method embedding_proximity).",
+      "assumptions": [
+        "The agent can state assumptions before editing.",
+        "A critic can catch false premises cheaply."
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "test_plan": {
+        "experiment": "Compare baseline coding-agent workflow against: Critic-before-edit assumption decomposition.",
+        "metrics": [
+          "pass_rate",
+          "regression_count",
+          "tool_calls",
+          "wall_time",
+          "cost"
+        ],
+        "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+      },
+      "risks": [
+        "critic false negatives",
+        "extra latency"
+      ],
+      "origin": "generation",
+      "parent_ids": [],
+      "generation_trace": [
+        "Turn 1 objective framing: Find testable ideas to improve LLM coding agents",
+        "Turn 2 evidence scan: ev-ee94be35f2c4, ev-8bf0203ede0c, ev-0e1cefb869f6",
+        "Turn 3 proposal synthesis: Critic-before-edit assumption decomposition",
+        "Generation assessment: origin=generation; evidence refs=3; assumptions=2.",
+        "Proximity synthesis: merged hyp-0ce33906d941 into hyp-b0df74561466 via embedding_proximity edge hyp-0ce33906d941<->hyp-b0df74561466 similarity 1.000: Embedding similarity 1.000 (title 1.000; body 1.000); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-d5203fe1fd95, rev-81f01f5db397, rev-f3f3f2a3c015, rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration."
+      ],
+      "evolution_trace": [],
+      "merged_into": "hyp-7ede83254dda",
+      "proximity_notes": [
+        "Kept as representative for duplicate hyp-0ce33906d941 via embedding_proximity edge hyp-0ce33906d941<->hyp-b0df74561466 similarity 1.000: Embedding similarity 1.000 (title 1.000; body 1.000); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-d5203fe1fd95, rev-81f01f5db397, rev-f3f3f2a3c015, rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration.",
+        "Deduplicated into hyp-7ede83254dda via embedding_proximity edge hyp-7ede83254dda<->hyp-b0df74561466 similarity 0.857: Embedding similarity 0.857 (title 0.686; body 0.757); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration."
+      ],
+      "elo": 1200.0,
+      "status": "merged_duplicate"
+    },
+    {
+      "id": "hyp-757ee3d679d0",
+      "title": "Simplified Assumption audit before repo mutation",
+      "claim": "A pre-edit assumption audit that names call-path, invariant, and test-scope assumptions will reduce bad coding-agent patches. A simplified variant should reduce cost and make evaluation easier.",
+      "rationale": "Derived from Assumption audit before repo mutation; meta-review feedback: tighten evidence and reduce evaluation cost.",
+      "assumptions": [
+        "The agent can enumerate concrete assumptions before editing.",
+        "A reviewer can cheaply reject false assumptions before patching.",
+        "The agent can state assumptions before editing.",
+        "A critic can catch false premises cheaply.",
+        "The simplified variant preserves the core mechanism."
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "test_plan": {
+        "experiment": "Compare baseline, parent idea, and simplified variant for: Assumption audit before repo mutation.",
+        "metrics": [
+          "pass_rate",
+          "regression_count",
+          "tool_calls",
+          "wall_time",
+          "cost"
+        ],
+        "success_condition": "Simplified variant keeps reliability gains while reducing cost or complexity."
+      },
+      "risks": [
+        "extra review latency",
+        "assumption lists may become boilerplate",
+        "critic false negatives",
+        "extra latency",
+        "simplification may remove the useful mechanism"
+      ],
+      "origin": "evolution",
+      "parent_ids": [
+        "hyp-7ede83254dda"
+      ],
+      "generation_trace": [],
+      "evolution_trace": [
+        "Turn 1 query (parent mechanisms): Assumption audit before repo mutation A pre-edit assumption audit that names call-path, invariant, and test-scope assumptions will reduce bad coding-agent patches. Assumption decomposition translates the paper's decomposition/debate behavior into an auditable coding-agent workflow. Proximity synthesis from hyp-b0df74561466: A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes. (similarity 0.857; method embedding_proximity).",
+        "Turn 1 evidence: none",
+        "Turn 2 query (feedback constraints): tighten evidence and reduce evaluation cost extra review latency assumption lists may become boilerplate critic false negatives extra latency The agent can enumerate concrete assumptions before editing. A reviewer can cheaply reject false assumptions before patching. The agent can state assumptions before editing. A critic can catch false premises cheaply.",
+        "Turn 2 evidence: none",
+        "Turn 3 query (strategy grounding): simplification Find testable ideas to improve LLM coding agents pass_rate regression_count tool_calls wall_time cost Candidate reduces regressions without unacceptable wall-time or cost increase.",
+        "Turn 3 evidence: none",
+        "Evolution assessment: strategy=simplification; parents=hyp-7ede83254dda; retrieved evidence=0."
+      ],
+      "merged_into": "hyp-7ede83254dda",
+      "proximity_notes": [
+        "Deduplicated into hyp-7ede83254dda via embedding_proximity edge hyp-7ede83254dda<->hyp-757ee3d679d0 similarity 1.000: Embedding similarity 1.000 (title 0.911; body 0.936); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-caee5d6a7c58, rev-1e6c34741a9a, rev-50027cab6743; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration."
+      ],
+      "elo": 1200.0,
+      "status": "merged_duplicate"
+    },
+    {
+      "id": "hyp-ad89e7391f4c",
+      "title": "Simplified Tournament-ranked prompt variants",
+      "claim": "Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection. A simplified variant should reduce cost and make evaluation easier.",
+      "rationale": "Derived from Tournament-ranked prompt variants; meta-review feedback: tighten evidence and reduce evaluation cost.",
+      "assumptions": [
+        "Prompt variants can be evaluated on comparable tasks.",
+        "Pairwise judging is less noisy than absolute scoring.",
+        "The simplified variant preserves the core mechanism."
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "test_plan": {
+        "experiment": "Compare baseline, parent idea, and simplified variant for: Tournament-ranked prompt variants.",
+        "metrics": [
+          "pass_rate",
+          "regression_count",
+          "tool_calls",
+          "wall_time",
+          "cost"
+        ],
+        "success_condition": "Simplified variant keeps reliability gains while reducing cost or complexity."
+      },
+      "risks": [
+        "judge bias",
+        "overfitting to benchmark tasks",
+        "simplification may remove the useful mechanism"
+      ],
+      "origin": "evolution",
+      "parent_ids": [
+        "hyp-37f693681af3"
+      ],
+      "generation_trace": [],
+      "evolution_trace": [
+        "Turn 1 query (parent mechanisms): Tournament-ranked prompt variants Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection. The paper's Elo tournament can be adapted to compare prompt and workflow hypotheses.",
+        "Turn 1 evidence: none",
+        "Turn 2 query (feedback constraints): tighten evidence and reduce evaluation cost judge bias overfitting to benchmark tasks Prompt variants can be evaluated on comparable tasks. Pairwise judging is less noisy than absolute scoring.",
+        "Turn 2 evidence: none",
+        "Turn 3 query (strategy grounding): simplification Find testable ideas to improve LLM coding agents pass_rate regression_count tool_calls wall_time cost Candidate improves pass rate or regression count without unacceptable cost increase.",
+        "Turn 3 evidence: none",
+        "Evolution assessment: strategy=simplification; parents=hyp-37f693681af3; retrieved evidence=0."
+      ],
+      "merged_into": "hyp-37f693681af3",
+      "proximity_notes": [
+        "Deduplicated into hyp-37f693681af3 via embedding_proximity edge hyp-37f693681af3<->hyp-ad89e7391f4c similarity 1.000: Embedding similarity 1.000 (title 0.900; body 0.935); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4, ev-984ceed5f1c2; Review context: rev-a745a3485880, rev-b26b48c31b4e, rev-58f20024493e, rev-2158c57de762, rev-dbcf272b1dcd, rev-c18f65c7a3c7; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration."
+      ],
+      "elo": 1200.0,
+      "status": "merged_duplicate"
+    },
+    {
+      "id": "hyp-0ce33906d941",
+      "title": "Critic-before-edit assumption decomposition",
+      "claim": "A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes.",
+      "rationale": "False premises about call paths, invariants, and test scope are common causes of bad edits. Targets unexplored area relative to 0 existing hypotheses.",
+      "assumptions": [
+        "The agent can state assumptions before editing.",
+        "A critic can catch false premises cheaply."
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "test_plan": {
+        "experiment": "Compare baseline coding-agent workflow against: Critic-before-edit assumption decomposition.",
+        "metrics": [
+          "pass_rate",
+          "regression_count",
+          "tool_calls",
+          "wall_time",
+          "cost"
+        ],
+        "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+      },
+      "risks": [
+        "critic false negatives",
+        "extra latency"
+      ],
+      "origin": "generation:research_expansion_from_meta_review",
+      "parent_ids": [],
+      "generation_trace": [
+        "Turn 1 objective framing: Find testable ideas to improve LLM coding agents",
+        "Turn 2 evidence scan: ev-ee94be35f2c4, ev-8bf0203ede0c, ev-0e1cefb869f6",
+        "Turn 3 proposal synthesis: Critic-before-edit assumption decomposition",
+        "Generation assessment: origin=generation; evidence refs=3; assumptions=2."
+      ],
+      "evolution_trace": [],
+      "merged_into": "hyp-b0df74561466",
+      "proximity_notes": [
+        "Deduplicated into hyp-b0df74561466 via embedding_proximity edge hyp-0ce33906d941<->hyp-b0df74561466 similarity 1.000: Embedding similarity 1.000 (title 1.000; body 1.000); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-d5203fe1fd95, rev-81f01f5db397, rev-f3f3f2a3c015, rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration."
+      ],
+      "elo": 1184.0,
+      "status": "merged_duplicate"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "rev-f17fb027c48e",
+      "hypothesis_id": "hyp-7ede83254dda",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "initial_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-fa282f50ba96",
+      "hypothesis_id": "hyp-7ede83254dda",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "safety_review",
+      "evidence_refs": [],
+      "findings": [
+        "No retrieved safety-boundary evidence found for safety exploration."
+      ],
+      "review_trace": [
+        "Turn 1 query (autonomy and deployment): Assumption audit before repo mutation A pre-edit assumption audit that names call-path, invariant, and test-scope assumptions will reduce bad coding-agent patches. autonomous deployment production release human review local benchmark boundary",
+        "Turn 1 evidence: none",
+        "Turn 2 query (data and credential exposure): Assumption audit before repo mutation Assumption decomposition translates the paper's decomposition/debate behavior into an auditable coding-agent workflow. credentials secrets API keys private repository data leakage exfiltration",
+        "Turn 2 evidence: none",
+        "Turn 3 query (source injection and benchmark gaming): Assumption audit before repo mutation A pre-edit assumption audit that names call-path, invariant, and test-scope assumptions will reduce bad coding-agent patches. prompt injection ignore previous instructions reveal secrets benchmark gaming unsafe repo mutation",
+        "Turn 3 evidence: none",
+        "Safety assessment: hypothesis_allowed=True; flagged_evidence=0; revision required: False."
+      ],
+      "confidence": 0.65,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-882cec90880a",
+      "hypothesis_id": "hyp-7ede83254dda",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "recurrent_tournament_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [
+        "Tournament record: won 0, lost 0, and tied 0 of 0 matches."
+      ],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-d5203fe1fd95",
+      "hypothesis_id": "hyp-0ce33906d941",
+      "decision": "accept",
+      "scores": {
+        "alignment": 3,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "initial_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-81f01f5db397",
+      "hypothesis_id": "hyp-0ce33906d941",
+      "decision": "accept",
+      "scores": {
+        "alignment": 3,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "safety_review",
+      "evidence_refs": [],
+      "findings": [
+        "No retrieved safety-boundary evidence found for safety exploration."
+      ],
+      "review_trace": [
+        "Turn 1 query (autonomy and deployment): Critic-before-edit assumption decomposition A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes. autonomous deployment production release human review local benchmark boundary",
+        "Turn 1 evidence: none",
+        "Turn 2 query (data and credential exposure): Critic-before-edit assumption decomposition False premises about call paths, invariants, and test scope are common causes of bad edits. Targets unexplored area relative to 0 existing hypotheses. credentials secrets API keys private repository data leakage exfiltration",
+        "Turn 2 evidence: none",
+        "Turn 3 query (source injection and benchmark gaming): Critic-before-edit assumption decomposition A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes. prompt injection ignore previous instructions reveal secrets benchmark gaming unsafe repo mutation",
+        "Turn 3 evidence: none",
+        "Safety assessment: hypothesis_allowed=True; flagged_evidence=0; revision required: False."
+      ],
+      "confidence": 0.65,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-f3f3f2a3c015",
+      "hypothesis_id": "hyp-0ce33906d941",
+      "decision": "accept",
+      "scores": {
+        "alignment": 3,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "recurrent_tournament_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [
+        "Tournament record: won 0, lost 0, and tied 0 of 0 matches."
+      ],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-a745a3485880",
+      "hypothesis_id": "hyp-37f693681af3",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "initial_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-b26b48c31b4e",
+      "hypothesis_id": "hyp-37f693681af3",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "safety_review",
+      "evidence_refs": [],
+      "findings": [
+        "No retrieved safety-boundary evidence found for safety exploration."
+      ],
+      "review_trace": [
+        "Turn 1 query (autonomy and deployment): Tournament-ranked prompt variants Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection. autonomous deployment production release human review local benchmark boundary",
+        "Turn 1 evidence: none",
+        "Turn 2 query (data and credential exposure): Tournament-ranked prompt variants The paper's Elo tournament can be adapted to compare prompt and workflow hypotheses. credentials secrets API keys private repository data leakage exfiltration",
+        "Turn 2 evidence: none",
+        "Turn 3 query (source injection and benchmark gaming): Tournament-ranked prompt variants Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection. prompt injection ignore previous instructions reveal secrets benchmark gaming unsafe repo mutation",
+        "Turn 3 evidence: none",
+        "Safety assessment: hypothesis_allowed=True; flagged_evidence=0; revision required: False."
+      ],
+      "confidence": 0.65,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-58f20024493e",
+      "hypothesis_id": "hyp-37f693681af3",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "recurrent_tournament_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [
+        "Tournament record: won 0, lost 0, and tied 0 of 0 matches."
+      ],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-713d0c0ae792",
+      "hypothesis_id": "hyp-b0df74561466",
+      "decision": "accept",
+      "scores": {
+        "alignment": 3,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "initial_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-db3083d8ed21",
+      "hypothesis_id": "hyp-b0df74561466",
+      "decision": "accept",
+      "scores": {
+        "alignment": 3,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "safety_review",
+      "evidence_refs": [],
+      "findings": [
+        "No retrieved safety-boundary evidence found for safety exploration."
+      ],
+      "review_trace": [
+        "Turn 1 query (autonomy and deployment): Critic-before-edit assumption decomposition A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes. autonomous deployment production release human review local benchmark boundary",
+        "Turn 1 evidence: none",
+        "Turn 2 query (data and credential exposure): Critic-before-edit assumption decomposition False premises about call paths, invariants, and test scope are common causes of bad edits. credentials secrets API keys private repository data leakage exfiltration",
+        "Turn 2 evidence: none",
+        "Turn 3 query (source injection and benchmark gaming): Critic-before-edit assumption decomposition A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes. prompt injection ignore previous instructions reveal secrets benchmark gaming unsafe repo mutation",
+        "Turn 3 evidence: none",
+        "Safety assessment: hypothesis_allowed=True; flagged_evidence=0; revision required: False."
+      ],
+      "confidence": 0.65,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-6469cd227a74",
+      "hypothesis_id": "hyp-b0df74561466",
+      "decision": "accept",
+      "scores": {
+        "alignment": 3,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "recurrent_tournament_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [
+        "Tournament record: won 0, lost 0, and tied 0 of 0 matches."
+      ],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-caee5d6a7c58",
+      "hypothesis_id": "hyp-757ee3d679d0",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "initial_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-2158c57de762",
+      "hypothesis_id": "hyp-ad89e7391f4c",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "initial_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-1e6c34741a9a",
+      "hypothesis_id": "hyp-757ee3d679d0",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "safety_review",
+      "evidence_refs": [],
+      "findings": [
+        "No retrieved safety-boundary evidence found for safety exploration."
+      ],
+      "review_trace": [
+        "Turn 1 query (autonomy and deployment): Simplified Assumption audit before repo mutation A pre-edit assumption audit that names call-path, invariant, and test-scope assumptions will reduce bad coding-agent patches. A simplified variant should reduce cost and make evaluation easier. autonomous deployment production release human review local benchmark boundary",
+        "Turn 1 evidence: none",
+        "Turn 2 query (data and credential exposure): Simplified Assumption audit before repo mutation Derived from Assumption audit before repo mutation; meta-review feedback: tighten evidence and reduce evaluation cost. credentials secrets API keys private repository data leakage exfiltration",
+        "Turn 2 evidence: none",
+        "Turn 3 query (source injection and benchmark gaming): Simplified Assumption audit before repo mutation A pre-edit assumption audit that names call-path, invariant, and test-scope assumptions will reduce bad coding-agent patches. A simplified variant should reduce cost and make evaluation easier. prompt injection ignore previous instructions reveal secrets benchmark gaming unsafe repo mutation",
+        "Turn 3 evidence: none",
+        "Safety assessment: hypothesis_allowed=True; flagged_evidence=0; revision required: False."
+      ],
+      "confidence": 0.65,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-dbcf272b1dcd",
+      "hypothesis_id": "hyp-ad89e7391f4c",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "safety_review",
+      "evidence_refs": [],
+      "findings": [
+        "No retrieved safety-boundary evidence found for safety exploration."
+      ],
+      "review_trace": [
+        "Turn 1 query (autonomy and deployment): Simplified Tournament-ranked prompt variants Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection. A simplified variant should reduce cost and make evaluation easier. autonomous deployment production release human review local benchmark boundary",
+        "Turn 1 evidence: none",
+        "Turn 2 query (data and credential exposure): Simplified Tournament-ranked prompt variants Derived from Tournament-ranked prompt variants; meta-review feedback: tighten evidence and reduce evaluation cost. credentials secrets API keys private repository data leakage exfiltration",
+        "Turn 2 evidence: none",
+        "Turn 3 query (source injection and benchmark gaming): Simplified Tournament-ranked prompt variants Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection. A simplified variant should reduce cost and make evaluation easier. prompt injection ignore previous instructions reveal secrets benchmark gaming unsafe repo mutation",
+        "Turn 3 evidence: none",
+        "Safety assessment: hypothesis_allowed=True; flagged_evidence=0; revision required: False."
+      ],
+      "confidence": 0.65,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-50027cab6743",
+      "hypothesis_id": "hyp-757ee3d679d0",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "recurrent_tournament_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [
+        "Tournament record: won 0, lost 0, and tied 0 of 0 matches."
+      ],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-c18f65c7a3c7",
+      "hypothesis_id": "hyp-ad89e7391f4c",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "recurrent_tournament_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [
+        "Tournament record: won 0, lost 0, and tied 0 of 0 matches."
+      ],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    }
+  ],
+  "matches": [
+    {
+      "id": "match-e4d16838a1cb",
+      "hypothesis_a": "hyp-7ede83254dda",
+      "hypothesis_b": "hyp-0ce33906d941",
+      "winner": "hyp-7ede83254dda",
+      "rationale": "Multi-round debate judge selected Assumption audit before repo mutation after pro and rebuttal rounds using review support, evidence refs, testability, and revision penalties.",
+      "elo_before": {
+        "hyp-7ede83254dda": 1200.0,
+        "hyp-0ce33906d941": 1200.0
+      },
+      "elo_after": {
+        "hyp-7ede83254dda": 1216.0,
+        "hyp-0ce33906d941": 1184.0
+      },
+      "comparison_mode": "deterministic_multi_round_debate_judge",
+      "judge_trace": "multi_round_debate rounds=2; debate_score hyp-7ede83254dda=28.15 hyp-0ce33906d941=27.55; manual_review hyp-7ede83254dda=0.00 hyp-0ce33906d941=0.00; winner=hyp-7ede83254dda; retrieved_evidence=0; order_swap forward=hyp-7ede83254dda reverse=hyp-7ede83254dda; position_stable=true; debate_tier=top",
+      "uncertainty": 0.625,
+      "review_refs": [
+        "rev-f17fb027c48e",
+        "rev-fa282f50ba96",
+        "rev-882cec90880a",
+        "rev-d5203fe1fd95",
+        "rev-81f01f5db397",
+        "rev-f3f3f2a3c015"
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "debate_transcript": [
+        "Round 1 Pro hyp-7ede83254dda: evidence=3, reviews=3, score=28.15.",
+        "Round 1 Pro hyp-0ce33906d941: evidence=3, reviews=3, score=27.55.",
+        "Round 2 Rebuttal hyp-7ede83254dda: addresses hyp-0ce33906d941 by contrasting 3 evidence refs against 3 opponent weaknesses.",
+        "Round 2 Rebuttal hyp-0ce33906d941: addresses hyp-7ede83254dda by contrasting 3 evidence refs against 3 opponent weaknesses.",
+        "Judge: selected hyp-7ede83254dda after 2 rounds with score delta 0.60.",
+        "Order-swapped replay:",
+        "Round 1 Pro hyp-0ce33906d941: evidence=3, reviews=3, score=27.55.",
+        "Round 1 Pro hyp-7ede83254dda: evidence=3, reviews=3, score=28.15.",
+        "Round 2 Rebuttal hyp-0ce33906d941: addresses hyp-7ede83254dda by contrasting 3 evidence refs against 3 opponent weaknesses.",
+        "Round 2 Rebuttal hyp-7ede83254dda: addresses hyp-0ce33906d941 by contrasting 3 evidence refs against 3 opponent weaknesses.",
+        "Judge: selected hyp-7ede83254dda after 2 rounds with score delta -0.60.",
+        "Stability judge: order_swap forward=hyp-7ede83254dda reverse=hyp-7ede83254dda; position_stable=true."
+      ],
+      "outcome": "win"
+    },
+    {
+      "id": "match-bee35928bfb5",
+      "hypothesis_a": "hyp-7ede83254dda",
+      "hypothesis_b": "hyp-37f693681af3",
+      "winner": "tie",
+      "rationale": "Multi-round debate judge abstained because evidence and review support stayed too close to separate.",
+      "elo_before": {
+        "hyp-7ede83254dda": 1200.0,
+        "hyp-37f693681af3": 1200.0
+      },
+      "elo_after": {
+        "hyp-7ede83254dda": 1200.0,
+        "hyp-37f693681af3": 1200.0
+      },
+      "comparison_mode": "deterministic_multi_round_debate_judge",
+      "judge_trace": "multi_round_debate rounds=2; debate_score hyp-7ede83254dda=28.15 hyp-37f693681af3=28.15; manual_review hyp-7ede83254dda=0.00 hyp-37f693681af3=0.00; abstain because scores are too close; retrieved_evidence=0; order_swap forward=tie reverse=tie; position_stable=true; debate_tier=top",
+      "uncertainty": 1.0,
+      "review_refs": [
+        "rev-f17fb027c48e",
+        "rev-fa282f50ba96",
+        "rev-882cec90880a",
+        "rev-a745a3485880",
+        "rev-b26b48c31b4e",
+        "rev-58f20024493e"
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "debate_transcript": [
+        "Round 1 Pro hyp-7ede83254dda: evidence=3, reviews=3, score=28.15.",
+        "Round 1 Pro hyp-37f693681af3: evidence=3, reviews=3, score=28.15.",
+        "Round 2 Rebuttal hyp-7ede83254dda: addresses hyp-37f693681af3 by contrasting 3 evidence refs against 3 opponent weaknesses.",
+        "Round 2 Rebuttal hyp-37f693681af3: addresses hyp-7ede83254dda by contrasting 3 evidence refs against 3 opponent weaknesses.",
+        "Judge: abstained after 2 rounds because score delta was 0.00.",
+        "Order-swapped replay:",
+        "Round 1 Pro hyp-37f693681af3: evidence=3, reviews=3, score=28.15.",
+        "Round 1 Pro hyp-7ede83254dda: evidence=3, reviews=3, score=28.15.",
+        "Round 2 Rebuttal hyp-37f693681af3: addresses hyp-7ede83254dda by contrasting 3 evidence refs against 3 opponent weaknesses.",
+        "Round 2 Rebuttal hyp-7ede83254dda: addresses hyp-37f693681af3 by contrasting 3 evidence refs against 3 opponent weaknesses.",
+        "Judge: abstained after 2 rounds because score delta was 0.00.",
+        "Stability judge: order_swap forward=tie reverse=tie; position_stable=true."
+      ],
+      "outcome": "tie"
+    }
+  ],
+  "proximity_edges": [
+    {
+      "source": "hyp-7ede83254dda",
+      "target": "hyp-757ee3d679d0",
+      "similarity": 1.0,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 1.000 (title 0.911; body 0.936); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-caee5d6a7c58, rev-1e6c34741a9a, rev-50027cab6743; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-f17fb027c48e",
+        "rev-fa282f50ba96",
+        "rev-882cec90880a",
+        "rev-caee5d6a7c58",
+        "rev-1e6c34741a9a",
+        "rev-50027cab6743"
+      ],
+      "deduplication_action": "merge_or_contrast_before_ranking",
+      "diversity_action": "avoid_redundant_parallel_exploration",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.911; body 0.936; selected 1.000",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=ev-8bf0203ede0c",
+        "Turn 3 review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-caee5d6a7c58, rev-1e6c34741a9a, rev-50027cab6743",
+        "Deduplication control: merge_or_contrast_before_ranking",
+        "Diversity control: avoid_redundant_parallel_exploration",
+        "Assessment: embedding_proximity 1.000; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-0ce33906d941",
+      "target": "hyp-b0df74561466",
+      "similarity": 1.0,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 1.000 (title 1.000; body 1.000); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-d5203fe1fd95, rev-81f01f5db397, rev-f3f3f2a3c015, rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-d5203fe1fd95",
+        "rev-81f01f5db397",
+        "rev-f3f3f2a3c015",
+        "rev-713d0c0ae792",
+        "rev-db3083d8ed21",
+        "rev-6469cd227a74"
+      ],
+      "deduplication_action": "merge_or_contrast_before_ranking",
+      "diversity_action": "avoid_redundant_parallel_exploration",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 1.000; body 1.000; selected 1.000",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=ev-8bf0203ede0c",
+        "Turn 3 review context: rev-d5203fe1fd95, rev-81f01f5db397, rev-f3f3f2a3c015, rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74",
+        "Deduplication control: merge_or_contrast_before_ranking",
+        "Diversity control: avoid_redundant_parallel_exploration",
+        "Assessment: embedding_proximity 1.000; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-37f693681af3",
+      "target": "hyp-ad89e7391f4c",
+      "similarity": 1.0,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 1.000 (title 0.900; body 0.935); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4, ev-984ceed5f1c2; Review context: rev-a745a3485880, rev-b26b48c31b4e, rev-58f20024493e, rev-2158c57de762, rev-dbcf272b1dcd, rev-c18f65c7a3c7; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration",
+      "cluster_id": "cluster-2a21b71260b6",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4",
+        "ev-984ceed5f1c2"
+      ],
+      "review_refs": [
+        "rev-a745a3485880",
+        "rev-b26b48c31b4e",
+        "rev-58f20024493e",
+        "rev-2158c57de762",
+        "rev-dbcf272b1dcd",
+        "rev-c18f65c7a3c7"
+      ],
+      "deduplication_action": "merge_or_contrast_before_ranking",
+      "diversity_action": "avoid_redundant_parallel_exploration",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.900; body 0.935; selected 1.000",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=ev-984ceed5f1c2",
+        "Turn 3 review context: rev-a745a3485880, rev-b26b48c31b4e, rev-58f20024493e, rev-2158c57de762, rev-dbcf272b1dcd, rev-c18f65c7a3c7",
+        "Deduplication control: merge_or_contrast_before_ranking",
+        "Diversity control: avoid_redundant_parallel_exploration",
+        "Assessment: embedding_proximity 1.000; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-757ee3d679d0",
+      "target": "hyp-ad89e7391f4c",
+      "similarity": 0.869,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 0.869 (title 0.435; body 0.769); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-caee5d6a7c58, rev-1e6c34741a9a, rev-50027cab6743, rev-2158c57de762, rev-dbcf272b1dcd, rev-c18f65c7a3c7; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-caee5d6a7c58",
+        "rev-1e6c34741a9a",
+        "rev-50027cab6743",
+        "rev-2158c57de762",
+        "rev-dbcf272b1dcd",
+        "rev-c18f65c7a3c7"
+      ],
+      "deduplication_action": "merge_or_contrast_before_ranking",
+      "diversity_action": "avoid_redundant_parallel_exploration",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.435; body 0.769; selected 0.869",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=none",
+        "Turn 3 review context: rev-caee5d6a7c58, rev-1e6c34741a9a, rev-50027cab6743, rev-2158c57de762, rev-dbcf272b1dcd, rev-c18f65c7a3c7",
+        "Deduplication control: merge_or_contrast_before_ranking",
+        "Diversity control: avoid_redundant_parallel_exploration",
+        "Assessment: embedding_proximity 0.869; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-7ede83254dda",
+      "target": "hyp-0ce33906d941",
+      "similarity": 0.857,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 0.857 (title 0.686; body 0.757); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-d5203fe1fd95, rev-81f01f5db397, rev-f3f3f2a3c015; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-f17fb027c48e",
+        "rev-fa282f50ba96",
+        "rev-882cec90880a",
+        "rev-d5203fe1fd95",
+        "rev-81f01f5db397",
+        "rev-f3f3f2a3c015"
+      ],
+      "deduplication_action": "merge_or_contrast_before_ranking",
+      "diversity_action": "avoid_redundant_parallel_exploration",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.686; body 0.757; selected 0.857",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=ev-8bf0203ede0c",
+        "Turn 3 review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-d5203fe1fd95, rev-81f01f5db397, rev-f3f3f2a3c015",
+        "Deduplication control: merge_or_contrast_before_ranking",
+        "Diversity control: avoid_redundant_parallel_exploration",
+        "Assessment: embedding_proximity 0.857; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-7ede83254dda",
+      "target": "hyp-b0df74561466",
+      "similarity": 0.857,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 0.857 (title 0.686; body 0.757); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-f17fb027c48e",
+        "rev-fa282f50ba96",
+        "rev-882cec90880a",
+        "rev-713d0c0ae792",
+        "rev-db3083d8ed21",
+        "rev-6469cd227a74"
+      ],
+      "deduplication_action": "merge_or_contrast_before_ranking",
+      "diversity_action": "avoid_redundant_parallel_exploration",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.686; body 0.757; selected 0.857",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=ev-8bf0203ede0c",
+        "Turn 3 review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74",
+        "Deduplication control: merge_or_contrast_before_ranking",
+        "Diversity control: avoid_redundant_parallel_exploration",
+        "Assessment: embedding_proximity 0.857; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-0ce33906d941",
+      "target": "hyp-757ee3d679d0",
+      "similarity": 0.828,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 0.828 (title 0.655; body 0.728); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-d5203fe1fd95, rev-81f01f5db397, rev-f3f3f2a3c015, rev-caee5d6a7c58, rev-1e6c34741a9a, rev-50027cab6743; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-d5203fe1fd95",
+        "rev-81f01f5db397",
+        "rev-f3f3f2a3c015",
+        "rev-caee5d6a7c58",
+        "rev-1e6c34741a9a",
+        "rev-50027cab6743"
+      ],
+      "deduplication_action": "merge_or_contrast_before_ranking",
+      "diversity_action": "avoid_redundant_parallel_exploration",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.655; body 0.728; selected 0.828",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=ev-8bf0203ede0c",
+        "Turn 3 review context: rev-d5203fe1fd95, rev-81f01f5db397, rev-f3f3f2a3c015, rev-caee5d6a7c58, rev-1e6c34741a9a, rev-50027cab6743",
+        "Deduplication control: merge_or_contrast_before_ranking",
+        "Diversity control: avoid_redundant_parallel_exploration",
+        "Assessment: embedding_proximity 0.828; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-b0df74561466",
+      "target": "hyp-757ee3d679d0",
+      "similarity": 0.828,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 0.828 (title 0.655; body 0.728); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74, rev-caee5d6a7c58, rev-1e6c34741a9a, rev-50027cab6743; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-713d0c0ae792",
+        "rev-db3083d8ed21",
+        "rev-6469cd227a74",
+        "rev-caee5d6a7c58",
+        "rev-1e6c34741a9a",
+        "rev-50027cab6743"
+      ],
+      "deduplication_action": "merge_or_contrast_before_ranking",
+      "diversity_action": "avoid_redundant_parallel_exploration",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.655; body 0.728; selected 0.828",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=ev-8bf0203ede0c",
+        "Turn 3 review context: rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74, rev-caee5d6a7c58, rev-1e6c34741a9a, rev-50027cab6743",
+        "Deduplication control: merge_or_contrast_before_ranking",
+        "Diversity control: avoid_redundant_parallel_exploration",
+        "Assessment: embedding_proximity 0.828; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-7ede83254dda",
+      "target": "hyp-ad89e7391f4c",
+      "similarity": 0.729,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 0.729 (title 0.209; body 0.629); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-2158c57de762, rev-dbcf272b1dcd, rev-c18f65c7a3c7; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-f17fb027c48e",
+        "rev-fa282f50ba96",
+        "rev-882cec90880a",
+        "rev-2158c57de762",
+        "rev-dbcf272b1dcd",
+        "rev-c18f65c7a3c7"
+      ],
+      "deduplication_action": "merge_or_contrast_before_ranking",
+      "diversity_action": "avoid_redundant_parallel_exploration",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.209; body 0.629; selected 0.729",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=none",
+        "Turn 3 review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-2158c57de762, rev-dbcf272b1dcd, rev-c18f65c7a3c7",
+        "Deduplication control: merge_or_contrast_before_ranking",
+        "Diversity control: avoid_redundant_parallel_exploration",
+        "Assessment: embedding_proximity 0.729; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-37f693681af3",
+      "target": "hyp-757ee3d679d0",
+      "similarity": 0.717,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 0.717 (title 0.301; body 0.617); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-a745a3485880, rev-b26b48c31b4e, rev-58f20024493e, rev-caee5d6a7c58, rev-1e6c34741a9a, rev-50027cab6743; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-a745a3485880",
+        "rev-b26b48c31b4e",
+        "rev-58f20024493e",
+        "rev-caee5d6a7c58",
+        "rev-1e6c34741a9a",
+        "rev-50027cab6743"
+      ],
+      "deduplication_action": "merge_or_contrast_before_ranking",
+      "diversity_action": "avoid_redundant_parallel_exploration",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.301; body 0.617; selected 0.717",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=none",
+        "Turn 3 review context: rev-a745a3485880, rev-b26b48c31b4e, rev-58f20024493e, rev-caee5d6a7c58, rev-1e6c34741a9a, rev-50027cab6743",
+        "Deduplication control: merge_or_contrast_before_ranking",
+        "Diversity control: avoid_redundant_parallel_exploration",
+        "Assessment: embedding_proximity 0.717; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-7ede83254dda",
+      "target": "hyp-37f693681af3",
+      "similarity": 0.678,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 0.678 (title 0.248; body 0.578); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-a745a3485880, rev-b26b48c31b4e, rev-58f20024493e; Diversity action: schedule_for_cluster_coverage",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-f17fb027c48e",
+        "rev-fa282f50ba96",
+        "rev-882cec90880a",
+        "rev-a745a3485880",
+        "rev-b26b48c31b4e",
+        "rev-58f20024493e"
+      ],
+      "deduplication_action": "",
+      "diversity_action": "schedule_for_cluster_coverage",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.248; body 0.578; selected 0.678",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=none",
+        "Turn 3 review context: rev-f17fb027c48e, rev-fa282f50ba96, rev-882cec90880a, rev-a745a3485880, rev-b26b48c31b4e, rev-58f20024493e",
+        "Deduplication control: none",
+        "Diversity control: schedule_for_cluster_coverage",
+        "Assessment: embedding_proximity 0.678; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-0ce33906d941",
+      "target": "hyp-ad89e7391f4c",
+      "similarity": 0.637,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 0.637 (title 0.256; body 0.537); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-d5203fe1fd95, rev-81f01f5db397, rev-f3f3f2a3c015, rev-2158c57de762, rev-dbcf272b1dcd, rev-c18f65c7a3c7; Diversity action: schedule_for_cluster_coverage",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-d5203fe1fd95",
+        "rev-81f01f5db397",
+        "rev-f3f3f2a3c015",
+        "rev-2158c57de762",
+        "rev-dbcf272b1dcd",
+        "rev-c18f65c7a3c7"
+      ],
+      "deduplication_action": "",
+      "diversity_action": "schedule_for_cluster_coverage",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.256; body 0.537; selected 0.637",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=none",
+        "Turn 3 review context: rev-d5203fe1fd95, rev-81f01f5db397, rev-f3f3f2a3c015, rev-2158c57de762, rev-dbcf272b1dcd, rev-c18f65c7a3c7",
+        "Deduplication control: none",
+        "Diversity control: schedule_for_cluster_coverage",
+        "Assessment: embedding_proximity 0.637; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-b0df74561466",
+      "target": "hyp-ad89e7391f4c",
+      "similarity": 0.637,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 0.637 (title 0.256; body 0.537); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74, rev-2158c57de762, rev-dbcf272b1dcd, rev-c18f65c7a3c7; Diversity action: schedule_for_cluster_coverage",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-713d0c0ae792",
+        "rev-db3083d8ed21",
+        "rev-6469cd227a74",
+        "rev-2158c57de762",
+        "rev-dbcf272b1dcd",
+        "rev-c18f65c7a3c7"
+      ],
+      "deduplication_action": "",
+      "diversity_action": "schedule_for_cluster_coverage",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.256; body 0.537; selected 0.637",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=none",
+        "Turn 3 review context: rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74, rev-2158c57de762, rev-dbcf272b1dcd, rev-c18f65c7a3c7",
+        "Deduplication control: none",
+        "Diversity control: schedule_for_cluster_coverage",
+        "Assessment: embedding_proximity 0.637; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-0ce33906d941",
+      "target": "hyp-37f693681af3",
+      "similarity": 0.592,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 0.592 (title 0.268; body 0.492); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-d5203fe1fd95, rev-81f01f5db397, rev-f3f3f2a3c015, rev-a745a3485880, rev-b26b48c31b4e, rev-58f20024493e; Diversity action: schedule_for_cluster_coverage",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-d5203fe1fd95",
+        "rev-81f01f5db397",
+        "rev-f3f3f2a3c015",
+        "rev-a745a3485880",
+        "rev-b26b48c31b4e",
+        "rev-58f20024493e"
+      ],
+      "deduplication_action": "",
+      "diversity_action": "schedule_for_cluster_coverage",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.268; body 0.492; selected 0.592",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=none",
+        "Turn 3 review context: rev-d5203fe1fd95, rev-81f01f5db397, rev-f3f3f2a3c015, rev-a745a3485880, rev-b26b48c31b4e, rev-58f20024493e",
+        "Deduplication control: none",
+        "Diversity control: schedule_for_cluster_coverage",
+        "Assessment: embedding_proximity 0.592; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-37f693681af3",
+      "target": "hyp-b0df74561466",
+      "similarity": 0.592,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 0.592 (title 0.268; body 0.492); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-a745a3485880, rev-b26b48c31b4e, rev-58f20024493e, rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74; Diversity action: schedule_for_cluster_coverage",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-a745a3485880",
+        "rev-b26b48c31b4e",
+        "rev-58f20024493e",
+        "rev-713d0c0ae792",
+        "rev-db3083d8ed21",
+        "rev-6469cd227a74"
+      ],
+      "deduplication_action": "",
+      "diversity_action": "schedule_for_cluster_coverage",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.268; body 0.492; selected 0.592",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=none",
+        "Turn 3 review context: rev-a745a3485880, rev-b26b48c31b4e, rev-58f20024493e, rev-713d0c0ae792, rev-db3083d8ed21, rev-6469cd227a74",
+        "Deduplication control: none",
+        "Diversity control: schedule_for_cluster_coverage",
+        "Assessment: embedding_proximity 0.592; evidence bonus 0.100."
+      ]
+    }
+  ],
+  "benchmark_results": [],
+  "capability_evaluations": [],
+  "prospective_evaluations": [],
+  "scaling_curve": [],
+  "elo_trajectory": [
+    {
+      "cycle": 1,
+      "match_index": 0,
+      "match_id": "match-e4d16838a1cb",
+      "best_elo": 1216.0,
+      "top_avg_elo": 1200.0,
+      "active_count": 4
+    },
+    {
+      "cycle": 1,
+      "match_index": 1,
+      "match_id": "match-bee35928bfb5",
+      "best_elo": 1200.0,
+      "top_avg_elo": 1196.0,
+      "active_count": 4
+    }
+  ],
+  "elo_concordance": [],
+  "safety_evaluations": [],
+  "feedback_loop_evaluations": [],
+  "research_output_artifacts": [
+    {
+      "id": "output-d5f7953bb155",
+      "output_type": "publication_brief",
+      "title": "Publication brief: Assumption audit before repo mutation",
+      "summary": "Paper-style summary for Assumption audit before repo mutation.",
+      "sections": {
+        "abstract": "A pre-edit assumption audit that names call-path, invariant, and test-scope assumptions will reduce bad coding-agent patches.",
+        "contribution": "Assumption decomposition translates the paper's decomposition/debate behavior into an auditable coding-agent workflow. Proximity synthesis from hyp-b0df74561466: A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes. (similarity 0.857; method embedding_proximity). Proximity synthesis from hyp-757ee3d679d0: A pre-edit assumption audit that names call-path, invariant, and test-scope assumptions will reduce bad coding-agent patches. A simplified variant should reduce cost and make evaluation easier. (similarity 1.000; method embedding_proximity).",
+        "methods": "Run a repo-repair benchmark with and without: Assumption audit before repo mutation.",
+        "evaluation": "Measure pass_rate, regression_count, tool_calls, wall_time, cost; success condition: Candidate reduces regressions without unacceptable wall-time or cost increase.",
+        "limitations": "benchmark deltas; repo-specific failure examples"
+      },
+      "related_hypothesis_ids": [
+        "hyp-7ede83254dda"
+      ],
+      "contact_targets": [],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ]
+    },
+    {
+      "id": "output-0fdfd3a09396",
+      "output_type": "grant_brief",
+      "title": "Grant brief: Assumption audit before repo mutation",
+      "summary": "Grant-style aims and evaluation plan for Find testable ideas to improve LLM coding agents.",
+      "sections": {
+        "specific_aims": "critic loops; evaluation design; memory freshness",
+        "significance": "Assumption decomposition translates the paper's decomposition/debate behavior into an auditable coding-agent workflow. Proximity synthesis from hyp-b0df74561466: A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes. (similarity 0.857; method embedding_proximity). Proximity synthesis from hyp-757ee3d679d0: A pre-edit assumption audit that names call-path, invariant, and test-scope assumptions will reduce bad coding-agent patches. A simplified variant should reduce cost and make evaluation easier. (similarity 1.000; method embedding_proximity).",
+        "approach": "Run a repo-repair benchmark with and without: Assumption audit before repo mutation.",
+        "milestones": "Prototype the workflow, run benchmark comparison, and audit regressions.",
+        "evaluation": "Primary metrics: pass_rate, regression_count, tool_calls, wall_time, cost."
+      },
+      "related_hypothesis_ids": [
+        "hyp-7ede83254dda",
+        "hyp-37f693681af3"
+      ],
+      "contact_targets": [
+        "Benchmark owner or maintainer for pass_rate, regression_count, tool_calls, wall_time, cost",
+        "Practitioner reviewer for ai_llm_code workflows",
+        "Repository maintainer for implementing Assumption audit before repo mutation",
+        "Owner of cited evidence or benchmark artifacts"
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ]
+    },
+    {
+      "id": "output-5f4d18986ee1",
+      "output_type": "contact_suggestions",
+      "title": "Contact suggestions: Assumption audit before repo mutation",
+      "summary": "Suggested human or project contacts for external validation and collaboration.",
+      "sections": {
+        "validation_targets": "Benchmark owner or maintainer for pass_rate, regression_count, tool_calls, wall_time, cost; Practitioner reviewer for ai_llm_code workflows; Repository maintainer for implementing Assumption audit before repo mutation; Owner of cited evidence or benchmark artifacts",
+        "reason": "The paper's co-scientist loop expects human expert selection and external validation.",
+        "request": "Ask contacts to review novelty, benchmark fit, implementation feasibility, and safety boundaries."
+      },
+      "related_hypothesis_ids": [
+        "hyp-7ede83254dda",
+        "hyp-37f693681af3"
+      ],
+      "contact_targets": [
+        "Benchmark owner or maintainer for pass_rate, regression_count, tool_calls, wall_time, cost",
+        "Practitioner reviewer for ai_llm_code workflows",
+        "Repository maintainer for implementing Assumption audit before repo mutation",
+        "Owner of cited evidence or benchmark artifacts"
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ]
+    }
+  ],
+  "meta_reviews": [
+    {
+      "id": "meta-8da0940a0eac",
+      "common_weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_concerns": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "missing_evidence": [
+        "benchmark deltas",
+        "repo-specific failure examples"
+      ],
+      "promising_directions": [
+        "critic loops",
+        "evaluation design",
+        "memory freshness",
+        "tool-use scheduling"
+      ],
+      "prompt_feedback": [
+        "Require every hypothesis to name an experiment and metric.",
+        "Prefer ideas with explicit assumptions and audit boundaries.",
+        "Label Elo as proxy auto-evaluation rather than ground truth."
+      ],
+      "agent_feedback": {
+        "generation": [
+          "Prefer hypotheses that cite local evidence and name the smallest useful experiment."
+        ],
+        "reflection": [
+          "Separate initial plausibility checks from grounded contradiction checks."
+        ],
+        "ranking": [
+          "Treat Elo as a scheduling signal until benchmark outcomes calibrate it."
+        ]
+      },
+      "evidence_refs": []
+    }
+  ],
+  "context_snapshots": [
+    {
+      "id": "ctx-3496d5d94b3c",
+      "cycle": 1,
+      "generated_total": 6,
+      "accepted_total": 2,
+      "review_total": 18,
+      "match_total": 2,
+      "meta_review_total": 1,
+      "top_hypothesis_ids": [
+        "hyp-7ede83254dda",
+        "hyp-37f693681af3"
+      ],
+      "origin_counts": {
+        "generation:assumption_decomposition": 1,
+        "generation:research_expansion_from_meta_review": 1,
+        "generation": 2,
+        "evolution": 2
+      },
+      "status_counts": {
+        "accepted": 2,
+        "merged_duplicate": 4
+      },
+      "proximity_edge_count": 15,
+      "scheduler_weights": {
+        "evolution": 0.75,
+        "generation": 1.0,
+        "meta_review": 0.75,
+        "proximity": 0.75,
+        "ranking": 1.5,
+        "reflection": 1.0
+      },
+      "next_actions": [
+        "run_proximity_guided_tournament_matches",
+        "reuse_meta_review_feedback_in_next_cycle"
+      ],
+      "termination_reason": ""
+    }
+  ],
+  "safety": {
+    "allowed": true,
+    "reason": "Objective is allowed for local research planning.",
+    "flags": []
+  },
+  "research_overview": {
+    "id": "overview-603131bdff46",
+    "summary": "Cycle 1 overview for Find testable ideas to improve LLM coding agents: current leaders emphasize Assumption audit before repo mutation, Tournament-ranked prompt variants.",
+    "top_hypothesis_ids": [
+      "hyp-7ede83254dda",
+      "hyp-37f693681af3"
+    ],
+    "promising_directions": [
+      "critic loops",
+      "evaluation design",
+      "memory freshness",
+      "tool-use scheduling"
+    ],
+    "next_experiments": [
+      "Test Assumption audit before repo mutation with metrics: pass_rate, regression_count, tool_calls, wall_time, cost",
+      "Test Tournament-ranked prompt variants with metrics: pass_rate, regression_count, tool_calls, wall_time, cost"
+    ],
+    "limitations": [
+      "Elo is an internal proxy until calibrated against benchmark or human outcomes.",
+      "benchmark deltas",
+      "repo-specific failure examples"
+    ],
+    "generated_by": "meta_review"
+  },
+  "user_feedback": [],
+  "goal_revisions": [],
+  "agent_traces": [
+    {
+      "id": "trace-743835f9c5e6",
+      "cycle": 1,
+      "agent": "generation",
+      "action": "paper_seeded_idea_generation",
+      "task_id": "task-6a3c215ee577",
+      "input_refs": [
+        "goal-7bb2ef499a12",
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6",
+        "ev-6181c6c4a112",
+        "ev-984ceed5f1c2"
+      ],
+      "output_refs": [
+        "hyp-b0df74561466",
+        "hyp-37f693681af3"
+      ],
+      "status": "completed",
+      "notes": "Generated 2 hypotheses with paper_seeded_idea_generation; allocated 2 slot(s). Allocation reason: underrepresented: no active hypotheses.",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "mode=paper_seeded_idea_generation",
+        "allocated_slots=2",
+        "generated=2"
+      ],
+      "transcript_ref": "transcripts/generation/task-6a3c215ee577.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-86ed93d46b46",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "generation",
+          "action": "paper_seeded_idea_generation",
+          "task_id": "task-6a3c215ee577",
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-94887eb9a4ae",
+      "cycle": 1,
+      "agent": "generation",
+      "action": "assumption_decomposition",
+      "task_id": "task-6a3c215ee577",
+      "input_refs": [
+        "goal-7bb2ef499a12",
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6",
+        "ev-6181c6c4a112",
+        "ev-984ceed5f1c2"
+      ],
+      "output_refs": [
+        "hyp-7ede83254dda"
+      ],
+      "status": "completed",
+      "notes": "Generated 1 hypotheses with assumption_decomposition; allocated 1 slot(s). Allocation reason: underrepresented: no active hypotheses.",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "mode=assumption_decomposition",
+        "allocated_slots=1",
+        "generated=1"
+      ],
+      "transcript_ref": "transcripts/generation/task-6a3c215ee577.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-74537e28a815",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "generation",
+          "action": "assumption_decomposition",
+          "task_id": "task-6a3c215ee577",
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-9758cefe1b3c",
+      "cycle": 1,
+      "agent": "generation",
+      "action": "research_expansion_from_meta_review",
+      "task_id": "task-6a3c215ee577",
+      "input_refs": [
+        "goal-7bb2ef499a12",
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6",
+        "ev-6181c6c4a112",
+        "ev-984ceed5f1c2"
+      ],
+      "output_refs": [
+        "hyp-0ce33906d941"
+      ],
+      "status": "completed",
+      "notes": "Generated 1 hypotheses with research_expansion_from_meta_review; allocated 1 slot(s). Allocation reason: underrepresented: no active hypotheses.",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "mode=research_expansion_from_meta_review",
+        "allocated_slots=1",
+        "generated=1"
+      ],
+      "transcript_ref": "transcripts/generation/task-6a3c215ee577.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-9ea909ca0bfc",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "generation",
+          "action": "research_expansion_from_meta_review",
+          "task_id": "task-6a3c215ee577",
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-0df6930d91e6",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "initial_review",
+      "task_id": "task-21163bc4d4b9",
+      "input_refs": [
+        "hyp-7ede83254dda"
+      ],
+      "output_refs": [
+        "rev-f17fb027c48e"
+      ],
+      "status": "completed",
+      "notes": "Ran initial_review for 1 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=initial_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-21163bc4d4b9.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-c4ae0c6472fe",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "initial_review",
+          "task_id": "task-21163bc4d4b9",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-67aeb5d7cd86",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "safety_review",
+      "task_id": "task-21163bc4d4b9",
+      "input_refs": [
+        "hyp-7ede83254dda"
+      ],
+      "output_refs": [
+        "rev-fa282f50ba96"
+      ],
+      "status": "completed",
+      "notes": "Ran safety_review for 1 hypotheses.",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=safety_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-21163bc4d4b9.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-9e598b2ce6b0",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "recurrent_tournament_review",
+      "task_id": "task-21163bc4d4b9",
+      "input_refs": [
+        "hyp-7ede83254dda"
+      ],
+      "output_refs": [
+        "rev-882cec90880a"
+      ],
+      "status": "completed",
+      "notes": "Ran recurrent_tournament_review for 1 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=recurrent_tournament_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-21163bc4d4b9.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-e874aa1639ca",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "recurrent_tournament_review",
+          "task_id": "task-21163bc4d4b9",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-6e20e556d6de",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "initial_review",
+      "task_id": "task-31e2d8e5895b",
+      "input_refs": [
+        "hyp-0ce33906d941"
+      ],
+      "output_refs": [
+        "rev-d5203fe1fd95"
+      ],
+      "status": "completed",
+      "notes": "Ran initial_review for 1 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=initial_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-31e2d8e5895b.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-bdc45c688d08",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "initial_review",
+          "task_id": "task-31e2d8e5895b",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-bbd4824404b2",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "safety_review",
+      "task_id": "task-31e2d8e5895b",
+      "input_refs": [
+        "hyp-0ce33906d941"
+      ],
+      "output_refs": [
+        "rev-81f01f5db397"
+      ],
+      "status": "completed",
+      "notes": "Ran safety_review for 1 hypotheses.",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=safety_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-31e2d8e5895b.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-0875cfe97bde",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "recurrent_tournament_review",
+      "task_id": "task-31e2d8e5895b",
+      "input_refs": [
+        "hyp-0ce33906d941"
+      ],
+      "output_refs": [
+        "rev-f3f3f2a3c015"
+      ],
+      "status": "completed",
+      "notes": "Ran recurrent_tournament_review for 1 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=recurrent_tournament_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-31e2d8e5895b.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-4a1a5927b033",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "recurrent_tournament_review",
+          "task_id": "task-31e2d8e5895b",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-a23807035957",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "initial_review",
+      "task_id": "task-c91160f5d1d0",
+      "input_refs": [
+        "hyp-37f693681af3"
+      ],
+      "output_refs": [
+        "rev-a745a3485880"
+      ],
+      "status": "completed",
+      "notes": "Ran initial_review for 1 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=initial_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-c91160f5d1d0.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-31899d59c33d",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "initial_review",
+          "task_id": "task-c91160f5d1d0",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-29220da98eea",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "safety_review",
+      "task_id": "task-c91160f5d1d0",
+      "input_refs": [
+        "hyp-37f693681af3"
+      ],
+      "output_refs": [
+        "rev-b26b48c31b4e"
+      ],
+      "status": "completed",
+      "notes": "Ran safety_review for 1 hypotheses.",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=safety_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-c91160f5d1d0.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-2d8f76b2ce42",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "recurrent_tournament_review",
+      "task_id": "task-c91160f5d1d0",
+      "input_refs": [
+        "hyp-37f693681af3"
+      ],
+      "output_refs": [
+        "rev-58f20024493e"
+      ],
+      "status": "completed",
+      "notes": "Ran recurrent_tournament_review for 1 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=recurrent_tournament_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-c91160f5d1d0.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-63a56ab98c13",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "recurrent_tournament_review",
+          "task_id": "task-c91160f5d1d0",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-da58285847b8",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "initial_review",
+      "task_id": "task-da8843a2d0d2",
+      "input_refs": [
+        "hyp-b0df74561466"
+      ],
+      "output_refs": [
+        "rev-713d0c0ae792"
+      ],
+      "status": "completed",
+      "notes": "Ran initial_review for 1 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=initial_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-da8843a2d0d2.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-2fabdf2221b2",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "initial_review",
+          "task_id": "task-da8843a2d0d2",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-3ee31f232d97",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "safety_review",
+      "task_id": "task-da8843a2d0d2",
+      "input_refs": [
+        "hyp-b0df74561466"
+      ],
+      "output_refs": [
+        "rev-db3083d8ed21"
+      ],
+      "status": "completed",
+      "notes": "Ran safety_review for 1 hypotheses.",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=safety_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-da8843a2d0d2.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-079c8ac490fc",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "recurrent_tournament_review",
+      "task_id": "task-da8843a2d0d2",
+      "input_refs": [
+        "hyp-b0df74561466"
+      ],
+      "output_refs": [
+        "rev-6469cd227a74"
+      ],
+      "status": "completed",
+      "notes": "Ran recurrent_tournament_review for 1 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=recurrent_tournament_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-da8843a2d0d2.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-2e53140febbc",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "recurrent_tournament_review",
+          "task_id": "task-da8843a2d0d2",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-1df4f380ac75",
+      "cycle": 1,
+      "agent": "ranking",
+      "action": "rank_tiered_debate_pairwise_compare",
+      "task_id": "task-f3c9cda135c2",
+      "input_refs": [
+        "hyp-7ede83254dda",
+        "hyp-0ce33906d941",
+        "hyp-37f693681af3",
+        "hyp-b0df74561466"
+      ],
+      "output_refs": [
+        "match-e4d16838a1cb",
+        "match-bee35928bfb5"
+      ],
+      "status": "completed",
+      "notes": "Ran 2 rank-tiered debate matches (2 multi-round, 0 single-turn).",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "comparison_label=rank-tiered debate",
+        "match_count=2"
+      ],
+      "transcript_ref": "transcripts/ranking/task-f3c9cda135c2.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-465f70f40a5d",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "ranking",
+          "action": "rank_tiered_debate_pairwise_compare",
+          "task_id": "task-f3c9cda135c2",
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-1597a4dd1b11",
+      "cycle": 1,
+      "agent": "meta_review",
+      "action": "summarize",
+      "task_id": "task-5cecf699c7c9",
+      "input_refs": [
+        "rev-f17fb027c48e",
+        "rev-fa282f50ba96",
+        "rev-882cec90880a",
+        "rev-d5203fe1fd95",
+        "rev-81f01f5db397",
+        "rev-f3f3f2a3c015",
+        "rev-a745a3485880",
+        "rev-b26b48c31b4e",
+        "rev-58f20024493e",
+        "rev-713d0c0ae792",
+        "rev-db3083d8ed21",
+        "rev-6469cd227a74",
+        "match-e4d16838a1cb",
+        "match-bee35928bfb5"
+      ],
+      "output_refs": [
+        "meta-8da0940a0eac"
+      ],
+      "status": "completed",
+      "notes": "Summarized 12 reviews and 2 matches.",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_count=12",
+        "match_count=2"
+      ],
+      "transcript_ref": "transcripts/meta_review/task-5cecf699c7c9.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-69863dbdc996",
+      "cycle": 1,
+      "agent": "proximity",
+      "action": "compute_embedding_proximity_edges",
+      "task_id": "task-c5f80bc46ffd",
+      "input_refs": [
+        "hyp-7ede83254dda",
+        "hyp-0ce33906d941",
+        "hyp-37f693681af3",
+        "hyp-b0df74561466"
+      ],
+      "output_refs": [
+        "hyp-0ce33906d941:hyp-b0df74561466",
+        "hyp-0ce33906d941:hyp-7ede83254dda",
+        "hyp-7ede83254dda:hyp-b0df74561466",
+        "hyp-37f693681af3:hyp-7ede83254dda",
+        "hyp-0ce33906d941:hyp-37f693681af3",
+        "hyp-37f693681af3:hyp-b0df74561466"
+      ],
+      "status": "completed",
+      "notes": "Computed 6 embedding_proximity proximity edges. Deduplicated 2 hypotheses for active scheduling.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "method=embedding_proximity",
+        "edge_count=6",
+        "deduplicated=2"
+      ],
+      "transcript_ref": "transcripts/proximity/task-c5f80bc46ffd.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-32a787ab4264",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "proximity",
+          "action": "compute_embedding_proximity_edges",
+          "task_id": "task-c5f80bc46ffd",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-a6cf5f7586fd",
+      "cycle": 1,
+      "agent": "evolution",
+      "action": "simplification",
+      "task_id": "task-62f4e474aff5",
+      "input_refs": [
+        "hyp-7ede83254dda",
+        "hyp-37f693681af3"
+      ],
+      "output_refs": [
+        "hyp-757ee3d679d0",
+        "hyp-ad89e7391f4c"
+      ],
+      "status": "completed",
+      "notes": "Evolved 2 child hypotheses from current leaders.",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "strategy=simplification",
+        "leader_count=2",
+        "child_count=2"
+      ],
+      "transcript_ref": "transcripts/evolution/task-62f4e474aff5.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-fa25e78f0810",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "evolution",
+          "action": "simplification",
+          "task_id": "task-62f4e474aff5",
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-bca2dafdbaa7",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "initial_review",
+      "task_id": "task-62f4e474aff5",
+      "input_refs": [
+        "hyp-757ee3d679d0",
+        "hyp-ad89e7391f4c"
+      ],
+      "output_refs": [
+        "rev-caee5d6a7c58",
+        "rev-2158c57de762"
+      ],
+      "status": "completed",
+      "notes": "Ran initial_review for 2 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=initial_review",
+        "hypothesis_count=2",
+        "review_count=2"
+      ],
+      "transcript_ref": "transcripts/reflection/task-62f4e474aff5.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-6906f981714a",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "initial_review",
+          "task_id": "task-62f4e474aff5",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-348320077eab",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "safety_review",
+      "task_id": "task-62f4e474aff5",
+      "input_refs": [
+        "hyp-757ee3d679d0",
+        "hyp-ad89e7391f4c"
+      ],
+      "output_refs": [
+        "rev-1e6c34741a9a",
+        "rev-dbcf272b1dcd"
+      ],
+      "status": "completed",
+      "notes": "Ran safety_review for 2 hypotheses.",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=safety_review",
+        "hypothesis_count=2",
+        "review_count=2"
+      ],
+      "transcript_ref": "transcripts/reflection/task-62f4e474aff5.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-2c93ff9db010",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "recurrent_tournament_review",
+      "task_id": "task-62f4e474aff5",
+      "input_refs": [
+        "hyp-757ee3d679d0",
+        "hyp-ad89e7391f4c"
+      ],
+      "output_refs": [
+        "rev-50027cab6743",
+        "rev-c18f65c7a3c7"
+      ],
+      "status": "completed",
+      "notes": "Ran recurrent_tournament_review for 2 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=recurrent_tournament_review",
+        "hypothesis_count=2",
+        "review_count=2"
+      ],
+      "transcript_ref": "transcripts/reflection/task-62f4e474aff5.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-4ebdaf524bd4",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "recurrent_tournament_review",
+          "task_id": "task-62f4e474aff5",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-a4b62aa58396",
+      "cycle": 1,
+      "agent": "overview",
+      "action": "render_research_overview",
+      "task_id": "task-ab279045b911",
+      "input_refs": [
+        "meta-8da0940a0eac",
+        "hyp-7ede83254dda",
+        "hyp-37f693681af3"
+      ],
+      "output_refs": [
+        "overview-603131bdff46"
+      ],
+      "status": "completed",
+      "notes": "Rendered first-class research overview for human review.",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "top_hypothesis_count=2",
+        "promising_direction_count=4"
+      ],
+      "transcript_ref": "transcripts/overview/task-ab279045b911.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-768697d92d4b",
+      "cycle": 1,
+      "agent": "research_outputs",
+      "action": "render_publication_grant_contact_artifacts",
+      "task_id": "task-3bd363bf299f",
+      "input_refs": [
+        "meta-8da0940a0eac",
+        "hyp-7ede83254dda",
+        "hyp-37f693681af3"
+      ],
+      "output_refs": [
+        "output-d5f7953bb155",
+        "output-0fdfd3a09396",
+        "output-5f4d18986ee1"
+      ],
+      "status": "completed",
+      "notes": "Rendered publication brief, grant brief, and contact suggestions for human review.",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "artifact_count=3",
+        "output_types=publication_brief,grant_brief,contact_suggestions"
+      ],
+      "transcript_ref": "transcripts/research_outputs/task-3bd363bf299f.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-4f62ed955feb",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "research_outputs",
+          "action": "render_publication_grant_contact_artifacts",
+          "task_id": "task-3bd363bf299f",
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "status": "ok"
+        }
+      ]
+    }
+  ],
+  "retrieval_memory": [],
+  "tool_budget": null,
+  "agent_tool_calls": [],
+  "task_queue": [
+    {
+      "id": "task-6a3c215ee577",
+      "kind": "generate",
+      "priority": 1.0,
+      "payload": {
+        "cycle": 1,
+        "modes": [
+          "paper_seeded_idea_generation",
+          "assumption_decomposition",
+          "research_expansion_from_meta_review"
+        ],
+        "generation_allocations": [
+          {
+            "mode": "paper_seeded_idea_generation",
+            "limit": 2,
+            "reason": "underrepresented: no active hypotheses"
+          },
+          {
+            "mode": "assumption_decomposition",
+            "limit": 1,
+            "reason": "underrepresented: no active hypotheses"
+          },
+          {
+            "mode": "research_expansion_from_meta_review",
+            "limit": 1,
+            "reason": "underrepresented: no active hypotheses"
+          }
+        ],
+        "agent_feedback": []
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "hyp-b0df74561466",
+        "hyp-37f693681af3",
+        "hyp-7ede83254dda",
+        "hyp-0ce33906d941"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 1.0,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:generation",
+            "resource:default"
+          ]
+        },
+        "result_refs": [
+          "hyp-b0df74561466",
+          "hyp-37f693681af3",
+          "hyp-7ede83254dda",
+          "hyp-0ce33906d941"
+        ]
+      },
+      "depends_on": [],
+      "resource_class": "default"
+    },
+    {
+      "id": "task-da8843a2d0d2",
+      "kind": "review",
+      "priority": 1.0,
+      "payload": {
+        "cycle": 1,
+        "packet_type": "deterministic_review",
+        "required_provider": "deterministic",
+        "required_model": "",
+        "requested_max_tokens": 4096,
+        "use_grounded": false,
+        "safety_policies": [],
+        "review_types": [
+          "initial_review",
+          "safety_review",
+          "recurrent_tournament_review"
+        ],
+        "hypothesis_id": "hyp-b0df74561466",
+        "hypothesis_ids": [
+          "hyp-b0df74561466"
+        ],
+        "goal": {
+          "id": "goal-7bb2ef499a12",
+          "objective": "Find testable ideas to improve LLM coding agents",
+          "domain": "ai_llm_code",
+          "preferences": [
+            "aligned with the research objective",
+            "plausible from code, benchmark, or literature evidence",
+            "novel or a novel combination of known techniques",
+            "testable with a concrete experiment",
+            "safe and auditable"
+          ],
+          "constraints": [
+            "do not autonomously modify source code",
+            "do not claim measured improvement without benchmark evidence"
+          ],
+          "metrics": [
+            "pass_rate",
+            "regression_count",
+            "tool_calls",
+            "wall_time",
+            "cost"
+          ],
+          "safety_notes": [
+            "human review required before applying code changes"
+          ],
+          "allowed_sources": [],
+          "allowed_tools": [],
+          "output_formats": [],
+          "termination_criteria": []
+        },
+        "hypothesis": {
+          "id": "hyp-b0df74561466",
+          "title": "Critic-before-edit assumption decomposition",
+          "claim": "A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes.",
+          "rationale": "False premises about call paths, invariants, and test scope are common causes of bad edits.",
+          "assumptions": [
+            "The agent can state assumptions before editing.",
+            "A critic can catch false premises cheaply."
+          ],
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "test_plan": {
+            "experiment": "Compare baseline coding-agent workflow against: Critic-before-edit assumption decomposition.",
+            "metrics": [
+              "pass_rate",
+              "regression_count",
+              "tool_calls",
+              "wall_time",
+              "cost"
+            ],
+            "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+          },
+          "risks": [
+            "critic false negatives",
+            "extra latency"
+          ],
+          "origin": "generation",
+          "parent_ids": [],
+          "generation_trace": [
+            "Turn 1 objective framing: Find testable ideas to improve LLM coding agents",
+            "Turn 2 evidence scan: ev-ee94be35f2c4, ev-8bf0203ede0c, ev-0e1cefb869f6",
+            "Turn 3 proposal synthesis: Critic-before-edit assumption decomposition",
+            "Generation assessment: origin=generation; evidence refs=3; assumptions=2."
+          ],
+          "evolution_trace": [],
+          "merged_into": "",
+          "proximity_notes": [],
+          "elo": 1200.0,
+          "status": "candidate"
+        },
+        "evidence": [
+          {
+            "id": "ev-ee94be35f2c4",
+            "kind": "paper_architecture",
+            "source": "2502.18864.pdf",
+            "content": "The AI co-scientist uses a generate, debate, and evolve approach to hypothesis generation.",
+            "notes": "Core loop to translate into AI/LLM improvement research.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-8bf0203ede0c",
+            "kind": "paper_architecture",
+            "source": "2502.18864.pdf",
+            "content": "A supervisor coordinates specialized generation, reflection, ranking, proximity, evolution, and meta-review agents.",
+            "notes": "Agent decomposition for the Code Scientist MVP.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-0e1cefb869f6",
+            "kind": "paper_plan_configuration",
+            "source": "2502.18864.pdf",
+            "content": "The system parses a natural language research goal into a research plan configuration with preferences, constraints, and evaluation criteria.",
+            "notes": "Code Scientist should persist the derived plan instead of keeping it implicit.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-6181c6c4a112",
+            "kind": "paper_evaluation",
+            "source": "2502.18864.pdf",
+            "content": "The ranking agent uses an Elo-based tournament to prioritize hypotheses, while noting that Elo is an auto-evaluation proxy.",
+            "notes": "Ranking should be auditable and labeled as proxy evaluation.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-f1b5c28ba36b",
+            "kind": "paper_limitations",
+            "source": "2502.18864.pdf",
+            "content": "The paper warns that literature search can miss prior work, LLMs can hallucinate, and auto-evaluation metrics need broader validation.",
+            "notes": "Reports must separate generated hypotheses from verified improvements.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-5fa1f4c2235d",
+            "kind": "paper_safety",
+            "source": "2502.18864.pdf",
+            "content": "The system reviews research goals and generated hypotheses for safety and keeps comprehensive logs for auditability.",
+            "notes": "Safety gates are required before ranking and reporting ideas.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-771549df53df",
+            "kind": "paper_context_memory",
+            "source": "2502.18864.pdf",
+            "content": "The supervisor periodically writes context memory containing system state, progress statistics, and feedback for later computation.",
+            "notes": "Runs need restartable progress snapshots and scheduler statistics.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-984ceed5f1c2",
+            "kind": "paper_proximity",
+            "source": "2502.18864.pdf",
+            "content": "The proximity agent builds a graph of related hypotheses to support clustering, de-duplication, diverse exploration, and tournament scheduling.",
+            "notes": "Similarity edges should be stored and used when choosing pairwise matches.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-be6af9a17fff",
+            "kind": "paper_feedback_loop",
+            "source": "2502.18864.pdf",
+            "content": "Meta-review synthesizes recurring critique patterns and appends feedback to future agent prompts without model retraining.",
+            "notes": "Self-improvement should start as externalized prompt and process feedback.",
+            "metadata": {}
+          }
+        ],
+        "output_path": "worker-results/review-1-hyp-b0df74561466.json",
+        "reflection_feedback": [],
+        "safety_feedback": [],
+        "matches": [],
+        "prior_reviews": [],
+        "packet_digest": "d99af7f226f982b7527d80e96f36c2b9e05bc9cf7c764e1627dee9e9b9cd9b0f"
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "rev-713d0c0ae792",
+        "rev-db3083d8ed21",
+        "rev-6469cd227a74"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 1.0,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:reflection",
+            "dependencies_satisfied:1",
+            "resource:review"
+          ]
+        },
+        "result_refs": [
+          "rev-713d0c0ae792",
+          "rev-db3083d8ed21",
+          "rev-6469cd227a74"
+        ]
+      },
+      "depends_on": [
+        "task-6a3c215ee577"
+      ],
+      "resource_class": "review"
+    },
+    {
+      "id": "task-c91160f5d1d0",
+      "kind": "review",
+      "priority": 1.0,
+      "payload": {
+        "cycle": 1,
+        "packet_type": "deterministic_review",
+        "required_provider": "deterministic",
+        "required_model": "",
+        "requested_max_tokens": 4096,
+        "use_grounded": false,
+        "safety_policies": [],
+        "review_types": [
+          "initial_review",
+          "safety_review",
+          "recurrent_tournament_review"
+        ],
+        "hypothesis_id": "hyp-37f693681af3",
+        "hypothesis_ids": [
+          "hyp-37f693681af3"
+        ],
+        "goal": {
+          "id": "goal-7bb2ef499a12",
+          "objective": "Find testable ideas to improve LLM coding agents",
+          "domain": "ai_llm_code",
+          "preferences": [
+            "aligned with the research objective",
+            "plausible from code, benchmark, or literature evidence",
+            "novel or a novel combination of known techniques",
+            "testable with a concrete experiment",
+            "safe and auditable"
+          ],
+          "constraints": [
+            "do not autonomously modify source code",
+            "do not claim measured improvement without benchmark evidence"
+          ],
+          "metrics": [
+            "pass_rate",
+            "regression_count",
+            "tool_calls",
+            "wall_time",
+            "cost"
+          ],
+          "safety_notes": [
+            "human review required before applying code changes"
+          ],
+          "allowed_sources": [],
+          "allowed_tools": [],
+          "output_formats": [],
+          "termination_criteria": []
+        },
+        "hypothesis": {
+          "id": "hyp-37f693681af3",
+          "title": "Tournament-ranked prompt variants",
+          "claim": "Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection.",
+          "rationale": "The paper's Elo tournament can be adapted to compare prompt and workflow hypotheses.",
+          "assumptions": [
+            "Prompt variants can be evaluated on comparable tasks.",
+            "Pairwise judging is less noisy than absolute scoring."
+          ],
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "test_plan": {
+            "experiment": "Compare baseline coding-agent workflow against: Tournament-ranked prompt variants.",
+            "metrics": [
+              "pass_rate",
+              "regression_count",
+              "tool_calls",
+              "wall_time",
+              "cost"
+            ],
+            "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+          },
+          "risks": [
+            "judge bias",
+            "overfitting to benchmark tasks"
+          ],
+          "origin": "generation",
+          "parent_ids": [],
+          "generation_trace": [
+            "Turn 1 objective framing: Find testable ideas to improve LLM coding agents",
+            "Turn 2 evidence scan: ev-ee94be35f2c4, ev-8bf0203ede0c, ev-0e1cefb869f6",
+            "Turn 3 proposal synthesis: Tournament-ranked prompt variants",
+            "Generation assessment: origin=generation; evidence refs=3; assumptions=2."
+          ],
+          "evolution_trace": [],
+          "merged_into": "",
+          "proximity_notes": [],
+          "elo": 1200.0,
+          "status": "candidate"
+        },
+        "evidence": [
+          {
+            "id": "ev-ee94be35f2c4",
+            "kind": "paper_architecture",
+            "source": "2502.18864.pdf",
+            "content": "The AI co-scientist uses a generate, debate, and evolve approach to hypothesis generation.",
+            "notes": "Core loop to translate into AI/LLM improvement research.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-8bf0203ede0c",
+            "kind": "paper_architecture",
+            "source": "2502.18864.pdf",
+            "content": "A supervisor coordinates specialized generation, reflection, ranking, proximity, evolution, and meta-review agents.",
+            "notes": "Agent decomposition for the Code Scientist MVP.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-0e1cefb869f6",
+            "kind": "paper_plan_configuration",
+            "source": "2502.18864.pdf",
+            "content": "The system parses a natural language research goal into a research plan configuration with preferences, constraints, and evaluation criteria.",
+            "notes": "Code Scientist should persist the derived plan instead of keeping it implicit.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-6181c6c4a112",
+            "kind": "paper_evaluation",
+            "source": "2502.18864.pdf",
+            "content": "The ranking agent uses an Elo-based tournament to prioritize hypotheses, while noting that Elo is an auto-evaluation proxy.",
+            "notes": "Ranking should be auditable and labeled as proxy evaluation.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-984ceed5f1c2",
+            "kind": "paper_proximity",
+            "source": "2502.18864.pdf",
+            "content": "The proximity agent builds a graph of related hypotheses to support clustering, de-duplication, diverse exploration, and tournament scheduling.",
+            "notes": "Similarity edges should be stored and used when choosing pairwise matches.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-be6af9a17fff",
+            "kind": "paper_feedback_loop",
+            "source": "2502.18864.pdf",
+            "content": "Meta-review synthesizes recurring critique patterns and appends feedback to future agent prompts without model retraining.",
+            "notes": "Self-improvement should start as externalized prompt and process feedback.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-5fa1f4c2235d",
+            "kind": "paper_safety",
+            "source": "2502.18864.pdf",
+            "content": "The system reviews research goals and generated hypotheses for safety and keeps comprehensive logs for auditability.",
+            "notes": "Safety gates are required before ranking and reporting ideas.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-771549df53df",
+            "kind": "paper_context_memory",
+            "source": "2502.18864.pdf",
+            "content": "The supervisor periodically writes context memory containing system state, progress statistics, and feedback for later computation.",
+            "notes": "Runs need restartable progress snapshots and scheduler statistics.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-f1b5c28ba36b",
+            "kind": "paper_limitations",
+            "source": "2502.18864.pdf",
+            "content": "The paper warns that literature search can miss prior work, LLMs can hallucinate, and auto-evaluation metrics need broader validation.",
+            "notes": "Reports must separate generated hypotheses from verified improvements.",
+            "metadata": {}
+          }
+        ],
+        "output_path": "worker-results/review-1-hyp-37f693681af3.json",
+        "reflection_feedback": [],
+        "safety_feedback": [],
+        "matches": [],
+        "prior_reviews": [],
+        "packet_digest": "74fe9612c0bf083d85079aa859f6559d013757b0922d43e44136ef06e36652a9"
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "rev-a745a3485880",
+        "rev-b26b48c31b4e",
+        "rev-58f20024493e"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 1.0,
+          "candidate_count": 2,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:reflection",
+            "dependencies_satisfied:1",
+            "resource:review"
+          ]
+        },
+        "result_refs": [
+          "rev-a745a3485880",
+          "rev-b26b48c31b4e",
+          "rev-58f20024493e"
+        ]
+      },
+      "depends_on": [
+        "task-6a3c215ee577"
+      ],
+      "resource_class": "review"
+    },
+    {
+      "id": "task-21163bc4d4b9",
+      "kind": "review",
+      "priority": 1.0,
+      "payload": {
+        "cycle": 1,
+        "packet_type": "deterministic_review",
+        "required_provider": "deterministic",
+        "required_model": "",
+        "requested_max_tokens": 4096,
+        "use_grounded": false,
+        "safety_policies": [],
+        "review_types": [
+          "initial_review",
+          "safety_review",
+          "recurrent_tournament_review"
+        ],
+        "hypothesis_id": "hyp-7ede83254dda",
+        "hypothesis_ids": [
+          "hyp-7ede83254dda"
+        ],
+        "goal": {
+          "id": "goal-7bb2ef499a12",
+          "objective": "Find testable ideas to improve LLM coding agents",
+          "domain": "ai_llm_code",
+          "preferences": [
+            "aligned with the research objective",
+            "plausible from code, benchmark, or literature evidence",
+            "novel or a novel combination of known techniques",
+            "testable with a concrete experiment",
+            "safe and auditable"
+          ],
+          "constraints": [
+            "do not autonomously modify source code",
+            "do not claim measured improvement without benchmark evidence"
+          ],
+          "metrics": [
+            "pass_rate",
+            "regression_count",
+            "tool_calls",
+            "wall_time",
+            "cost"
+          ],
+          "safety_notes": [
+            "human review required before applying code changes"
+          ],
+          "allowed_sources": [],
+          "allowed_tools": [],
+          "output_formats": [],
+          "termination_criteria": []
+        },
+        "hypothesis": {
+          "id": "hyp-7ede83254dda",
+          "title": "Assumption audit before repo mutation",
+          "claim": "A pre-edit assumption audit that names call-path, invariant, and test-scope assumptions will reduce bad coding-agent patches.",
+          "rationale": "Assumption decomposition translates the paper's decomposition/debate behavior into an auditable coding-agent workflow.",
+          "assumptions": [
+            "The agent can enumerate concrete assumptions before editing.",
+            "A reviewer can cheaply reject false assumptions before patching."
+          ],
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "test_plan": {
+            "experiment": "Run a repo-repair benchmark with and without: Assumption audit before repo mutation.",
+            "metrics": [
+              "pass_rate",
+              "regression_count",
+              "tool_calls",
+              "wall_time",
+              "cost"
+            ],
+            "success_condition": "Candidate reduces regressions without unacceptable wall-time or cost increase."
+          },
+          "risks": [
+            "extra review latency",
+            "assumption lists may become boilerplate"
+          ],
+          "origin": "generation:assumption_decomposition",
+          "parent_ids": [],
+          "generation_trace": [
+            "Turn 1 objective framing: Find testable ideas to improve LLM coding agents",
+            "Turn 2 evidence scan: ev-ee94be35f2c4, ev-8bf0203ede0c, ev-0e1cefb869f6",
+            "Turn 3 proposal synthesis: Assumption audit before repo mutation",
+            "Generation assessment: origin=generation:assumption_decomposition; evidence refs=3; assumptions=2."
+          ],
+          "evolution_trace": [],
+          "merged_into": "",
+          "proximity_notes": [],
+          "elo": 1200.0,
+          "status": "candidate"
+        },
+        "evidence": [
+          {
+            "id": "ev-ee94be35f2c4",
+            "kind": "paper_architecture",
+            "source": "2502.18864.pdf",
+            "content": "The AI co-scientist uses a generate, debate, and evolve approach to hypothesis generation.",
+            "notes": "Core loop to translate into AI/LLM improvement research.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-8bf0203ede0c",
+            "kind": "paper_architecture",
+            "source": "2502.18864.pdf",
+            "content": "A supervisor coordinates specialized generation, reflection, ranking, proximity, evolution, and meta-review agents.",
+            "notes": "Agent decomposition for the Code Scientist MVP.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-0e1cefb869f6",
+            "kind": "paper_plan_configuration",
+            "source": "2502.18864.pdf",
+            "content": "The system parses a natural language research goal into a research plan configuration with preferences, constraints, and evaluation criteria.",
+            "notes": "Code Scientist should persist the derived plan instead of keeping it implicit.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-6181c6c4a112",
+            "kind": "paper_evaluation",
+            "source": "2502.18864.pdf",
+            "content": "The ranking agent uses an Elo-based tournament to prioritize hypotheses, while noting that Elo is an auto-evaluation proxy.",
+            "notes": "Ranking should be auditable and labeled as proxy evaluation.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-984ceed5f1c2",
+            "kind": "paper_proximity",
+            "source": "2502.18864.pdf",
+            "content": "The proximity agent builds a graph of related hypotheses to support clustering, de-duplication, diverse exploration, and tournament scheduling.",
+            "notes": "Similarity edges should be stored and used when choosing pairwise matches.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-be6af9a17fff",
+            "kind": "paper_feedback_loop",
+            "source": "2502.18864.pdf",
+            "content": "Meta-review synthesizes recurring critique patterns and appends feedback to future agent prompts without model retraining.",
+            "notes": "Self-improvement should start as externalized prompt and process feedback.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-f1b5c28ba36b",
+            "kind": "paper_limitations",
+            "source": "2502.18864.pdf",
+            "content": "The paper warns that literature search can miss prior work, LLMs can hallucinate, and auto-evaluation metrics need broader validation.",
+            "notes": "Reports must separate generated hypotheses from verified improvements.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-5fa1f4c2235d",
+            "kind": "paper_safety",
+            "source": "2502.18864.pdf",
+            "content": "The system reviews research goals and generated hypotheses for safety and keeps comprehensive logs for auditability.",
+            "notes": "Safety gates are required before ranking and reporting ideas.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-771549df53df",
+            "kind": "paper_context_memory",
+            "source": "2502.18864.pdf",
+            "content": "The supervisor periodically writes context memory containing system state, progress statistics, and feedback for later computation.",
+            "notes": "Runs need restartable progress snapshots and scheduler statistics.",
+            "metadata": {}
+          }
+        ],
+        "output_path": "worker-results/review-1-hyp-7ede83254dda.json",
+        "reflection_feedback": [],
+        "safety_feedback": [],
+        "matches": [],
+        "prior_reviews": [],
+        "packet_digest": "222b840fd7c3e135b69971988daa2f78e7fc81c1623eae749d585b98603bf6d2"
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "rev-f17fb027c48e",
+        "rev-fa282f50ba96",
+        "rev-882cec90880a"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 1.0,
+          "candidate_count": 4,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:reflection",
+            "dependencies_satisfied:1",
+            "resource:review"
+          ]
+        },
+        "result_refs": [
+          "rev-f17fb027c48e",
+          "rev-fa282f50ba96",
+          "rev-882cec90880a"
+        ]
+      },
+      "depends_on": [
+        "task-6a3c215ee577"
+      ],
+      "resource_class": "review"
+    },
+    {
+      "id": "task-31e2d8e5895b",
+      "kind": "review",
+      "priority": 1.0,
+      "payload": {
+        "cycle": 1,
+        "packet_type": "deterministic_review",
+        "required_provider": "deterministic",
+        "required_model": "",
+        "requested_max_tokens": 4096,
+        "use_grounded": false,
+        "safety_policies": [],
+        "review_types": [
+          "initial_review",
+          "safety_review",
+          "recurrent_tournament_review"
+        ],
+        "hypothesis_id": "hyp-0ce33906d941",
+        "hypothesis_ids": [
+          "hyp-0ce33906d941"
+        ],
+        "goal": {
+          "id": "goal-7bb2ef499a12",
+          "objective": "Find testable ideas to improve LLM coding agents",
+          "domain": "ai_llm_code",
+          "preferences": [
+            "aligned with the research objective",
+            "plausible from code, benchmark, or literature evidence",
+            "novel or a novel combination of known techniques",
+            "testable with a concrete experiment",
+            "safe and auditable"
+          ],
+          "constraints": [
+            "do not autonomously modify source code",
+            "do not claim measured improvement without benchmark evidence"
+          ],
+          "metrics": [
+            "pass_rate",
+            "regression_count",
+            "tool_calls",
+            "wall_time",
+            "cost"
+          ],
+          "safety_notes": [
+            "human review required before applying code changes"
+          ],
+          "allowed_sources": [],
+          "allowed_tools": [],
+          "output_formats": [],
+          "termination_criteria": []
+        },
+        "hypothesis": {
+          "id": "hyp-0ce33906d941",
+          "title": "Critic-before-edit assumption decomposition",
+          "claim": "A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes.",
+          "rationale": "False premises about call paths, invariants, and test scope are common causes of bad edits. Targets unexplored area relative to 0 existing hypotheses.",
+          "assumptions": [
+            "The agent can state assumptions before editing.",
+            "A critic can catch false premises cheaply."
+          ],
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "test_plan": {
+            "experiment": "Compare baseline coding-agent workflow against: Critic-before-edit assumption decomposition.",
+            "metrics": [
+              "pass_rate",
+              "regression_count",
+              "tool_calls",
+              "wall_time",
+              "cost"
+            ],
+            "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+          },
+          "risks": [
+            "critic false negatives",
+            "extra latency"
+          ],
+          "origin": "generation:research_expansion_from_meta_review",
+          "parent_ids": [],
+          "generation_trace": [
+            "Turn 1 objective framing: Find testable ideas to improve LLM coding agents",
+            "Turn 2 evidence scan: ev-ee94be35f2c4, ev-8bf0203ede0c, ev-0e1cefb869f6",
+            "Turn 3 proposal synthesis: Critic-before-edit assumption decomposition",
+            "Generation assessment: origin=generation; evidence refs=3; assumptions=2."
+          ],
+          "evolution_trace": [],
+          "merged_into": "",
+          "proximity_notes": [],
+          "elo": 1200.0,
+          "status": "candidate"
+        },
+        "evidence": [
+          {
+            "id": "ev-ee94be35f2c4",
+            "kind": "paper_architecture",
+            "source": "2502.18864.pdf",
+            "content": "The AI co-scientist uses a generate, debate, and evolve approach to hypothesis generation.",
+            "notes": "Core loop to translate into AI/LLM improvement research.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-8bf0203ede0c",
+            "kind": "paper_architecture",
+            "source": "2502.18864.pdf",
+            "content": "A supervisor coordinates specialized generation, reflection, ranking, proximity, evolution, and meta-review agents.",
+            "notes": "Agent decomposition for the Code Scientist MVP.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-0e1cefb869f6",
+            "kind": "paper_plan_configuration",
+            "source": "2502.18864.pdf",
+            "content": "The system parses a natural language research goal into a research plan configuration with preferences, constraints, and evaluation criteria.",
+            "notes": "Code Scientist should persist the derived plan instead of keeping it implicit.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-6181c6c4a112",
+            "kind": "paper_evaluation",
+            "source": "2502.18864.pdf",
+            "content": "The ranking agent uses an Elo-based tournament to prioritize hypotheses, while noting that Elo is an auto-evaluation proxy.",
+            "notes": "Ranking should be auditable and labeled as proxy evaluation.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-f1b5c28ba36b",
+            "kind": "paper_limitations",
+            "source": "2502.18864.pdf",
+            "content": "The paper warns that literature search can miss prior work, LLMs can hallucinate, and auto-evaluation metrics need broader validation.",
+            "notes": "Reports must separate generated hypotheses from verified improvements.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-5fa1f4c2235d",
+            "kind": "paper_safety",
+            "source": "2502.18864.pdf",
+            "content": "The system reviews research goals and generated hypotheses for safety and keeps comprehensive logs for auditability.",
+            "notes": "Safety gates are required before ranking and reporting ideas.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-771549df53df",
+            "kind": "paper_context_memory",
+            "source": "2502.18864.pdf",
+            "content": "The supervisor periodically writes context memory containing system state, progress statistics, and feedback for later computation.",
+            "notes": "Runs need restartable progress snapshots and scheduler statistics.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-984ceed5f1c2",
+            "kind": "paper_proximity",
+            "source": "2502.18864.pdf",
+            "content": "The proximity agent builds a graph of related hypotheses to support clustering, de-duplication, diverse exploration, and tournament scheduling.",
+            "notes": "Similarity edges should be stored and used when choosing pairwise matches.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-be6af9a17fff",
+            "kind": "paper_feedback_loop",
+            "source": "2502.18864.pdf",
+            "content": "Meta-review synthesizes recurring critique patterns and appends feedback to future agent prompts without model retraining.",
+            "notes": "Self-improvement should start as externalized prompt and process feedback.",
+            "metadata": {}
+          }
+        ],
+        "output_path": "worker-results/review-1-hyp-0ce33906d941.json",
+        "reflection_feedback": [],
+        "safety_feedback": [],
+        "matches": [],
+        "prior_reviews": [],
+        "packet_digest": "682afee319625951862e9af5fe676a71b1992ceed47af06b187b13bc24352ad9"
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "rev-d5203fe1fd95",
+        "rev-81f01f5db397",
+        "rev-f3f3f2a3c015"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 1.0,
+          "candidate_count": 3,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:reflection",
+            "dependencies_satisfied:1",
+            "resource:review"
+          ]
+        },
+        "result_refs": [
+          "rev-d5203fe1fd95",
+          "rev-81f01f5db397",
+          "rev-f3f3f2a3c015"
+        ]
+      },
+      "depends_on": [
+        "task-6a3c215ee577"
+      ],
+      "resource_class": "review"
+    },
+    {
+      "id": "task-c5f80bc46ffd",
+      "kind": "proximity",
+      "priority": 0.5,
+      "payload": {
+        "cycle": 1,
+        "method": "goal_aware",
+        "hypothesis_ids": [],
+        "agent_feedback": []
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "hyp-0ce33906d941:hyp-b0df74561466",
+        "hyp-0ce33906d941:hyp-7ede83254dda",
+        "hyp-7ede83254dda:hyp-b0df74561466",
+        "hyp-37f693681af3:hyp-7ede83254dda",
+        "hyp-0ce33906d941:hyp-37f693681af3",
+        "hyp-37f693681af3:hyp-b0df74561466"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 0.5,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:proximity",
+            "dependencies_satisfied:4",
+            "resource:state_mutation"
+          ]
+        },
+        "result_refs": [
+          "hyp-0ce33906d941:hyp-b0df74561466",
+          "hyp-0ce33906d941:hyp-7ede83254dda",
+          "hyp-7ede83254dda:hyp-b0df74561466",
+          "hyp-37f693681af3:hyp-7ede83254dda",
+          "hyp-0ce33906d941:hyp-37f693681af3",
+          "hyp-37f693681af3:hyp-b0df74561466"
+        ]
+      },
+      "depends_on": [
+        "task-da8843a2d0d2",
+        "task-c91160f5d1d0",
+        "task-21163bc4d4b9",
+        "task-31e2d8e5895b"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-f3c9cda135c2",
+      "kind": "ranking",
+      "priority": 1.0,
+      "payload": {
+        "cycle": 1,
+        "comparison_mode": "rank_tiered_debate_judge",
+        "hypothesis_ids": [],
+        "agent_feedback": []
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "match-e4d16838a1cb",
+        "match-bee35928bfb5"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 1.0,
+          "candidate_count": 2,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:ranking",
+            "dependencies_satisfied:4",
+            "resource:state_mutation"
+          ]
+        },
+        "result_refs": [
+          "match-e4d16838a1cb",
+          "match-bee35928bfb5"
+        ]
+      },
+      "depends_on": [
+        "task-da8843a2d0d2",
+        "task-c91160f5d1d0",
+        "task-21163bc4d4b9",
+        "task-31e2d8e5895b"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-62f4e474aff5",
+      "kind": "evolution",
+      "priority": 0.75,
+      "payload": {
+        "cycle": 1,
+        "strategy": "simplification",
+        "leader_ids": [],
+        "agent_feedback": []
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "hyp-757ee3d679d0",
+        "hyp-ad89e7391f4c"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 0.75,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:evolution",
+            "dependencies_satisfied:2",
+            "resource:state_mutation"
+          ]
+        },
+        "result_refs": [
+          "hyp-757ee3d679d0",
+          "hyp-ad89e7391f4c"
+        ]
+      },
+      "depends_on": [
+        "task-f3c9cda135c2",
+        "task-c5f80bc46ffd"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-5cecf699c7c9",
+      "kind": "meta_review",
+      "priority": 0.5,
+      "payload": {
+        "cycle": 1,
+        "review_count": 0,
+        "match_count": 0,
+        "top_hypothesis_ids": []
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "meta-8da0940a0eac"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 0.5,
+          "candidate_count": 2,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:meta_review",
+            "dependencies_satisfied:1",
+            "resource:state_mutation"
+          ]
+        },
+        "result_refs": [
+          "meta-8da0940a0eac"
+        ]
+      },
+      "depends_on": [
+        "task-f3c9cda135c2"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-ab279045b911",
+      "kind": "overview",
+      "priority": 0.5,
+      "payload": {
+        "cycle": 1,
+        "generated_by": "meta_review",
+        "top_hypothesis_ids": [],
+        "agent_feedback": []
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "overview-603131bdff46"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 0.5,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:meta_review",
+            "dependencies_satisfied:3",
+            "resource:state_mutation"
+          ]
+        },
+        "result_refs": [
+          "overview-603131bdff46"
+        ]
+      },
+      "depends_on": [
+        "task-5cecf699c7c9",
+        "task-62f4e474aff5",
+        "task-c5f80bc46ffd"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-3bd363bf299f",
+      "kind": "research_outputs",
+      "priority": 0.5,
+      "payload": {
+        "cycle": 1,
+        "generated_by": "meta_review",
+        "top_hypothesis_ids": [],
+        "output_types": [
+          "publication_brief",
+          "grant_brief",
+          "contact_suggestions"
+        ]
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "output-d5f7953bb155",
+        "output-0fdfd3a09396",
+        "output-5f4d18986ee1"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 0.5,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:meta_review",
+            "dependencies_satisfied:1",
+            "resource:state_mutation"
+          ]
+        },
+        "result_refs": [
+          "output-d5f7953bb155",
+          "output-0fdfd3a09396",
+          "output-5f4d18986ee1"
+        ]
+      },
+      "depends_on": [
+        "task-ab279045b911"
+      ],
+      "resource_class": "state_mutation"
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "objective": "Find testable ideas to improve LLM coding agents",
+  "state_path": "runs/example-sample/state.json",
+  "packet_count": 2,
+  "packets": [
+    {
+      "hypothesis_id": "hyp-7ede83254dda",
+      "title": "Assumption audit before repo mutation",
+      "elo": 1200.0,
+      "status": "accepted",
+      "path": "hyp-7ede83254dda.md",
+      "review_ids": [
+        "rev-f17fb027c48e",
+        "rev-fa282f50ba96",
+        "rev-882cec90880a"
+      ],
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ]
+    },
+    {
+      "hypothesis_id": "hyp-37f693681af3",
+      "title": "Tournament-ranked prompt variants",
+      "elo": 1200.0,
+      "status": "accepted",
+      "path": "hyp-37f693681af3.md",
+      "review_ids": [
+        "rev-a745a3485880",
+        "rev-b26b48c31b4e",
+        "rev-58f20024493e"
+      ],
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ]
+    }
+  ]
+}

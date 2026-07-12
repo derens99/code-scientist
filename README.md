@@ -6,11 +6,29 @@ The default MVP path is offline and deterministic. It does not autonomously rewr
 
 The run state mirrors the paper's control loop with a parsed research plan configuration, paper-seeded evidence, generated and evolved hypotheses, structured reviews, Elo tournament matches, proximity graph edges, meta-reviews, and context-memory snapshots for scheduler/progress state.
 
-## Usage
+## Quickstart
+
+Requirements: Python 3.11+ managed with [uv](https://docs.astral.sh/uv/). Node 22 is only needed for the optional web workbench. Claude Code or Codex is only needed for research-grade `host-agent` runs.
 
 ```bash
+git clone <this-repository> && cd code-scientist
+uv sync
 uv run code-scientist run "Find testable ideas to improve LLM coding agents" --cycles 2 --max-hypotheses 8 --out runs/demo
 uv run code-scientist report runs/demo/state.json
+uv run code-scientist findings runs/demo/state.json
+```
+
+That first run is offline and deterministic — no API key, no login — and shows the full pipeline and artifact shapes in under a minute. [examples/sample-run](examples/sample-run) is a committed copy of exactly this output. Deterministic hypotheses are blueprint scaffolding, never novel research.
+
+For research-grade runs, open this repository in Claude Code and invoke `/code-scientist` (or `$code-scientist` in Codex) with your research objective. The skill defaults to `--provider host-agent`, where the agent session itself answers the engine's LLM calls — no API key involved. See Providers below for the API and headless-CLI alternatives.
+
+To research one of your own projects, run from this checkout and point the evidence flags at your code:
+
+```bash
+uv run code-scientist run "How should <your project> reduce <problem>?" \
+  --provider host-agent \
+  --repo-search-path /path/to/your/project \
+  --out runs/your-project-question
 ```
 
 ## Web Workbench
@@ -310,17 +328,6 @@ uv run code-scientist run "Find testable ideas to improve LLM coding agents" --p
 
 `.env` is ignored by git. Do not commit real API keys.
 
-## Verified Local Demo
-
-The MVP can be verified with:
-
-```bash
-uv run code-scientist run "Find testable ideas that could improve LLM coding agents" --cycles 2 --max-hypotheses 8 --max-matches 4 --out runs/demo
-uv run code-scientist report runs/demo/state.json
-```
-
-The generated report separates hypotheses from verified improvements and labels Elo as an auto-evaluation proxy.
-
 ## Development
 
 ```bash
@@ -335,6 +342,15 @@ npm run typecheck
 ```
 
 Design notes and implementation plans live in `docs/`, including the paper-alignment audits that track how closely the engine reproduces the co-scientist paper's mechanisms.
+
+## Known Limitations
+
+- Hypotheses are candidates, not validated results. Reviews, Elo, and the findings digest are auto-evaluation proxies; the reports label them as such, and nothing should be treated as a measured improvement without benchmark or human-review evidence.
+- Reviews within one run usually share a single judge (the session model answering the bridge, or one API model), so cross-review agreement cannot certify correctness. Independent packet-reviewer subagents mitigate but do not remove this.
+- `codex exec` can hang when invoked from inside another agent's sandbox; use `--provider codex-cli` from a normal shell. `claude-cli` fails with 401 when the standalone `claude` login has expired — run `claude /login` first.
+- `--pdf-vision` requires `--provider anthropic`; host-CLI and host-agent providers cannot carry image payloads.
+- Host-agent runs depend on the launching session staying attentive; unanswered bridge requests time out after 600 seconds and two consecutive timeouts end the run's LLM phase (deterministic paths finish the run).
+- Developed and tested on macOS and Linux (CI); Windows is untested.
 
 ## License
 
