@@ -1,0 +1,25 @@
+{
+  "goals": [
+    {
+      "id": "requirement-coverage",
+      "objective": "Identify exactly one appended system-prompt instruction that could improve a coding agent's complete extraction and implementation of dispersed requirements across several Python modules under a fixed deadline. The intervention must be directly A/B testable against no appended instruction, add minimal overhead, name its causal mechanism, and state concrete failure risks.",
+      "cycles": 2,
+      "max_hypotheses": 3,
+      "max_matches": 1
+    },
+    {
+      "id": "edge-semantics",
+      "objective": "Identify exactly one appended system-prompt instruction that could improve a coding agent's correctness on boundary cases, invalid-input behavior, and exact error semantics across several Python modules under a fixed deadline. The intervention must be directly A/B testable against no appended instruction, avoid generic advice, name its causal mechanism, and state concrete failure risks.",
+      "cycles": 2,
+      "max_hypotheses": 3,
+      "max_matches": 1
+    },
+    {
+      "id": "verification-efficiency",
+      "objective": "Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.",
+      "cycles": 2,
+      "max_hypotheses": 3,
+      "max_matches": 1
+    }
+  ]
+}
