@@ -1,0 +1,220 @@
+{
+  "reviewer_id": "reviewer-1",
+  "blinding": "Arm labels are independently randomized. No engine traces or outcomes are included.",
+  "instructions": "For each item, choose arm_a, arm_b, or no_preference. Score each arm from 1 to 5 on every rubric field. Judge only objective fit and proposal quality; do not infer provenance.",
+  "rubric": [
+    "specificity",
+    "plausibility",
+    "testability",
+    "mechanism_clarity",
+    "risk_awareness",
+    "protocol_quality"
+  ],
+  "items": [
+    {
+      "item_id": "requirement-coverage",
+      "objective": "Identify exactly one appended system-prompt instruction that could improve a coding agent's complete extraction and implementation of dispersed requirements across several Python modules under a fixed deadline. The intervention must be directly A/B testable against no appended instruction, add minimal overhead, name its causal mechanism, and state concrete failure risks.",
+      "arm_a": {
+        "title": "Coverage-First Round-Robin Passes",
+        "intervention_and_claim": "Appending exactly this instruction \u2014 'Use round-robin coverage passes: first remove every stub and implement the smallest specification-valid path in every module; only then revisit modules in descending risk to add boundary and error clauses, never polishing one module while another required behavior remains wholly unimplemented.' \u2014 will increase all-modules held-out pass rate under a fixed deadline relative to no appended instruction.",
+        "rationale_or_mechanism": "Coding agents often follow prompt order and sink time into locally difficult details, leaving later modules untouched; an all-or-nothing bundle then converts concentrated progress into failure. The instruction changes scheduling, not the implementation method: it lowers catastrophic omission risk by establishing a functional floor everywhere, then allocates remaining time by risk. It adds almost no explicit planning artifact or tool calls. Proximity synthesis from hyp-ce6d1f22dee2: Appending exactly this instruction \u2014 'Use round-robin coverage passes: first remove every stub and implement the smallest specification-valid path in every module; only then revisit modules in descending risk to add boundary and error clauses, never polishing one module while another required behavior remains wholly unimplemented.' \u2014 will increase all-modules held-out pass rate under a fixed deadline relative to no appended instruction. A compress intervention variant should be tested separately. (similarity 1.000; method embedding_proximity).",
+        "assumptions": [
+          "Baseline agents sometimes leave later modules or behavior classes untouched",
+          "A minimal valid path can be identified without causing large rework",
+          "Held-out grading rewards partial cross-module coverage enough to improve whole-bundle success",
+          "Risk ordering after the first pass is better than prompt-order polishing",
+          "The strategy preserves testability."
+        ],
+        "risks": [
+          "Shallow first-pass implementations can create rework or misleading confidence",
+          "Some modules require a correct full design and cannot be safely built incrementally",
+          "Switching modules adds context-switch overhead",
+          "Whole-bundle grading may still fail unless every deep edge clause is completed",
+          "strategy may introduce unmeasured tradeoffs"
+        ],
+        "test_plan": {
+          "experiment": "Compare baseline coding-agent workflow against: Coverage-First Round-Robin Passes.",
+          "metrics": [
+            "pass_rate",
+            "regression_count",
+            "tool_calls",
+            "wall_time",
+            "cost"
+          ],
+          "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+        }
+      },
+      "arm_b": {
+        "title": "Requirement-to-module coverage ledger",
+        "intervention_and_claim": "Maintain a compact ledger mapping every explicit requirement to its affected Python module and verification, and do not declare completion while any ledger entry is unmapped or unverified. Against no appended instruction, this instruction will increase full-task pass rate on fixed-deadline multi-module Python tasks without increasing median wall time or turns by more than 10%.",
+        "rationale_or_mechanism": "Externalizing requirement-to-module coverage reduces working-memory loss and premature completion by making omitted or unverified dispersed requirements auditable before the agent stops.",
+        "assumptions": [
+          "Task requirements can be represented as a short ledger without consuming material deadline budget.",
+          "The agent can identify affected modules and available verification from the repository and task text."
+        ],
+        "risks": [
+          "The ledger may encode an initially missed or misinterpreted requirement and create false confidence.",
+          "Maintaining the ledger may consume scarce time on very short deadlines.",
+          "The agent may over-expand scope by mapping implied rather than explicit requirements."
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched multi-module Python tasks with identical deadlines and agent settings to this appended instruction or no appended instruction.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The intervention arm has a higher full-task pass rate, with median wall_time and turns each no more than 10% above control."
+        }
+      }
+    },
+    {
+      "item_id": "edge-semantics",
+      "objective": "Identify exactly one appended system-prompt instruction that could improve a coding agent's correctness on boundary cases, invalid-input behavior, and exact error semantics across several Python modules under a fixed deadline. The intervention must be directly A/B testable against no appended instruction, avoid generic advice, name its causal mechanism, and state concrete failure risks.",
+      "arm_a": {
+        "title": "Boundary-contract precommitment",
+        "intervention_and_claim": "Appending exactly this instruction\u2014\"Before editing code, write a compact boundary contract for every affected callable that lists valid-domain edges, invalid-input behavior, and the exact exception type and message, then make the implementation and tests conform to that contract.\"\u2014may increase held-out boundary and error-semantics pass_rate, relative to no appended instruction, when otherwise identical coding agents receive equal tool-call and wall-time caps across several Python modules.",
+        "rationale_or_mechanism": "The intervention forces the agent to externalize edge semantics before implementation, converting easily overlooked prose constraints into an explicit local invariant. This precommitment may reduce default-behavior guessing and exception-message drift, while the final conformity clause keeps implementation and tests tied to the same stated contract. A prospective randomized A/B comparison can measure pass_rate and regression_count while recording tool_calls, wall_time, and cost; no benefit is assumed before that evidence exists. Proximity synthesis from hyp-62833ad44777: Appending exactly this instruction\u2014\"Before editing code, write a compact boundary contract for every affected callable that lists valid-domain edges, invalid-input behavior, and the exact exception type and message, then make the implementation and tests conform to that contract.\"\u2014may increase held-out boundary and error-semantics pass_rate, relative to no appended instruction, when otherwise identical coding agents receive equal tool-call and wall-time caps across several Python modules. A replace vague verbs with observable actions variant should be tested separately. (similarity 1.000; method embedding_proximity).",
+        "assumptions": [
+          "Task specifications contain enough information to infer the intended boundaries and exact error behavior",
+          "The agent can create the contract within the fixed deadline without materially reducing implementation time",
+          "Held-out evaluators include boundary, invalid-input, and exact exception checks that are not exposed to the agent",
+          "The same base model, task order, tools, and resource caps are used in both arms",
+          "The strategy preserves testability."
+        ],
+        "risks": [
+          "The agent may precommit to an incorrect contract and then consistently implement the wrong semantics",
+          "Contract-writing overhead may reduce completed work under a tight deadline and increase wall_time or cost",
+          "The agent may overfit visible specification wording while missing implicit compatibility behavior",
+          "Requiring exact messages may encourage brittle local assertions or needless message changes that create regressions",
+          "The compound phrasing may be interpreted as multiple procedural steps despite being one appended instruction",
+          "strategy may introduce unmeasured tradeoffs"
+        ],
+        "test_plan": {
+          "experiment": "Compare baseline coding-agent workflow against: Boundary-contract precommitment.",
+          "metrics": [
+            "pass_rate",
+            "regression_count",
+            "tool_calls",
+            "wall_time",
+            "cost"
+          ],
+          "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+        }
+      },
+      "arm_b": {
+        "title": "Boundary-contract matrix before edits",
+        "intervention_and_claim": "Before editing, extract from the target code and tests a compact matrix of each affected public callable's minimum, maximum, empty, malformed, and wrong-type inputs with the exact required return value or exception type and message, then make only changes whose behavior is checked against every applicable matrix row. Compared with no appended instruction, this instruction will increase hidden boundary-and-error-semantics pass rate without exceeding the fixed deadline, while recording wall time and turns as costs.",
+        "rationale_or_mechanism": "The explicit per-callable matrix converts diffuse edge semantics into a finite set of auditable behavioral obligations, reducing omission errors and preventing broad fixes from silently changing exception class, message, or sentinel behavior across modules.",
+        "assumptions": [
+          "The repository code or tests expose enough evidence to infer the intended contracts.",
+          "The agent can inspect relevant files and run focused tests within the deadline.",
+          "Affected callables and boundary dimensions can be enumerated compactly."
+        ],
+        "risks": [
+          "Contract inference may fossilize an existing bug when tests and implementation agree incorrectly.",
+          "Matrix construction consumes deadline time and may reduce implementation time.",
+          "An incomplete matrix can create false confidence and miss interaction-dependent cases.",
+          "Overly literal message matching may preserve incidental wording rather than intended semantics."
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched multi-module Python repair tasks to the appended instruction or no appended instruction under identical deadlines, tools, and model settings; score with held-out tests emphasizing boundaries, invalid inputs, exception classes, and exact messages.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The intervention arm has a higher held-out pass_rate, including the edge-semantics subset, with median wall_time within the fixed deadline and no material increase in turns."
+        }
+      }
+    },
+    {
+      "item_id": "verification-efficiency",
+      "objective": "Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.",
+      "arm_a": {
+        "title": "Cross-module counterexample first",
+        "intervention_and_claim": "Appending exactly this one system-prompt instruction\u2014\"Before broad verification of a multi-module Python change, identify the most plausible silent contract violation at a changed module boundary, run the cheapest check capable of falsifying that contract first, then use only the remaining pre-deadline verification budget on broader checks.\"\u2014will, versus no appended instruction with all other conditions fixed, reduce regression_count without increasing deadline misses; pass_rate, tool_calls, wall_time, and cost will be measured to determine whether the tradeoff is favorable.",
+        "rationale_or_mechanism": "The named causal mechanism is counterexample-guided verification: converting the patch into a concrete cross-module failure hypothesis focuses the earliest, cheapest check on a likely silent correctness defect, so an actionable failure can be found before expensive broad suites consume the deadline. A paired A/B test should use hidden multi-module tasks, randomized condition assignment, repeated seeds, identical time and tool budgets, and trace audits that score whether the predicted contract, falsifying check, and subsequent budget use were actually observable. Proximity synthesis from hyp-e1ae36f2c251: Appending exactly this one system-prompt instruction\u2014\"Before broad verification of a multi-module Python change, identify the most plausible silent contract violation at a changed module boundary, run the cheapest check capable of falsifying that contract first, then use only the remaining pre-deadline verification budget on broader checks.\"\u2014will, versus no appended instruction with all other conditions fixed, reduce regression_count without increasing deadline misses; pass_rate, tool_calls, wall_time, and cost will be measured to determine whether the tradeoff is favorable. A revise wording only when it improves compliance with the same mechanism; do not add a second intervention variant should be tested separately. (similarity 1.000; method embedding_proximity).",
+        "assumptions": [
+          "Patch context is sufficient for the agent to infer a plausible boundary contract and failure mode.",
+          "A cheap falsifying check can often distinguish contract preservation from violation.",
+          "Broad verification remains feasible within the residual budget when the targeted check passes quickly.",
+          "Held-out evaluation prevents direct knowledge of hidden regression cases.",
+          "The strategy preserves testability."
+        ],
+        "risks": [
+          "Anchoring on one plausible failure can divert effort from a different, less obvious regression.",
+          "The inferred contract may be wrong or incomplete, producing a passing but uninformative check.",
+          "Generating a custom falsification check may cost more time and tokens than running an existing targeted test.",
+          "A failed check may trigger debugging or repeated reruns that exhaust the deadline.",
+          "Prioritizing one boundary can neglect independent failures in other touched modules, packaging, configuration, or end-to-end flows.",
+          "The instruction may improve benchmark-specific reasoning traces without improving hidden-test correctness.",
+          "strategy may introduce unmeasured tradeoffs"
+        ],
+        "test_plan": {
+          "experiment": "Compare baseline coding-agent workflow against: Cross-module counterexample first.",
+          "metrics": [
+            "pass_rate",
+            "regression_count",
+            "tool_calls",
+            "wall_time",
+            "cost"
+          ],
+          "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+        }
+      },
+      "arm_b": {
+        "title": "Semantic-diff risk targeting",
+        "intervention_and_claim": "Before finalizing, spend no more than 12% of the deadline on one targeted check for the highest-risk diff hunk, ranking public signature or schema changes first, control-flow and exception changes second, and internal value changes third, with cross-module consumers breaking ties. Compared with no appended instruction, semantic-diff risk targeting will raise hidden-test pass_rate without raising deadline misses and with median wall_time and turns no more than 5% above control.",
+        "rationale_or_mechanism": "A fixed, auditable risk ordering concentrates bounded verification on changes most likely to violate contracts or propagate across modules instead of treating all edited lines equally.",
+        "assumptions": [
+          "Diff hunks can be classified reliably enough",
+          "The risk ordering correlates with correctness impact",
+          "A targeted check exists for the top-ranked hunk"
+        ],
+        "risks": [
+          "A low-ranked internal value change may contain the actual bug",
+          "Public changes may be intentional and well covered already",
+          "Classification and consumer tracing add overhead",
+          "One check may not cover multiple interacting hunks"
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched multi-module Python tasks to treatment or no appended instruction with fixed model, seeds, tools, and deadlines; measure hidden-test results and completion timing.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "Treatment has higher pass_rate, no higher deadline-miss rate, and no more than 5% increases in median wall_time and turns."
+        }
+      }
+    }
+  ],
+  "return_schema": {
+    "reviewer_id": "reviewer-1",
+    "reviews": [
+      {
+        "item_id": "goal id",
+        "preferred_arm": "arm_a|arm_b|no_preference",
+        "arm_a_scores": {
+          "specificity": "integer 1..5",
+          "plausibility": "integer 1..5",
+          "testability": "integer 1..5",
+          "mechanism_clarity": "integer 1..5",
+          "risk_awareness": "integer 1..5",
+          "protocol_quality": "integer 1..5"
+        },
+        "arm_b_scores": {
+          "specificity": "integer 1..5",
+          "plausibility": "integer 1..5",
+          "testability": "integer 1..5",
+          "mechanism_clarity": "integer 1..5",
+          "risk_awareness": "integer 1..5",
+          "protocol_quality": "integer 1..5"
+        },
+        "justification": "short reason",
+        "confidence": "number 0..1"
+      }
+    ]
+  }
+}
