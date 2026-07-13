@@ -1,0 +1,8 @@
+{
+  "id": "bundle-07-trial2-candidate",
+  "status": "completed",
+  "duration_seconds": 180,
+  "num_turns": 1,
+  "cost_usd": 0.0,
+  "detail": "Implemented num_format.py, record_split.py, and intervals.py. Ran the required boundary-first quoted-field check, then py_compile and broad contract smoke/invariant checks; all passed."
+}

@@ -1,0 +1,8 @@
+{
+  "id": "bundle-07-trial2-baseline",
+  "status": "completed",
+  "duration_seconds": 180.0,
+  "num_turns": 1,
+  "cost_usd": 0.0,
+  "detail": "Implemented format_number, split_record, and merge_intervals from their docstrings. Verified syntax and focused edge cases with uv."
+}

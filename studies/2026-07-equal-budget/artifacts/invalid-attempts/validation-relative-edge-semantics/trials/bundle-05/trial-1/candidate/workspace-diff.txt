@@ -1,0 +1,144 @@
+added: BOUNDARY_CONTRACT.md
+--- a/BOUNDARY_CONTRACT.md
++++ b/BOUNDARY_CONTRACT.md
+@@ -0,0 +1,25 @@
++# Boundary contracts
++
++- `merge_intervals(intervals, *, lo=None, hi=None)`: accepts iterable entries that are
++  2-item tuples/lists of integers, including zero-length spans; optional bounds are
++  integers and may be equal. Empty and clamp-emptied spans are omitted. A malformed
++  entry raises `ValueError("each interval must be a pair")`; a non-integer endpoint
++  raises `TypeError("interval endpoints must be integers")`; a reversed span raises
++  `ValueError("interval start must not exceed end")`; a non-integer `lo`/`hi` raises
++  `TypeError("lo must be an integer")` / `TypeError("hi must be an integer")`; and
++  `lo > hi` raises `ValueError("lo must not exceed hi")`.
++- `normalize_path(path)`: accepts any non-empty string containing no backslash;
++  absolute and relative paths may contain duplicate separators, dot segments, and
++  unresolved parent segments. Non-string input raises `TypeError("path must be a
++  string")`; empty input raises `ValueError("path must not be empty")`; any backslash
++  raises `ValueError("backslashes are not allowed")`.
++- `aggregate_windows(events, window_size, *, agg="sum")`: accepts a list of 2-item
++  tuple/list events, integer timestamps (including negative timestamps), numeric
++  values, a positive integer window size, and one supported aggregation name. An
++  invalid window size (including a non-integer) raises `ValueError("window_size must
++  be a positive integer")`; an unsupported aggregation raises `ValueError("unsupported
++  aggregation")`; a non-list events object raises `ValueError("events must be a
++  list")`; a malformed event raises `ValueError("each event must be a pair")`; a
++  non-integer timestamp raises `TypeError("event timestamps must be integers")`; and
++  a non-numeric value raises `TypeError("event values must be numeric")` (except in
++  `count` mode, where values are ignored entirely as specified).
+modified: event_windows.py
+--- a/event_windows.py
++++ b/event_windows.py
+@@ -49,4 +49,38 @@
+ 
+     Returns the list of `(window_start, window_end, aggregate)` tuples.
+     """
+-    raise NotImplementedError
++    if not isinstance(window_size, int) or window_size <= 0:
++        raise ValueError("window_size must be a positive integer")
++    if agg not in {"sum", "avg", "min", "max", "count"}:
++        raise ValueError("unsupported aggregation")
++    if not isinstance(events, list):
++        raise ValueError("events must be a list")
++
++    windows = {}
++    for event in events:
++        if not isinstance(event, (tuple, list)) or len(event) != 2:
++            raise ValueError("each event must be a pair")
++        timestamp, value = event
++        if not isinstance(timestamp, int):
++            raise TypeError("event timestamps must be integers")
++        if agg != "count" and not isinstance(value, (int, float)):
++            raise TypeError("event values must be numeric")
++        index = timestamp // window_size
++        windows.setdefault(index, []).append(value)
++
++    result = []
++    for index in sorted(windows):
++        values = windows[index]
++        if agg == "sum":
++            aggregate = sum(values)
++        elif agg == "avg":
++            aggregate = sum(values) / len(values)
++        elif agg == "min":
++            aggregate = min(values)
++        elif agg == "max":
++            aggregate = max(values)
++        else:
++            aggregate = len(values)
++        start = index * window_size
++        result.append((start, start + window_size, aggregate))
++    return result
+modified: intervals.py
+--- a/intervals.py
++++ b/intervals.py
+@@ -41,4 +41,36 @@
+ 
+     Returns the merged list of `(start, end)` tuples.
+     """
+-    raise NotImplementedError
++    if lo is not None and not isinstance(lo, int):
++        raise TypeError("lo must be an integer")
++    if hi is not None and not isinstance(hi, int):
++        raise TypeError("hi must be an integer")
++    if lo is not None and hi is not None and lo > hi:
++        raise ValueError("lo must not exceed hi")
++
++    prepared = []
++    for interval in intervals:
++        if not isinstance(interval, (tuple, list)) or len(interval) != 2:
++            raise ValueError("each interval must be a pair")
++        start, end = interval
++        if not isinstance(start, int) or not isinstance(end, int):
++            raise TypeError("interval endpoints must be integers")
++        if start > end:
++            raise ValueError("interval start must not exceed end")
++
++        if lo is not None:
++            start = max(start, lo)
++        if hi is not None:
++            end = min(end, hi)
++        if start < end:
++            prepared.append((start, end))
++
++    prepared.sort()
++    merged = []
++    for start, end in prepared:
++        if not merged or start > merged[-1][1]:
++            merged.append((start, end))
++        else:
++            previous_start, previous_end = merged[-1]
++            merged[-1] = (previous_start, max(previous_end, end))
++    return merged
+modified: path_normalize.py
+--- a/path_normalize.py
++++ b/path_normalize.py
+@@ -44,4 +44,26 @@
+ 
+     Returns the normalized path string.
+     """
+-    raise NotImplementedError
++    if not isinstance(path, str):
++        raise TypeError("path must be a string")
++    if path == "":
++        raise ValueError("path must not be empty")
++    if "\\" in path:
++        raise ValueError("backslashes are not allowed")
++
++    absolute = path.startswith("/")
++    kept = []
++    for segment in path.split("/"):
++        if segment == "" or segment == ".":
++            continue
++        if segment == "..":
++            if kept and kept[-1] != "..":
++                kept.pop()
++            elif not absolute:
++                kept.append(segment)
++        else:
++            kept.append(segment)
++
++    if absolute:
++        return "/" + "/".join(kept)
++    return "/".join(kept) if kept else "."

@@ -1,0 +1,8 @@
+{
+  "id": "bundle-07-trial1-baseline",
+  "status": "completed",
+  "duration_seconds": 74.0,
+  "num_turns": 1,
+  "cost_usd": 0.0,
+  "detail": "Implemented num_format.format_number, record_split.split_record, and intervals.merge_intervals per their docstrings; syntax and focused behavior checks passed."
+}

@@ -39,3 +39,21 @@ rerun.
 This amendment does not erase the operational defect: the final report will
 present the strict original execution as `incomplete`, the corrected execution
 separately, and the impact of using corrected rather than strict data.
+
+## 2026-07-12: relative validation output invalidated
+
+Recorded before corrected coding trials are rerun. The first three validation
+experiments were launched with relative `--out` paths. The grading function
+correctly runs from each isolated workspace, but the relative config path then
+resolved under that workspace (for example
+`workspace/studies/.../.grader-pytest.ini`) instead of pointing at the grader
+config next to the workspace. Every arm consequently failed with a grader
+`FileNotFoundError`; these are infrastructure failures, not task outcomes.
+
+The three runs are retained under `artifacts/invalid-attempts/` as
+`validation-relative-*`. Their reports are excluded from all primary and
+sensitivity statistics. The corrected rerun uses absolute output paths and the
+same registered tasks, interventions, seed, trials, timeout, and analysis.
+The original arm responses remain part of the audit, and any bridge scheduling
+timeouts remain failures under the same no-retry rule unless the runner itself
+cannot start the grader.

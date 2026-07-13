@@ -1,0 +1,8 @@
+{
+  "id": "bundle-06-trial2-candidate",
+  "status": "completed",
+  "duration_seconds": 138,
+  "num_turns": 1,
+  "cost_usd": 0,
+  "detail": "Implemented all three requested modules from their docstrings. Added stable multi-key record sorting with validation, None-last behavior, and incomparable-type errors; exact ASCII table rendering with validation, alignment, width computation, and truncation; and a direct non-regex glob parser/matcher supporting stars, question marks, classes, ranges, negation, escapes, and malformed-pattern errors. Targeted checks passed under uv."
+}

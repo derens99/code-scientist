@@ -1,0 +1,23 @@
+ config = yield
+             ^^^^^
+  File "/Users/derensnonwork/Documents/code-scientist/.venv/lib/python3.12/site-packages/pluggy/_callers.py", line 121, in _multicall
+    res = hook_impl.function(*args)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/derensnonwork/Documents/code-scientist/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 1232, in pytest_cmdline_parse
+    self.parse(args)
+  File "/Users/derensnonwork/Documents/code-scientist/.venv/lib/python3.12/site-packages/_pytest/config/__init__.py", line 1533, in parse
+    rootpath, inipath, inicfg, ignored_config_files = determine_setup(
+                                                      ^^^^^^^^^^^^^^^^
+  File "/Users/derensnonwork/Documents/code-scientist/.venv/lib/python3.12/site-packages/_pytest/config/findpaths.py", line 309, in determine_setup
+    inicfg = load_config_dict_from_file(inipath_) or {}
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/derensnonwork/Documents/code-scientist/.venv/lib/python3.12/site-packages/_pytest/config/findpaths.py", line 67, in load_config_dict_from_file
+    iniconfig = _parse_ini_config(filepath)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/derensnonwork/Documents/code-scientist/.venv/lib/python3.12/site-packages/_pytest/config/findpaths.py", line 53, in _parse_ini_config
+    return iniconfig.IniConfig(str(path))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/derensnonwork/Documents/code-scientist/.venv/lib/python3.12/site-packages/iniconfig/__init__.py", line 113, in __init__
+    with open(self.path, encoding=encoding) as fp:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/Users/derensnonwork/Documents/code-scientist/studies/2026-07-equal-budget/artifacts/validation/requirement-coverage/trials/bundle-07/trial-2/baseline/workspace/studies/2026-07-equal-budget/artifacts/validation/requirement-coverage/trials/bundle-07/trial-2/baseline/.grader-pytest.ini'

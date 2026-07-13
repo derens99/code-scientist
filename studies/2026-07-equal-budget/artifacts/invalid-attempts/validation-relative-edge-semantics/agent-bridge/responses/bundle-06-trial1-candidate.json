@@ -1,0 +1,8 @@
+{
+  "id": "bundle-06-trial1-candidate",
+  "status": "completed",
+  "duration_seconds": 180.0,
+  "num_turns": 1,
+  "cost_usd": 0,
+  "detail": "Implemented all three documented modules and verified edge behavior with uv."
+}

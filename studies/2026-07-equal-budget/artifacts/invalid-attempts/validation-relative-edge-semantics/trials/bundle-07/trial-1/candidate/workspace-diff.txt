@@ -1,0 +1,148 @@
+added: BOUNDARY_CONTRACT.md
+--- a/BOUNDARY_CONTRACT.md
++++ b/BOUNDARY_CONTRACT.md
+@@ -0,0 +1,13 @@
++# Boundary contract
++
++## `format_number(value, *, decimals=2, thousands_sep=False, percent=False, width=None)`
++- Valid edges: numeric finite `int`/`float` (excluding `bool`); `decimals` non-negative `int`; `width` `None` or non-negative `int`; flags may be truthy as documented. Percent conversion precedes banker's rounding; negative zero suppressed; grouping/sign/suffix then left-padding.
++- Invalid: non-numeric/bool `value` -> `TypeError`; non-finite value -> `ValueError`; invalid `decimals` or `width` -> `ValueError`.
++
++## `split_record(line, sep=",")`
++- Valid edges: any line string (empty gives `[""]`); `sep` is exactly one non-quote character. Quoted fields begin with `"`, support doubled quotes, separators inside quotes, and require immediate separator/end after closing quote; unquoted fields are literal.
++- Invalid: `sep` not a one-character string or is `"` -> `ValueError`; unterminated quoted field or trailing data after a closing quote -> `ValueError`.
++
++## `merge_intervals(intervals, *, lo=None, hi=None)`
++- Valid edges: iterable of 2-item tuple/list integer pairs; `lo`/`hi` are `None` or ints with `lo <= hi`. Zero-length and clamped-empty intervals are dropped; remaining half-open intervals are sorted and overlap/touch merged.
++- Invalid: malformed interval shape or `start > end` -> `ValueError`; non-int endpoints or bounds -> `TypeError`; `lo > hi` -> `ValueError`.
+modified: intervals.py
+--- a/intervals.py
++++ b/intervals.py
+@@ -41,4 +41,37 @@
+ 
+     Returns the merged list of `(start, end)` tuples.
+     """
+-    raise NotImplementedError
++    if lo is not None and not isinstance(lo, int):
++        raise TypeError("lo must be an int or None")
++    if hi is not None and not isinstance(hi, int):
++        raise TypeError("hi must be an int or None")
++    if lo is not None and hi is not None and lo > hi:
++        raise ValueError("lo must not exceed hi")
++    prepared = []
++    for interval in intervals:
++        if not isinstance(interval, (tuple, list)) or len(interval) != 2:
++            raise ValueError("each interval must be a tuple or list of length 2")
++        start, end = interval
++        if not isinstance(start, int) or not isinstance(end, int):
++            raise TypeError("interval endpoints must be ints")
++        if start > end:
++            raise ValueError("interval start must not exceed end")
++        if lo is not None:
++            start = max(start, lo)
++        if hi is not None:
++            end = min(end, hi)
++        if start >= end:
++            continue
++        prepared.append((start, end))
++    if not prepared:
++        return []
++    prepared.sort(key=lambda pair: pair[0])
++    merged = [prepared[0]]
++    for start, end in prepared[1:]:
++        prev_start, prev_end = merged[-1]
++        if start <= prev_end:
++            if end > prev_end:
++                merged[-1] = (prev_start, end)
++        else:
++            merged.append((start, end))
++    return merged
+modified: num_format.py
+--- a/num_format.py
++++ b/num_format.py
+@@ -48,4 +48,31 @@
+ 
+     Returns the formatted string.
+     """
+-    raise NotImplementedError
++    if isinstance(value, bool) or not isinstance(value, (int, float)):
++        raise TypeError("value must be an int or float (not bool)")
++    if isinstance(value, float) and not math.isfinite(value):
++        raise ValueError("value must be finite")
++    if not isinstance(decimals, int) or decimals < 0:
++        raise ValueError("decimals must be a non-negative int")
++    if width is not None and (not isinstance(width, int) or width < 0):
++        raise ValueError("width must be a non-negative int or None")
++
++    scaled = value * 100 if percent else value
++    rounded = round(scaled, decimals)
++    is_negative = rounded < 0
++    if rounded == 0:
++        is_negative = False
++        rounded = 0
++    magnitude = -rounded if is_negative else rounded
++    number = format(magnitude, f".{decimals}f")
++    if thousands_sep:
++        integer, dot, fraction = number.partition(".")
++        integer = f"{int(integer):,}"
++        number = integer + (dot + fraction if dot else "")
++    if is_negative:
++        number = "-" + number
++    if percent:
++        number += "%"
++    if width is not None and len(number) < width:
++        number = " " * (width - len(number)) + number
++    return number
+modified: record_split.py
+--- a/record_split.py
++++ b/record_split.py
+@@ -44,4 +44,48 @@
+ 
+     Returns a list of field strings, in order.
+     """
+-    raise NotImplementedError
++    if not isinstance(sep, str) or len(sep) != 1 or sep == '"':
++        raise ValueError("sep must be a single non-quote character")
++    n = len(line)
++    if n == 0:
++        return [""]
++    fields = []
++    i = 0
++    while i < n:
++        if line[i] != '"':
++            j = line.find(sep, i)
++            if j < 0:
++                fields.append(line[i:])
++                i = n
++            else:
++                fields.append(line[i:j])
++                i = j + 1
++                if i == n:
++                    fields.append("")
++            continue
++        j = i + 1
++        chars = []
++        closed = False
++        while j < n:
++            if line[j] == '"':
++                if j + 1 < n and line[j + 1] == '"':
++                    chars.append('"')
++                    j += 2
++                    continue
++                closed = True
++                j += 1
++                break
++            chars.append(line[j])
++            j += 1
++        if not closed:
++            raise ValueError("unterminated quoted field")
++        if j < n and line[j] != sep:
++            raise ValueError("trailing data after closing quote")
++        fields.append("".join(chars))
++        if j == n:
++            i = n
++        else:
++            i = j + 1
++            if i == n:
++                fields.append("")
++    return fields
