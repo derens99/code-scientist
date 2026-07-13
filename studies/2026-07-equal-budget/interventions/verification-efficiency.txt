@@ -1,0 +1,1 @@
+Before broad verification of a multi-module Python change, identify the most plausible silent contract violation at a changed module boundary, run the cheapest check capable of falsifying that contract first, then use only the remaining pre-deadline verification budget on broader checks.

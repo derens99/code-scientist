@@ -1,0 +1,8 @@
+{
+  "id": "bundle-05-trial2-baseline",
+  "status": "completed",
+  "duration_seconds": 211,
+  "num_turns": 1,
+  "cost_usd": 0,
+  "detail": "implemented all modules; uv checks passed"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "bundle-06-trial2-baseline",
+  "status": "completed",
+  "duration_seconds": 145,
+  "num_turns": 4,
+  "cost_usd": 0,
+  "detail": "Implemented all three requested modules from their docstrings. Verified stable multi-key sorting with null-last behavior and type errors, exact ASCII table rendering with alignment and truncation, and non-regex glob matching with wildcards, escapes, character classes, ranges, negation, and malformed-pattern errors using focused uv-run assertions."
+}

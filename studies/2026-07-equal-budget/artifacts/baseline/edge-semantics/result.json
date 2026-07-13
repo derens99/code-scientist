@@ -1,0 +1,467 @@
+{
+  "goal": {
+    "id": "edge-semantics",
+    "objective": "Identify exactly one appended system-prompt instruction that could improve a coding agent's correctness on boundary cases, invalid-input behavior, and exact error semantics across several Python modules under a fixed deadline. The intervention must be directly A/B testable against no appended instruction, avoid generic advice, name its causal mechanism, and state concrete failure risks.",
+    "cycles": 2,
+    "max_hypotheses": 3,
+    "max_matches": 1
+  },
+  "matched_call_count": 16,
+  "proposal_call_count": 12,
+  "selection_call_count": 4,
+  "proposals": [
+    {
+      "candidate_id": "candidate-4a7b41fcaf57b31c-01",
+      "proposal_digest": "4a7b41fcaf57b31c",
+      "proposal": {
+        "title": "Boundary-contract matrix before edits",
+        "intervention": "Before editing, extract from the target code and tests a compact matrix of each affected public callable's minimum, maximum, empty, malformed, and wrong-type inputs with the exact required return value or exception type and message, then make only changes whose behavior is checked against every applicable matrix row.",
+        "claim": "Compared with no appended instruction, this instruction will increase hidden boundary-and-error-semantics pass rate without exceeding the fixed deadline, while recording wall time and turns as costs.",
+        "mechanism": "The explicit per-callable matrix converts diffuse edge semantics into a finite set of auditable behavioral obligations, reducing omission errors and preventing broad fixes from silently changing exception class, message, or sentinel behavior across modules.",
+        "assumptions": [
+          "The repository code or tests expose enough evidence to infer the intended contracts.",
+          "The agent can inspect relevant files and run focused tests within the deadline.",
+          "Affected callables and boundary dimensions can be enumerated compactly."
+        ],
+        "risks": [
+          "Contract inference may fossilize an existing bug when tests and implementation agree incorrectly.",
+          "Matrix construction consumes deadline time and may reduce implementation time.",
+          "An incomplete matrix can create false confidence and miss interaction-dependent cases.",
+          "Overly literal message matching may preserve incidental wording rather than intended semantics."
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched multi-module Python repair tasks to the appended instruction or no appended instruction under identical deadlines, tools, and model settings; score with held-out tests emphasizing boundaries, invalid inputs, exception classes, and exact messages.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The intervention arm has a higher held-out pass_rate, including the edge-semantics subset, with median wall_time within the fixed deadline and no material increase in turns."
+        },
+        "single_shot_ordinal": 1
+      }
+    },
+    {
+      "candidate_id": "candidate-f876fac131b5d053-02",
+      "proposal_digest": "f876fac131b5d053",
+      "proposal": {
+        "title": "Nearest-boundary counterexample requirement",
+        "intervention": "For every behavior-changing edit, construct and run one nearest-valid and one nearest-invalid counterexample at the edited branch, asserting the exact value or the exact exception class and message before considering that edit complete.",
+        "claim": "Against no appended instruction on matched Python repair tasks, this instruction will raise held-out boundary and invalid-input pass_rate under the same deadline, with wall_time and turns tracked for overhead.",
+        "mechanism": "Pairing adjacent valid and invalid witnesses forces the agent to locate the true contract boundary and distinguishes an intended rejection from an off-by-one condition, overly broad exception, or message mismatch at the moment each branch is changed.",
+        "assumptions": [
+          "Edited branches admit concrete adjacent valid and invalid inputs.",
+          "Exact expected outcomes can be derived from specifications, tests, callers, or stable repository conventions.",
+          "Focused examples can be executed within the fixed deadline."
+        ],
+        "risks": [
+          "Some domains lack a natural nearest input, causing arbitrary examples.",
+          "Locally correct counterexamples may miss cross-module interactions or stateful sequences.",
+          "Deriving an exact message from ambiguous evidence can encode the wrong contract.",
+          "Running two witnesses per edit may consume time needed for broader fixes."
+        ],
+        "test_plan": {
+          "experiment": "Randomize matched multi-module Python tasks between this appended instruction and no appended instruction using identical models, tools, and deadlines; evaluate with hidden tests stratified by boundary values, malformed and wrong-type inputs, exception class, and exact message.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The intervention arm achieves higher hidden pass_rate overall and on the edge-semantics stratum while staying within the deadline and without a material increase in median turns."
+        },
+        "single_shot_ordinal": 2
+      }
+    },
+    {
+      "candidate_id": "candidate-809faa43db765b11-03",
+      "proposal_digest": "809faa43db765b11",
+      "proposal": {
+        "title": "Exception provenance lock",
+        "intervention": "When changing invalid-input handling, preserve or deliberately reproduce the repository-evidenced exception provenance by asserting the exact exception class, message, and raising layer for each affected invalid-input path, and reject any fix that merely catches or normalizes a broader exception.",
+        "claim": "On matched multi-module Python tasks, appending this instruction will improve held-out exact-error-semantics pass_rate relative to no appended instruction under the same fixed deadline, with wall_time and turns measured as costs.",
+        "mechanism": "Tracking exception provenance prevents convenience wrappers and broad catch blocks from altering which layer rejects input, thereby preserving exact class and message semantics that ordinary happy-path testing overlooks.",
+        "assumptions": [
+          "Tests, callers, documentation, or existing sibling modules provide evidence for the intended raising layer.",
+          "The task's exact error contract is stable rather than intentionally being redesigned.",
+          "The agent can exercise affected invalid-input paths."
+        ],
+        "risks": [
+          "Existing exception provenance may be accidental or itself defective.",
+          "The instruction can discourage a legitimate normalization boundary.",
+          "Exact message assertions may be brittle across Python or dependency versions.",
+          "Provenance tracing may consume deadline time while leaving non-error boundaries underexplored."
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched Python repair tasks to this appended instruction or no appended instruction with identical model, tools, and deadline; evaluate on held-out tests covering invalid types, malformed values, boundary values, exception classes, exact messages, and raising-layer-sensitive cases.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The instruction arm has higher held-out pass_rate, especially on exact-error cases, while completing within the deadline and without a material median-turn increase."
+        },
+        "single_shot_ordinal": 3
+      }
+    },
+    {
+      "candidate_id": "candidate-a81f37794d0a9113-04",
+      "proposal_digest": "a81f37794d0a9113",
+      "proposal": {
+        "title": "Comparator boundary audit",
+        "intervention": "For every edited conditional that accepts, rejects, slices, indexes, counts, or ranges over input, explicitly evaluate the condition at b-1, b, and b+1 for each referenced boundary b and verify the exact returned value or exception class and message.",
+        "claim": "Compared with no appended instruction, this bounded comparator audit will increase held-out boundary and error-semantics pass_rate on matched Python tasks under an identical fixed deadline, while wall_time and turns quantify overhead.",
+        "mechanism": "Executing the three points surrounding each syntactic boundary directly exposes inclusive-versus-exclusive mistakes, empty-range behavior, sentinel leakage, and incorrect rejection semantics introduced by edited comparisons.",
+        "assumptions": [
+          "Most relevant boundaries are represented by values referenced in edited conditionals.",
+          "Neighbor values b-1 and b+1 are meaningful or can be interpreted as adjacent domain values.",
+          "Expected exact outcomes are inferable from repository evidence."
+        ],
+        "risks": [
+          "Non-numeric, discontinuous, or multidimensional domains may not have meaningful adjacent values.",
+          "Focusing on edited conditionals can miss inherited errors in untouched helpers.",
+          "Combinatorial interactions between multiple boundaries remain untested.",
+          "Exact checks at every comparator may consume scarce deadline time."
+        ],
+        "test_plan": {
+          "experiment": "Randomize matched multi-module Python repairs between this appended instruction and no appended instruction under identical models, tools, and deadlines; score hidden cases around comparison thresholds plus invalid-input exception class and exact-message checks.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The intervention arm improves hidden pass_rate overall and at threshold-adjacent cases, remains within the deadline, and does not materially increase median turns."
+        },
+        "single_shot_ordinal": 4
+      }
+    },
+    {
+      "candidate_id": "candidate-f116ddd3ecef18fb-05",
+      "proposal_digest": "f116ddd3ecef18fb",
+      "proposal": {
+        "title": "Cross-module contract differential",
+        "intervention": "For any affected operation implemented in more than one module, run the same minimal boundary and invalid-input corpus through every implementation and resolve each output, exception-class, or exception-message divergence using the strongest repository contract evidence.",
+        "claim": "Relative to no appended instruction, this cross-module differential will increase held-out edge-semantics pass_rate on matched Python tasks under the same deadline, with wall_time and turns recorded.",
+        "mechanism": "A shared input corpus turns parallel implementations into differential oracles, surfacing module-specific omissions and exact error divergences that isolated testing would not reveal.",
+        "assumptions": [
+          "At least some affected modules expose semantically comparable operations.",
+          "Repository evidence can identify which divergent behavior is intended.",
+          "A small shared corpus is executable within the deadline."
+        ],
+        "risks": [
+          "Similar-looking operations may intentionally have different contracts.",
+          "All implementations may share the same defect and falsely agree.",
+          "Choosing a canonical behavior from ambiguous evidence can propagate an error.",
+          "Adapter work for heterogeneous APIs may consume excessive time."
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched multi-module Python tasks to this appended instruction or no appended instruction with identical model, tools, and deadline; use hidden tests spanning shared boundary inputs and exact invalid-input semantics per module.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The intervention arm has higher hidden pass_rate overall and fewer cross-module semantic divergences while remaining within the deadline and without materially higher median turns."
+        },
+        "single_shot_ordinal": 5
+      }
+    },
+    {
+      "candidate_id": "candidate-15180e1fea133cd5-06",
+      "proposal_digest": "15180e1fea133cd5",
+      "proposal": {
+        "title": "Guard-order witness",
+        "intervention": "For each edited function with multiple validation guards, create one input that triggers each guard while also satisfying at least one later guard, and assert the exact first exception class and message dictated by repository evidence.",
+        "claim": "Against no appended instruction, this guard-order instruction will improve exact invalid-input pass_rate on matched Python repairs under the same deadline, with wall_time and turns measured for cost.",
+        "mechanism": "Overlapping-invalid witnesses reveal validation precedence, preventing refactors from changing the first observable error when one input violates several constraints.",
+        "assumptions": [
+          "Validation guards can be triggered with concrete inputs.",
+          "The ordering of exact errors is part of the intended observable contract.",
+          "Repository evidence distinguishes intended precedence."
+        ],
+        "risks": [
+          "Validation order may intentionally be unspecified.",
+          "Constructing overlapping-invalid inputs may be difficult for coupled constraints.",
+          "The instruction emphasizes error precedence over valid boundary behavior.",
+          "Brittle exact-message checks may overfit incidental text."
+        ],
+        "test_plan": {
+          "experiment": "Randomize matched multi-module Python tasks between this appended instruction and no appended instruction under identical deadlines and tools; score hidden tests that violate single and multiple constraints and check exact first error, alongside valid boundary tests.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The intervention arm yields higher hidden pass_rate on overlapping-invalid and overall edge cases, finishes within the deadline, and has no material median-turn increase."
+        },
+        "single_shot_ordinal": 6
+      }
+    },
+    {
+      "candidate_id": "candidate-f4ab4e5e180de615-07",
+      "proposal_digest": "f4ab4e5e180de615",
+      "proposal": {
+        "title": "Falsy-value separation",
+        "intervention": "At every edited input check or defaulting expression, separately exercise None, False, numeric zero, empty string, and empty container, and preserve the repository-specified return or exact exception class and message for each instead of treating them as one falsy case.",
+        "claim": "Compared with no appended instruction, this falsy-value separation will improve held-out boundary and invalid-input pass_rate on matched Python tasks under the same deadline, with wall_time and turns captured as costs.",
+        "mechanism": "Python truthiness collapses semantically distinct sentinels, values, and container boundaries; forcing separate witnesses exposes incorrect `if not x`, `x or default`, and bool-as-int behavior before it spreads across modules.",
+        "assumptions": [
+          "At least some affected APIs distinguish among falsy inputs.",
+          "Intended behavior for each falsy category is recoverable from code, tests, callers, or documentation.",
+          "The small fixed corpus is relevant to edited checks."
+        ],
+        "risks": [
+          "Some APIs intentionally unify all falsy inputs, making the checks redundant.",
+          "The fixed corpus can distract from non-falsy boundaries such as maximum sizes.",
+          "Empty custom objects may have domain-specific truthiness not covered by the corpus.",
+          "Exact-message expectations may be ambiguous or version-sensitive."
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched multi-module Python repair tasks to this appended instruction or no appended instruction with identical tools, models, and deadlines; score hidden tests separating falsy inputs plus other boundary and exact-error cases.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The intervention arm achieves higher hidden pass_rate on falsy-separation and overall edge tests while meeting the deadline and without a material increase in median turns."
+        },
+        "single_shot_ordinal": 7
+      }
+    },
+    {
+      "candidate_id": "candidate-d07a876ad9fbb33c-08",
+      "proposal_digest": "d07a876ad9fbb33c",
+      "proposal": {
+        "title": "Reject-before-mutation invariant",
+        "intervention": "For every edited path that can reject an input, verify on one representative invalid boundary that the exact exception class and message occur before any mutation of arguments, object state, files, caches, or collaborators.",
+        "claim": "Against no appended instruction, this reject-before-mutation invariant will improve held-out invalid-input correctness on matched Python tasks under an identical deadline, while wall_time and turns measure overhead.",
+        "mechanism": "Checking both the exact error and the pre-error state catches partial side effects caused by late validation, a failure invisible when tests assert only that an exception was raised.",
+        "assumptions": [
+          "Invalid-input behavior is intended to be atomic for affected APIs.",
+          "Relevant mutable state can be observed or snapshotted cheaply.",
+          "A representative invalid boundary exercises each edited rejection path."
+        ],
+        "risks": [
+          "Some APIs intentionally mutate state before reporting an error.",
+          "Hidden external side effects may not be observable in a local snapshot.",
+          "Snapshot setup can consume deadline time or introduce brittle tests.",
+          "One representative invalid value may miss mutations on other rejection branches."
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched multi-module Python repairs to this appended instruction or no appended instruction under identical model, tools, and deadline; evaluate hidden invalid-input cases for exact errors and state atomicity, plus boundary pass rate.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The intervention arm has higher hidden pass_rate on invalid-input atomicity and overall edge semantics, stays within the deadline, and does not materially increase median turns."
+        },
+        "single_shot_ordinal": 8
+      }
+    },
+    {
+      "candidate_id": "candidate-494c481a871a531e-09",
+      "proposal_digest": "494c481a871a531e",
+      "proposal": {
+        "title": "Python subtype trap check",
+        "intervention": "Whenever an edited API validates numeric or sequence types, explicitly test bool beside int, str beside general Sequence, and a relevant subclass beside its base type, asserting the repository-required acceptance or exact exception class and message for each.",
+        "claim": "Compared with no appended instruction, this targeted subtype-trap check will improve held-out invalid-type and exact-error pass_rate on matched Python tasks under the same fixed deadline, with wall_time and turns tracked.",
+        "mechanism": "Python's nominal and structural subtype relationships admit values that naive isinstance checks often accept unintentionally; paired subtype witnesses expose those language-specific contract leaks.",
+        "assumptions": [
+          "Affected modules validate numeric, sequence, or inheritable types.",
+          "Repository evidence specifies whether these subtype cases are valid.",
+          "The three targeted relationships cover meaningful risks in the task."
+        ],
+        "risks": [
+          "APIs may intentionally honor substitutability, making exact-type rejection incorrect.",
+          "The fixed subtype set may miss protocols, numpy scalars, or custom duck types.",
+          "Extra exact-type checks can break legitimate extension points.",
+          "Repository evidence about subclass acceptance may be ambiguous."
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched Python repair tasks to this appended instruction or no appended instruction under identical tools, model, and deadline; score hidden subtype-trap, boundary, invalid-input, exception-class, and exact-message cases.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The intervention arm achieves higher hidden pass_rate on subtype traps and overall edge semantics while meeting the deadline and without a material median-turn increase."
+        },
+        "single_shot_ordinal": 9
+      }
+    },
+    {
+      "candidate_id": "candidate-63b9caa60aed2932-10",
+      "proposal_digest": "63b9caa60aed2932",
+      "proposal": {
+        "title": "Minimal failing-input shrink",
+        "intervention": "For each newly observed boundary or invalid-input failure, shrink the input to the smallest value that preserves the failure, then make the fix satisfy both that minimal case and its nearest valid neighbor with the exact expected return or exception class and message.",
+        "claim": "Against no appended instruction, minimal failing-input shrinkage will improve held-out edge-semantics pass_rate on matched Python tasks within the same deadline, while wall_time and turns reveal its cost.",
+        "mechanism": "Shrinking removes irrelevant input features, isolates the responsible predicate, and pairs it with the adjacent accepted case, reducing overbroad patches and incorrect error normalization.",
+        "assumptions": [
+          "At least one failing example is available from tests or direct probing.",
+          "Inputs can be simplified manually within the deadline.",
+          "A meaningful valid neighbor and exact expected behavior can be inferred."
+        ],
+        "risks": [
+          "Manual shrinking may consume time or stop at a non-minimal case.",
+          "The smallest failure may not represent interaction-heavy hidden cases.",
+          "Some domains lack an obvious size ordering or valid neighbor.",
+          "Fixing the minimal case can overfit if the underlying contract is misunderstood."
+        ],
+        "test_plan": {
+          "experiment": "Randomize matched multi-module Python repair tasks between this appended instruction and no appended instruction with identical models, tools, failing examples, and deadlines; evaluate hidden boundary, invalid-input, exception-class, and exact-message tests.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The intervention arm has higher hidden pass_rate overall and on nearest-neighbor edge cases, remains within the fixed deadline, and does not materially increase median turns."
+        },
+        "single_shot_ordinal": 10
+      }
+    },
+    {
+      "candidate_id": "candidate-66771eb56609fac7-11",
+      "proposal_digest": "66771eb56609fac7",
+      "proposal": {
+        "title": "Dynamic error-string witness",
+        "intervention": "For every edited error message containing input-derived data, run one invalid input with whitespace, quotes, or a non-ASCII character and assert the complete message byte-for-byte, including value rendering, punctuation, and parameter naming.",
+        "claim": "Relative to no appended instruction, this dynamic error-string witness will improve held-out exact-message pass_rate on matched Python tasks under the same deadline, with wall_time and turns measured.",
+        "mechanism": "Adversarial display characters expose differences among str, repr, quoting, normalization, and mislabeled parameters that ordinary alphanumeric invalid inputs conceal.",
+        "assumptions": [
+          "Affected errors interpolate user-supplied values.",
+          "Exact message text is a tested part of the contract.",
+          "Repository evidence identifies the intended rendering and parameter name."
+        ],
+        "risks": [
+          "Byte-for-byte assertions may be brittle across encodings or dependency versions.",
+          "The targeted display cases may be irrelevant to numeric-only APIs.",
+          "Focusing on message rendering can leave exception type or boundary logic unfixed.",
+          "Existing tests may encode accidental wording rather than a durable contract."
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched multi-module Python tasks to this appended instruction or no appended instruction with identical model, tools, and deadline; evaluate hidden invalid values containing display-sensitive characters plus general boundary and exception tests.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The intervention arm achieves higher hidden exact-message and overall edge-semantics pass_rate while meeting the deadline and without materially increasing median turns."
+        },
+        "single_shot_ordinal": 11
+      }
+    },
+    {
+      "candidate_id": "candidate-ce50814d76d2ec34-12",
+      "proposal_digest": "ce50814d76d2ec34",
+      "proposal": {
+        "title": "Normalize-versus-validate pair",
+        "intervention": "At each edited parsing or coercion boundary, test one raw input and its normalized counterpart and assert whether validation must occur before or after normalization, including the exact return or exception class and message for both.",
+        "claim": "Compared with no appended instruction, this paired normalization check will improve held-out boundary and invalid-input pass_rate on matched Python tasks within the same deadline, with wall_time and turns tracked.",
+        "mechanism": "Paired raw and canonical values reveal ordering bugs where trimming, case-folding, numeric coercion, or decoding accidentally converts an invalid input into a valid one or changes the observable error.",
+        "assumptions": [
+          "Affected modules contain parsing, coercion, or normalization boundaries.",
+          "Repository evidence specifies the intended order of normalization and validation.",
+          "Representative raw/canonical pairs can be constructed cheaply."
+        ],
+        "risks": [
+          "The intended normalization policy may be undocumented.",
+          "One pair may not cover interactions among multiple normalization steps.",
+          "Strict pre-normalization rejection can harm deliberately permissive APIs.",
+          "Exact errors may differ legitimately across parser backends."
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched multi-module Python repairs to this appended instruction or no appended instruction under identical model, tools, and deadline; score hidden raw/canonical pairs plus boundary, invalid-input, exception-class, and exact-message cases.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The intervention arm has higher hidden pass_rate on normalization-order and overall edge semantics, completes within the deadline, and does not materially increase median turns."
+        },
+        "single_shot_ordinal": 12
+      }
+    }
+  ],
+  "selections": [
+    {
+      "selected_id": "candidate-4a7b41fcaf57b31c-01",
+      "reason": "The compact per-callable boundary-contract matrix most completely covers the objective's three semantic dimensions across several modules while remaining a single auditable imperative. Its finite rows give a clear causal mechanism against omission and regression, the matched A/B protocol includes all required metrics, and its risks explicitly address deadline overhead, incomplete coverage, and incorrect contract inference.",
+      "scores": {
+        "specificity": 5,
+        "plausibility": 5,
+        "testability": 5,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 5
+      }
+    },
+    {
+      "selected_id": "candidate-4a7b41fcaf57b31c-01",
+      "reason": "This proposal is the strongest general intervention for the full objective: its compact matrix explicitly covers extrema, emptiness, malformed values, wrong types, returns, exception classes, and messages for every affected public callable. The mechanism is concrete and auditable, its matched hidden-test protocol directly isolates the appended instruction, and the listed risks candidly capture inference error, incompleteness, brittleness, and fixed-deadline cost.",
+      "scores": {
+        "specificity": 5,
+        "plausibility": 5,
+        "testability": 5,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 5
+      }
+    },
+    {
+      "selected_id": "candidate-4a7b41fcaf57b31c-01",
+      "reason": "The matrix proposal has the broadest direct fit without becoming generic: it enumerates concrete boundary and invalid-input categories per public callable and requires exact values, exception types, and messages. That finite artifact plausibly reduces cross-module omissions, is straightforward to audit in an A/B run, and is paired with a complete matched-task protocol and unusually balanced failure risks.",
+      "scores": {
+        "specificity": 5,
+        "plausibility": 5,
+        "testability": 5,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 5
+      }
+    },
+    {
+      "selected_id": "candidate-4a7b41fcaf57b31c-01",
+      "reason": "The boundary-contract matrix is the most objective-complete and protocol-ready candidate. It operationalizes boundary values, malformed and wrong-type inputs, and exact return and exception semantics across every affected public callable; the explicit finite matrix explains how omissions are prevented and can be audited directly. Its A/B design is matched, held out, deadline-aware, and measures all required outcomes, while its risks identify the main causal failure modes.",
+      "scores": {
+        "specificity": 5,
+        "plausibility": 5,
+        "testability": 5,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 5
+      }
+    }
+  ],
+  "selected": {
+    "candidate_id": "candidate-4a7b41fcaf57b31c-01",
+    "proposal_digest": "4a7b41fcaf57b31c",
+    "proposal": {
+      "title": "Boundary-contract matrix before edits",
+      "intervention": "Before editing, extract from the target code and tests a compact matrix of each affected public callable's minimum, maximum, empty, malformed, and wrong-type inputs with the exact required return value or exception type and message, then make only changes whose behavior is checked against every applicable matrix row.",
+      "claim": "Compared with no appended instruction, this instruction will increase hidden boundary-and-error-semantics pass rate without exceeding the fixed deadline, while recording wall time and turns as costs.",
+      "mechanism": "The explicit per-callable matrix converts diffuse edge semantics into a finite set of auditable behavioral obligations, reducing omission errors and preventing broad fixes from silently changing exception class, message, or sentinel behavior across modules.",
+      "assumptions": [
+        "The repository code or tests expose enough evidence to infer the intended contracts.",
+        "The agent can inspect relevant files and run focused tests within the deadline.",
+        "Affected callables and boundary dimensions can be enumerated compactly."
+      ],
+      "risks": [
+        "Contract inference may fossilize an existing bug when tests and implementation agree incorrectly.",
+        "Matrix construction consumes deadline time and may reduce implementation time.",
+        "An incomplete matrix can create false confidence and miss interaction-dependent cases.",
+        "Overly literal message matching may preserve incidental wording rather than intended semantics."
+      ],
+      "test_plan": {
+        "experiment": "Randomly assign matched multi-module Python repair tasks to the appended instruction or no appended instruction under identical deadlines, tools, and model settings; score with held-out tests emphasizing boundaries, invalid inputs, exception classes, and exact messages.",
+        "metrics": [
+          "pass_rate",
+          "wall_time",
+          "turns"
+        ],
+        "success_condition": "The intervention arm has a higher held-out pass_rate, including the edge-semantics subset, with median wall_time within the fixed deadline and no material increase in turns."
+      },
+      "single_shot_ordinal": 1
+    }
+  }
+}

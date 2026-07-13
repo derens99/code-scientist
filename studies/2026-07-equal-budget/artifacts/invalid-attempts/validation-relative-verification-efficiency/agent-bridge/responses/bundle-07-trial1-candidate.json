@@ -1,0 +1,8 @@
+{
+  "id": "bundle-07-trial1-candidate",
+  "status": "completed",
+  "duration_seconds": 118.0,
+  "num_turns": 1,
+  "cost_usd": 0.0,
+  "detail": "Implemented num_format.py, record_split.py, and intervals.py. Verified the percent/rounding/negative-zero/width boundary first, then ran broader contract checks across all modules and compiled all three successfully."
+}

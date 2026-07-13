@@ -1,0 +1,182 @@
+modified: glob_match.py
+--- a/glob_match.py
++++ b/glob_match.py
+@@ -45,4 +45,67 @@
+ 
+     Returns `True` or `False`.
+     """
+-    raise NotImplementedError
++    tokens = []
++    index = 0
++    while index < len(pattern):
++        char = pattern[index]
++        if char == "\\":
++            if index + 1 == len(pattern):
++                raise ValueError("trailing escape")
++            tokens.append(("literal", pattern[index + 1]))
++            index += 2
++        elif char == "*":
++            if not tokens or tokens[-1][0] != "star":
++                tokens.append(("star", None))
++            index += 1
++        elif char == "?":
++            tokens.append(("any", None))
++            index += 1
++        elif char == "[":
++            closing = pattern.find("]", index + 1)
++            if closing == -1:
++                raise ValueError("unterminated character class")
++            body = pattern[index + 1 : closing]
++            negated = bool(body) and body[0] in "!^"
++            if negated:
++                body = body[1:]
++            members = set()
++            body_index = 0
++            while body_index < len(body):
++                if (
++                    body_index + 2 < len(body)
++                    and body[body_index + 1] == "-"
++                    and body[body_index] <= body[body_index + 2]
++                ):
++                    start = ord(body[body_index])
++                    end = ord(body[body_index + 2])
++                    members.update(chr(codepoint) for codepoint in range(start, end + 1))
++                    body_index += 3
++                else:
++                    members.add(body[body_index])
++                    body_index += 1
++            tokens.append(("class", (members, negated)))
++            index = closing + 1
++        else:
++            tokens.append(("literal", char))
++            index += 1
++
++    reachable = {0}
++    for kind, value in tokens:
++        if kind == "star":
++            if reachable:
++                reachable = set(range(min(reachable), len(text) + 1))
++            continue
++        next_reachable = set()
++        for text_index in reachable:
++            if text_index == len(text):
++                continue
++            if kind == "any" or (kind == "literal" and text[text_index] == value):
++                next_reachable.add(text_index + 1)
++            elif kind == "class":
++                members, negated = value
++                contained = text[text_index] in members
++                if contained != negated:
++                    next_reachable.add(text_index + 1)
++        reachable = next_reachable
++    return len(text) in reachable
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -1,4 +1,6 @@
+ """Stable multi-key sorter for lists of dict records."""
++
++from functools import cmp_to_key
+ 
+ 
+ def sort_records(records, keys):
+@@ -46,4 +48,39 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    if not isinstance(records, list):
++        raise TypeError("records must be a list")
++    if not isinstance(keys, list) or not keys:
++        raise ValueError("keys must be a non-empty list")
++
++    normalized_keys = []
++    for key in keys:
++        if not isinstance(key, (tuple, list)) or len(key) != 2:
++            raise ValueError("each sort key must contain a field and direction")
++        field, direction = key
++        if direction not in ("asc", "desc"):
++            raise ValueError("direction must be 'asc' or 'desc'")
++        normalized_keys.append((field, direction))
++
++    def compare(left, right):
++        for field, direction in normalized_keys:
++            left_value = left.get(field)
++            right_value = right.get(field)
++            if left_value is None:
++                if right_value is not None:
++                    return 1
++                continue
++            if right_value is None:
++                return -1
++
++            if left_value < right_value:
++                result = -1
++            elif right_value < left_value:
++                result = 1
++            else:
++                result = 0
++            if result:
++                return result if direction == "asc" else -result
++        return 0
++
++    return sorted(records, key=cmp_to_key(compare))
+modified: table_render.py
+--- a/table_render.py
++++ b/table_render.py
+@@ -55,4 +55,54 @@
+ 
+     Returns the list of rendered lines (no trailing newline characters).
+     """
+-    raise NotImplementedError
++    if not isinstance(headers, list) or not headers:
++        raise ValueError("headers must be a non-empty list")
++    if any(not isinstance(header, str) for header in headers):
++        raise TypeError("headers must be strings")
++    if not isinstance(rows, list):
++        raise ValueError("rows must be a list")
++    for row in rows:
++        if not isinstance(row, list) or len(row) != len(headers):
++            raise ValueError("each row must match the header length")
++        if any(not isinstance(cell, str) for cell in row):
++            raise TypeError("cells must be strings")
++
++    if alignments is None:
++        alignments = ["left"] * len(headers)
++    elif not isinstance(alignments, list) or len(alignments) != len(headers):
++        raise ValueError("alignments must match the header length")
++    if any(value not in ("left", "right", "center") for value in alignments):
++        raise ValueError("invalid alignment")
++    if max_col_width is not None and (
++        not isinstance(max_col_width, int) or max_col_width < 4
++    ):
++        raise ValueError("max_col_width must be an integer >= 4")
++
++    def truncate(value):
++        if max_col_width is not None and len(value) > max_col_width:
++            return value[: max_col_width - 3] + "..."
++        return value
++
++    rendered_headers = [truncate(value) for value in headers]
++    rendered_rows = [[truncate(value) for value in row] for row in rows]
++    widths = []
++    for column, header in enumerate(rendered_headers):
++        widths.append(max([len(header)] + [len(row[column]) for row in rendered_rows]))
++
++    border = "+" + "+".join("-" * (width + 2) for width in widths) + "+"
++
++    def render_row(row):
++        cells = []
++        for value, width, alignment in zip(row, widths, alignments):
++            if alignment == "left":
++                aligned = value.ljust(width)
++            elif alignment == "right":
++                aligned = value.rjust(width)
++            else:
++                aligned = value.center(width)
++            cells.append(" " + aligned + " ")
++        return "|" + "|".join(cells) + "|"
++
++    return [border, render_row(rendered_headers), border] + [
++        render_row(row) for row in rendered_rows
++    ] + [border]

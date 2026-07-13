@@ -1,0 +1,122 @@
+"""Render a list of rows into a bordered, plain-ASCII text table."""
+
+
+def render_table(headers, rows, alignments=None, max_col_width=None):
+    """Render `headers` and `rows` into a bordered text table.
+
+    `headers` is a list of column-name strings. `rows` is a list of
+    rows, each row being a list of cell strings with the same length as
+    `headers`. `alignments`, if given, is a list (same length as
+    `headers`) of `"left"`, `"right"`, or `"center"`, one per column;
+    if omitted, every column defaults to `"left"`. `max_col_width`, if
+    given, is the maximum rendered width of any single column.
+
+    Rules:
+
+    1. `headers` must be a non-empty list of strings; an empty list
+       raises `ValueError`, and any non-string header raises
+       `TypeError`.
+    2. Every row must be a list whose length equals `len(headers)`;
+       otherwise raise `ValueError`. Every cell in every row must be a
+       string; otherwise raise `TypeError`.
+    3. If `alignments` is given, its length must equal `len(headers)`
+       (otherwise raise `ValueError`), and every value in it must be one
+       of `"left"`, `"right"`, `"center"` (otherwise raise `ValueError`).
+    4. If `max_col_width` is given, it must be an integer `>= 4`
+       (otherwise raise `ValueError`).
+    5. Cell width is always measured with plain `len()` (character/code
+       point count) — no special handling of wide/combining Unicode
+       characters.
+    6. If `max_col_width` is given and a cell's (or header's) length
+       exceeds it, the cell is truncated to exactly `max_col_width`
+       characters as `text[: max_col_width - 3] + "..."`. Truncation is
+       applied to headers and data cells alike, and happens BEFORE
+       column widths are computed.
+    7. After any truncation, each column's rendered width is
+       `max(len(header_cell), max(len(cell) for cell in that column))`
+       (0 if there are no rows).
+    8. Every column's cells (including the header) are padded to that
+       column's width using the column's alignment (`str.ljust` for
+       `"left"`, `str.rjust` for `"right"`, `str.center` for
+       `"center"`), with exactly one literal space of padding on each
+       side of the aligned content, and `|` characters as the left/right
+       border and column separators, e.g. a padded cell renders as
+       `"| " + aligned + " |"` joined between columns.
+    9. A horizontal border line is `"+"` followed by, for each column,
+       `"-" * (width + 2)`, joined by `"+"`, and capped with a final
+       `"+"`.
+    10. The returned value is a list of text lines in this exact order:
+        border, header line, border, one line per data row (in row
+        order), border. This holds even when `rows` is empty (there are
+        still three border lines and the header line, but zero row
+        lines).
+    11. A single-column table renders correctly using the same border
+        and padding rules (no special-casing needed).
+
+    Returns the list of rendered lines (no trailing newline characters).
+    """
+    if not isinstance(headers, list):
+        raise TypeError("headers must be a list")
+    if not headers:
+        raise ValueError("headers must not be empty")
+    if any(not isinstance(header, str) for header in headers):
+        raise TypeError("headers must contain only strings")
+
+    if alignments is not None:
+        try:
+            alignment_count = len(alignments)
+        except TypeError as exc:
+            raise ValueError("alignments must have one entry per header") from exc
+        if alignment_count != len(headers):
+            raise ValueError("alignments length must match headers")
+        if any(alignment not in ("left", "right", "center") for alignment in alignments):
+            raise ValueError("invalid alignment")
+        alignment_values = list(alignments)
+    else:
+        alignment_values = ["left"] * len(headers)
+
+    if max_col_width is not None:
+        if isinstance(max_col_width, bool) or not isinstance(max_col_width, int) or max_col_width < 4:
+            raise ValueError("max_col_width must be an integer >= 4")
+
+    rendered_rows = []
+    for row in rows:
+        if not isinstance(row, list) or len(row) != len(headers):
+            raise ValueError("each row must match headers")
+        if any(not isinstance(cell, str) for cell in row):
+            raise TypeError("cells must contain only strings")
+        rendered_rows.append(list(row))
+
+    rendered_headers = list(headers)
+    if max_col_width is not None:
+        def truncate(value):
+            return value if len(value) <= max_col_width else value[: max_col_width - 3] + "..."
+        rendered_headers = [truncate(value) for value in rendered_headers]
+        rendered_rows = [[truncate(value) for value in row] for row in rendered_rows]
+
+    widths = []
+    for index, header in enumerate(rendered_headers):
+        width = len(header)
+        if rendered_rows:
+            width = max(width, max(len(row[index]) for row in rendered_rows))
+        widths.append(width)
+
+    def border():
+        return "+" + "+".join("-" * (width + 2) for width in widths) + "+"
+
+    def line(values):
+        cells = []
+        for value, width, alignment in zip(values, widths, alignment_values):
+            if alignment == "left":
+                aligned = value.ljust(width)
+            elif alignment == "right":
+                aligned = value.rjust(width)
+            else:
+                aligned = value.center(width)
+            cells.append("| " + aligned + " ")
+        return "".join(cells) + "|"
+
+    output = [border(), line(rendered_headers), border()]
+    output.extend(line(row) for row in rendered_rows)
+    output.append(border())
+    return output

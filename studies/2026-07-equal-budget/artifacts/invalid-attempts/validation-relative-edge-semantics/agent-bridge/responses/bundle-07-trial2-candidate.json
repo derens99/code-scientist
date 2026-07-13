@@ -1,0 +1,8 @@
+{
+  "id": "bundle-07-trial2-candidate",
+  "status": "completed",
+  "duration_seconds": 2.4,
+  "num_turns": 1,
+  "cost_usd": 0.0,
+  "detail": "Implemented format_number, split_record, and merge_intervals per their docstrings, including validation, rounding, quoting, clamping, and merging edge cases. Added boundary_contract.md before implementation and ran smoke tests with uv."
+}

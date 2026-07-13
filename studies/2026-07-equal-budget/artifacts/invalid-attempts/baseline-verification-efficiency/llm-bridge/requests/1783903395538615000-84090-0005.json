@@ -1,0 +1,6 @@
+{
+  "id": "1783903395538615000-84090-0005",
+  "prompt": "You are the model in a pre-registered best-of-N single-shot baseline.\nIndependently answer the objective below in one pass. You have not seen and must not assume\nany other candidate. Produce exactly one appended system-prompt intervention, not a workflow.\n\nObjective: Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.\n\nReturn only JSON:\n{\"title\":\"...\",\"intervention\":\"one imperative instruction\",\"claim\":\"A/B-testable claim\",\n\"mechanism\":\"causal explanation\",\"assumptions\":[\"...\"],\"risks\":[\"...\"],\n\"test_plan\":{\"experiment\":\"...\",\"metrics\":[\"pass_rate\",\"wall_time\",\"turns\"],\n\"success_condition\":\"...\"},\"single_shot_ordinal\":5}\nDo not claim measured improvement. Keep the intervention bounded and auditable.",
+  "max_tokens": 4096,
+  "created_at": 1783903395.538661
+}

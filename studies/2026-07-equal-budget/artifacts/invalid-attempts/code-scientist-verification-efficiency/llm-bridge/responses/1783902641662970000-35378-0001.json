@@ -1,0 +1,71 @@
+{
+  "id": "1783902641662970000-35378-0001",
+  "response": {
+    "proposal_preferences": [
+      "Propose one exact appended instruction, not a collection of optional tips",
+      "Prioritize checks by expected correctness information per unit of remaining time",
+      "Use a simple decision rule an agent can follow without maintaining a large artifact",
+      "Keep the control arm identical except for the appended instruction",
+      "Separate a plausible causal mechanism from any unmeasured effectiveness claim"
+    ],
+    "evaluation_criteria": [
+      "Complete held-out task pass rate under a fixed hard deadline",
+      "Regression count measured by an external fresh-checkout grader",
+      "Deadline-miss rate as a preregistered noninferiority guardrail",
+      "Tool calls, wall time, and cost per assigned trial",
+      "Compliance with the specified verification-priority rule",
+      "Safety-boundary and benchmark-integrity violations"
+    ],
+    "generation_methods": [
+      "Generate contrasting mechanisms: risk-weighted micro-probes, staged test ladders, and counterexample-first checks",
+      "Translate each mechanism into one copy-pastable imperative instruction",
+      "Derive concrete failure risks and falsifying outcomes before ranking",
+      "Reject proposals whose bookkeeping likely costs as much as the verification they prioritize"
+    ],
+    "review_types": [
+      "Causal-mechanism review",
+      "Deadline and overhead red-team",
+      "Testability and treatment-isolation review",
+      "Safety, data-exposure, and benchmark-gaming review",
+      "Independent blinded ranking"
+    ],
+    "evolution_strategies": [
+      "Compress multi-step policies into a single bounded decision rule",
+      "Replace vague risk language with observable prioritization criteria",
+      "Remove redundant broad test runs and unbounded iteration",
+      "Revise claims to match available evidence and retain explicit failure modes"
+    ],
+    "scheduler_weights": {
+      "generation": 1.0,
+      "reflection": 1.25,
+      "proximity": 0.75,
+      "ranking": 1.25,
+      "evolution": 1.0,
+      "meta_review": 1.0
+    },
+    "constraints": [
+      "Exactly one appended system-prompt instruction is the treatment",
+      "No autonomous source changes outside isolated pre-authorized trial workspaces",
+      "No claim of measured improvement without held-out benchmark results",
+      "Identical model, context, tools, seeds policy, and hard deadline across arms",
+      "No access to hidden graders, other-arm outputs, credentials, or unrelated files",
+      "Human review is required before applying any generated patch outside the trial"
+    ],
+    "output_formats": [
+      "Exact instruction text",
+      "One-sentence causal mechanism",
+      "Direct paired A/B protocol",
+      "Concrete failure risks",
+      "Candid evidence-status statement"
+    ],
+    "allowed_sources": [],
+    "allowed_tools": [],
+    "termination_criteria": [
+      "A single intervention is selected with an operational prioritization rule",
+      "Primary outcome and deadline noninferiority guardrail are preregistered",
+      "At least three concrete failure risks are recorded",
+      "The final text makes no unsupported empirical claim",
+      "Provider-call budget or configured research-cycle limit is reached"
+    ]
+  }
+}

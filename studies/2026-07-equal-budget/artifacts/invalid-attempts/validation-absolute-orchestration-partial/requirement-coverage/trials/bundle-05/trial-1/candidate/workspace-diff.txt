@@ -1,0 +1,131 @@
+modified: event_windows.py
+--- a/event_windows.py
++++ b/event_windows.py
+@@ -49,4 +49,39 @@
+ 
+     Returns the list of `(window_start, window_end, aggregate)` tuples.
+     """
+-    raise NotImplementedError
++    if type(window_size) is not int or window_size <= 0:
++        raise ValueError("window_size must be a positive int")
++    if agg not in ("sum", "avg", "min", "max", "count"):
++        raise ValueError("unsupported aggregation mode")
++    if not isinstance(events, list):
++        raise ValueError("events must be a list")
++
++    windows = {}
++    for event in events:
++        if not isinstance(event, (tuple, list)) or len(event) != 2:
++            raise ValueError("each event must be a tuple or list of length 2")
++        timestamp, value = event
++        if type(timestamp) is not int:
++            raise TypeError("timestamp must be an int")
++        if type(value) not in (int, float):
++            raise TypeError("value must be an int or float")
++        index = timestamp // window_size
++        windows.setdefault(index, []).append(value)
++
++    result = []
++    for index in sorted(windows):
++        values = windows[index]
++        start = index * window_size
++        end = start + window_size
++        if agg == "sum":
++            aggregate = sum(values)
++        elif agg == "avg":
++            aggregate = float(sum(values) / len(values))
++        elif agg == "min":
++            aggregate = min(values)
++        elif agg == "max":
++            aggregate = max(values)
++        else:  # count
++            aggregate = len(values)
++        result.append((start, end, aggregate))
++    return result
+modified: intervals.py
+--- a/intervals.py
++++ b/intervals.py
+@@ -41,4 +41,43 @@
+ 
+     Returns the merged list of `(start, end)` tuples.
+     """
+-    raise NotImplementedError
++    # Validate optional bounds before processing the input so malformed
++    # bounds are reported consistently even when ``intervals`` is empty.
++    if lo is not None and type(lo) is not int:
++        raise TypeError("lo must be an int")
++    if hi is not None and type(hi) is not int:
++        raise TypeError("hi must be an int")
++    if lo is not None and hi is not None and lo > hi:
++        raise ValueError("lo must not exceed hi")
++
++    kept = []
++    for interval in intervals:
++        if not isinstance(interval, (tuple, list)) or len(interval) != 2:
++            raise ValueError("each interval must be a tuple or list of length 2")
++        start, end = interval
++        if type(start) is not int or type(end) is not int:
++            raise TypeError("interval endpoints must be ints")
++        if start > end:
++            raise ValueError("interval start must not exceed end")
++
++        if lo is not None:
++            start = max(start, lo)
++        if hi is not None:
++            end = min(end, hi)
++        if start >= end:
++            continue
++        kept.append((start, end))
++
++    if not kept:
++        return []
++
++    kept.sort(key=lambda pair: pair[0])
++    merged = [kept[0]]
++    for start, end in kept[1:]:
++        prev_start, prev_end = merged[-1]
++        if start <= prev_end:  # overlap or merely touch
++            if end > prev_end:
++                merged[-1] = (prev_start, end)
++        else:
++            merged.append((start, end))
++    return merged
+modified: path_normalize.py
+--- a/path_normalize.py
++++ b/path_normalize.py
+@@ -44,4 +44,34 @@
+ 
+     Returns the normalized path string.
+     """
+-    raise NotImplementedError
++    if not isinstance(path, str):
++        raise TypeError("path must be a string")
++    if path == "":
++        raise ValueError("path must not be empty")
++    if "\\" in path:
++        raise ValueError("backslashes are not allowed")
++
++    absolute = path.startswith("/")
++    # Splitting naturally handles duplicate separators and produces empty
++    # segments, which are ignored below.  No whitespace is stripped.
++    stack = []
++    for segment in path.split("/"):
++        if segment == "" or segment == ".":
++            continue
++        if segment == "..":
++            # Only a real segment can be cancelled; leading/unmatched ``..``
++            # segments are preserved for relative paths and discarded for
++            # absolute paths.
++            for i in range(len(stack) - 1, -1, -1):
++                if stack[i] != "..":
++                    del stack[i]
++                    break
++            else:
++                if not absolute:
++                    stack.append("..")
++            continue
++        stack.append(segment)
++
++    if absolute:
++        return "/" + "/".join(stack) if stack else "/"
++    return "/".join(stack) if stack else "."

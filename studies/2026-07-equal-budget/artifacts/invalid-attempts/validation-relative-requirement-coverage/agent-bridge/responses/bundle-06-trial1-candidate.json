@@ -1,0 +1,8 @@
+{
+  "id": "bundle-06-trial1-candidate",
+  "status": "completed",
+  "duration_seconds": 190,
+  "num_turns": 1,
+  "cost_usd": 0,
+  "detail": "Implemented all three requested modules from their docstrings. Added stable multi-key sorting with null-last handling and validation; exact bordered table rendering with alignment, truncation, and validation; and a direct non-regex glob parser/matcher supporting stars, question marks, character classes, ranges, negation, and escaping. Verified with uv-run assertion suites, including exhaustive small-pattern glob checks."
+}

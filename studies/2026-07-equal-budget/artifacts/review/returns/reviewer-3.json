@@ -1,0 +1,71 @@
+{
+  "reviewer_id": "reviewer-3",
+  "reviews": [
+    {
+      "item_id": "requirement-coverage",
+      "preferred_arm": "arm_b",
+      "arm_a_scores": {
+        "specificity": 5,
+        "plausibility": 4,
+        "testability": 4,
+        "mechanism_clarity": 5,
+        "risk_awareness": 4,
+        "protocol_quality": 3
+      },
+      "arm_b_scores": {
+        "specificity": 5,
+        "plausibility": 4,
+        "testability": 5,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 5
+      },
+      "justification": "Arm B makes omissions auditable with a compact requirement-to-module ledger and supplies a more precise randomized protocol and overhead threshold; Arm A has a strong scheduling mechanism but a vague success condition.",
+      "confidence": 0.88
+    },
+    {
+      "item_id": "edge-semantics",
+      "preferred_arm": "arm_b",
+      "arm_a_scores": {
+        "specificity": 5,
+        "plausibility": 4,
+        "testability": 4,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 3
+      },
+      "arm_b_scores": {
+        "specificity": 5,
+        "plausibility": 4,
+        "testability": 5,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 5
+      },
+      "justification": "Both interventions clearly externalize edge contracts, but Arm B turns them into explicitly enumerable matrix rows and pairs that mechanism with a stronger held-out, matched-task protocol and concrete cost criteria.",
+      "confidence": 0.82
+    },
+    {
+      "item_id": "verification-efficiency",
+      "preferred_arm": "arm_a",
+      "arm_a_scores": {
+        "specificity": 5,
+        "plausibility": 4,
+        "testability": 5,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 5
+      },
+      "arm_b_scores": {
+        "specificity": 5,
+        "plausibility": 4,
+        "testability": 4,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 3
+      },
+      "justification": "Arm A gives an auditable risk ranking, a hard verification budget, and explicit deadline-miss and overhead criteria. Arm B has a compelling counterexample mechanism but a less bounded residual budget and a vaguer success threshold.",
+      "confidence": 0.87
+    }
+  ]
+}

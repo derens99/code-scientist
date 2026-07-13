@@ -1,0 +1,113 @@
+modified: event_windows.py
+--- a/event_windows.py
++++ b/event_windows.py
+@@ -49,4 +49,36 @@
+ 
+     Returns the list of `(window_start, window_end, aggregate)` tuples.
+     """
+-    raise NotImplementedError
++    if not isinstance(window_size, int) or window_size <= 0:
++        raise ValueError("window_size must be a positive int")
++    if agg not in {"sum", "avg", "min", "max", "count"}:
++        raise ValueError("unsupported aggregation")
++    if not isinstance(events, list):
++        raise ValueError("events must be a list")
++
++    windows = {}
++    for event in events:
++        if not isinstance(event, (tuple, list)) or len(event) != 2:
++            raise ValueError("each event must be a pair")
++        timestamp, value = event
++        if not isinstance(timestamp, int):
++            raise TypeError("timestamps must be ints")
++        index = timestamp // window_size
++        windows.setdefault(index, []).append(value)
++
++    result = []
++    for index in sorted(windows):
++        values = windows[index]
++        if agg == "sum":
++            aggregate = sum(values)
++        elif agg == "avg":
++            aggregate = float(sum(values) / len(values))
++        elif agg == "min":
++            aggregate = min(values)
++        elif agg == "max":
++            aggregate = max(values)
++        else:
++            aggregate = len(values)
++        start = index * window_size
++        result.append((start, start + window_size, aggregate))
++    return result
+modified: intervals.py
+--- a/intervals.py
++++ b/intervals.py
+@@ -41,4 +41,36 @@
+ 
+     Returns the merged list of `(start, end)` tuples.
+     """
+-    raise NotImplementedError
++    if lo is not None and not isinstance(lo, int):
++        raise TypeError("lo must be an int")
++    if hi is not None and not isinstance(hi, int):
++        raise TypeError("hi must be an int")
++    if lo is not None and hi is not None and lo > hi:
++        raise ValueError("lo must not exceed hi")
++
++    clamped = []
++    for interval in intervals:
++        if not isinstance(interval, (tuple, list)) or len(interval) != 2:
++            raise ValueError("each interval must be a pair")
++        start, end = interval
++        if not isinstance(start, int) or not isinstance(end, int):
++            raise TypeError("interval endpoints must be ints")
++        if start > end:
++            raise ValueError("interval start must not exceed end")
++
++        if lo is not None:
++            start = max(start, lo)
++        if hi is not None:
++            end = min(end, hi)
++        if start < end:
++            clamped.append((start, end))
++
++    clamped.sort()
++    merged = []
++    for start, end in clamped:
++        if not merged or start > merged[-1][1]:
++            merged.append((start, end))
++        else:
++            previous_start, previous_end = merged[-1]
++            merged[-1] = (previous_start, max(previous_end, end))
++    return merged
+modified: path_normalize.py
+--- a/path_normalize.py
++++ b/path_normalize.py
+@@ -44,4 +44,26 @@
+ 
+     Returns the normalized path string.
+     """
+-    raise NotImplementedError
++    if not isinstance(path, str):
++        raise TypeError("path must be a string")
++    if path == "":
++        raise ValueError("path must not be empty")
++    if "\\" in path:
++        raise ValueError("backslashes are not allowed")
++
++    absolute = path.startswith("/")
++    kept = []
++    for segment in path.split("/"):
++        if segment == "" or segment == ".":
++            continue
++        if segment == "..":
++            if kept and kept[-1] != "..":
++                kept.pop()
++            elif not absolute:
++                kept.append(segment)
++        else:
++            kept.append(segment)
++
++    if absolute:
++        return "/" + "/".join(kept)
++    return "/".join(kept) if kept else "."

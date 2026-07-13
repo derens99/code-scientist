@@ -1,0 +1,8 @@
+{
+  "id": "bundle-06-trial2-candidate",
+  "status": "completed",
+  "duration_seconds": 238.0,
+  "num_turns": 1,
+  "cost_usd": 0.0,
+  "detail": "Implemented record_sort.py, table_render.py, and glob_match.py; recorded boundary contracts before code edits; verified compilation and edge behavior with uv."
+}
