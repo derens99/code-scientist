@@ -336,6 +336,9 @@ def _success_payload() -> str:
 
 def test_claude_cli_executor_argv_env_and_parsing(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "harness-proxy-key")
+    monkeypatch.setenv("DATABASE_PASSWORD", "do-not-leak")
+    monkeypatch.setenv("GITHUB_TOKEN", "do-not-leak")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/tmp/claude-config")
     record: dict = {}
     executor = ClaudeCliAgentExecutor(
         model="claude-haiku-4-5",
@@ -358,6 +361,9 @@ def test_claude_cli_executor_argv_env_and_parsing(tmp_path, monkeypatch):
     assert record["stdin"] == "Fix the bug."
     assert record["cwd"] == str(workspace)
     assert "ANTHROPIC_API_KEY" not in record["env"]
+    assert "DATABASE_PASSWORD" not in record["env"]
+    assert "GITHUB_TOKEN" not in record["env"]
+    assert record["env"]["CLAUDE_CONFIG_DIR"] == "/tmp/claude-config"
     assert invocation.status == "completed"
     assert invocation.num_turns == 4.0
     assert invocation.cost_usd == pytest.approx(0.0125)

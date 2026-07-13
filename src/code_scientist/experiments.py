@@ -31,9 +31,9 @@ from typing import Any
 
 from code_scientist.llm import (
     BRIDGE_STOP_FILENAME,
-    CLAUDE_CLI_SANITIZED_ENV_VARS,
     DEFAULT_BRIDGE_POLL_SECONDS,
     DEFAULT_CLAUDE_CLI_BINARY,
+    host_cli_environment,
     read_dotenv,
     _atomic_write_json,
     _read_json_object,
@@ -429,14 +429,12 @@ class ClaudeCliAgentExecutor:
                 )
 
     def _child_env(self) -> dict[str, str]:
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if key not in CLAUDE_CLI_SANITIZED_ENV_VARS
-        }
-        if self.agent_auth == "api-key":
-            env["ANTHROPIC_API_KEY"] = self._api_key
-        return env
+        explicit = (
+            {"ANTHROPIC_API_KEY": self._api_key}
+            if self.agent_auth == "api-key"
+            else None
+        )
+        return host_cli_environment(explicit)
 
     def run_trial(self, spec: TrialSpec) -> AgentInvocation:
         argv = [

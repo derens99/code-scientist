@@ -215,10 +215,14 @@ def test_claude_cli_client_runs_headless_print_mode_with_prompt_on_stdin():
     assert timeout == pytest.approx(600.0)
 
 
-def test_claude_cli_client_strips_session_auth_env_overrides(monkeypatch):
+def test_claude_cli_client_allowlists_child_environment(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "stale-key")
     monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "stale-token")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://session-proxy.local")
+    monkeypatch.setenv("DATABASE_PASSWORD", "do-not-leak")
+    monkeypatch.setenv("UNRELATED_SERVICE_TOKEN", "do-not-leak")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "/tmp/claude-config")
+    monkeypatch.setenv("LC_ALL", "C.UTF-8")
     seen_envs = []
 
     def runner(argv, stdin_text, timeout, env):
@@ -232,7 +236,11 @@ def test_claude_cli_client_strips_session_auth_env_overrides(monkeypatch):
     assert "ANTHROPIC_API_KEY" not in env
     assert "ANTHROPIC_AUTH_TOKEN" not in env
     assert "ANTHROPIC_BASE_URL" not in env
+    assert "DATABASE_PASSWORD" not in env
+    assert "UNRELATED_SERVICE_TOKEN" not in env
     assert "PATH" in env
+    assert env["CLAUDE_CONFIG_DIR"] == "/tmp/claude-config"
+    assert env["LC_ALL"] == "C.UTF-8"
 
 
 def test_claude_cli_client_resolves_alias_only_local_install(tmp_path, monkeypatch):
@@ -332,6 +340,24 @@ def test_codex_cli_client_reads_last_message_file_and_cleans_up():
     assert "--model" not in argv
     assert stdin_text == "Generate research ideas."
     assert not seen_paths[0].exists()
+
+
+def test_codex_cli_client_allowlists_child_environment(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "do-not-leak")
+    monkeypatch.setenv("GITHUB_TOKEN", "do-not-leak")
+    monkeypatch.setenv("CODEX_HOME", "/tmp/codex-home")
+    seen_envs = []
+
+    def runner(argv, stdin_text, timeout, env):
+        seen_envs.append(env)
+        Path(argv[argv.index("--output-last-message") + 1]).write_text("ok", encoding="utf-8")
+        return _completed(argv)
+
+    assert CodexCLIClient(runner=runner).complete("prompt") == "ok"
+    assert seen_envs[0]["CODEX_HOME"] == "/tmp/codex-home"
+    assert "PATH" in seen_envs[0]
+    assert "OPENAI_API_KEY" not in seen_envs[0]
+    assert "GITHUB_TOKEN" not in seen_envs[0]
 
 
 def test_codex_cli_client_forwards_explicit_model():
