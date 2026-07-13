@@ -1,0 +1,441 @@
+{
+  "goal": {
+    "id": "requirement-coverage",
+    "objective": "Identify exactly one appended system-prompt instruction that could improve a coding agent's complete extraction and implementation of dispersed requirements across several Python modules under a fixed deadline. The intervention must be directly A/B testable against no appended instruction, add minimal overhead, name its causal mechanism, and state concrete failure risks.",
+    "cycles": 2,
+    "max_hypotheses": 3,
+    "max_matches": 1
+  },
+  "matched_call_count": 16,
+  "proposal_call_count": 12,
+  "selection_call_count": 4,
+  "proposals": [
+    {
+      "candidate_id": "candidate-020636159c2633ec-01",
+      "proposal_digest": "020636159c2633ec",
+      "proposal": {
+        "title": "Requirement-to-module coverage ledger",
+        "intervention": "Maintain a compact ledger mapping every explicit requirement to its affected Python module and verification, and do not declare completion while any ledger entry is unmapped or unverified.",
+        "claim": "Against no appended instruction, this instruction will increase full-task pass rate on fixed-deadline multi-module Python tasks without increasing median wall time or turns by more than 10%.",
+        "mechanism": "Externalizing requirement-to-module coverage reduces working-memory loss and premature completion by making omitted or unverified dispersed requirements auditable before the agent stops.",
+        "assumptions": [
+          "Task requirements can be represented as a short ledger without consuming material deadline budget.",
+          "The agent can identify affected modules and available verification from the repository and task text."
+        ],
+        "risks": [
+          "The ledger may encode an initially missed or misinterpreted requirement and create false confidence.",
+          "Maintaining the ledger may consume scarce time on very short deadlines.",
+          "The agent may over-expand scope by mapping implied rather than explicit requirements."
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched multi-module Python tasks with identical deadlines and agent settings to this appended instruction or no appended instruction.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The intervention arm has a higher full-task pass rate, with median wall_time and turns each no more than 10% above control."
+        },
+        "single_shot_ordinal": 1
+      }
+    },
+    {
+      "candidate_id": "candidate-23051746cb2d34bc-02",
+      "proposal_digest": "23051746cb2d34bc",
+      "proposal": {
+        "title": "Final requirement sweep",
+        "intervention": "Before declaring the task complete, reread the original request once and check each explicit requirement against the final diff across all touched Python modules, fixing any uncovered item within the remaining deadline.",
+        "claim": "Compared with no appended instruction, this single final sweep will raise the proportion of fixed-deadline multi-module Python tasks satisfying every explicit requirement while adding at most 10% to median wall time and turns.",
+        "mechanism": "A forced comparison between the stable source request and the concrete final diff counters attention decay and premature stopping that leave late or cross-module requirements unimplemented.",
+        "assumptions": [
+          "The original request remains available at completion time.",
+          "Enough deadline remains for one concise reread and targeted correction."
+        ],
+        "risks": [
+          "The sweep may occur too late to repair a substantial omission.",
+          "Diff-only checking can miss required behavior caused by untouched modules or runtime configuration.",
+          "Rereading may prompt unnecessary scope expansion from ambiguous wording."
+        ],
+        "test_plan": {
+          "experiment": "Randomize matched dispersed-requirement Python tasks between this appended instruction and no appended instruction under identical agent and deadline settings.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The instruction arm achieves a higher all-requirements pass_rate and neither median wall_time nor median turns exceeds control by more than 10%."
+        },
+        "single_shot_ordinal": 2
+      }
+    },
+    {
+      "candidate_id": "candidate-4a3fa43cc634349a-03",
+      "proposal_digest": "4a3fa43cc634349a",
+      "proposal": {
+        "title": "Atomic requirement parsing",
+        "intervention": "Treat every independently testable clause in the user request as a separate acceptance criterion, including clauses joined by conjunctions, and implement each criterion before stopping.",
+        "claim": "On matched fixed-deadline Python tasks with requirements dispersed across modules, appending this instruction will improve complete-task pass_rate versus no appended instruction with no more than a 10% increase in median wall_time or turns.",
+        "mechanism": "Splitting compound language into atomic acceptance criteria prevents one implemented clause from masking an omitted sibling clause during planning and completion judgment.",
+        "assumptions": [
+          "Most target requirements are expressible as independently testable clauses.",
+          "The agent can distinguish requirement conjunctions from explanatory prose."
+        ],
+        "risks": [
+          "Over-segmentation may turn one coherent behavior into redundant work.",
+          "Ambiguous clauses may be incorrectly promoted to mandatory scope.",
+          "More acceptance criteria may encourage shallow coverage when the deadline is tight."
+        ],
+        "test_plan": {
+          "experiment": "Assign matched multi-module Python tasks at random to identical agents with either this appended instruction or no appended instruction and enforce the same deadline.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The treatment produces a higher all-criteria pass_rate while treatment median wall_time and turns are each at most 110% of control."
+        },
+        "single_shot_ordinal": 3
+      }
+    },
+    {
+      "candidate_id": "candidate-3ddab07838cdfc3b-04",
+      "proposal_digest": "3ddab07838cdfc3b",
+      "proposal": {
+        "title": "Named-concept repository sweep",
+        "intervention": "Search the repository once for each concrete symbol, command, or behavior named in the request and inspect its Python hits before deciding which modules to change.",
+        "claim": "Relative to no appended instruction, this bounded search instruction will increase all-requirements pass_rate on matched deadline-limited multi-module Python tasks without raising median wall_time or turns by more than 10%.",
+        "mechanism": "Request-derived searches expose distributed implementations and call sites that a locality-biased agent would otherwise overlook when selecting files.",
+        "assumptions": [
+          "The request contains searchable names or behavior terms that occur in the repository.",
+          "Repository search is available and fast relative to the deadline."
+        ],
+        "risks": [
+          "Generic terms may produce noisy hits and waste time.",
+          "Requirements described with vocabulary different from the code may still be missed.",
+          "Inspecting textual hits may bias the agent away from dynamically connected modules."
+        ],
+        "test_plan": {
+          "experiment": "Randomize matched dispersed-requirement Python tasks to the appended search instruction or no appended instruction with the same repository, agent, and deadline.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "Treatment has higher complete-task pass_rate, and its median wall_time and turns are each no greater than 1.10 times control."
+        },
+        "single_shot_ordinal": 4
+      }
+    },
+    {
+      "candidate_id": "candidate-fa8cf2aac8301d5e-05",
+      "proposal_digest": "fa8cf2aac8301d5e",
+      "proposal": {
+        "title": "Producer-consumer closure",
+        "intervention": "For each requested behavior, identify its producing Python module and direct consuming modules, and account for both sides in the implementation before stopping.",
+        "claim": "Appending this instruction will improve complete pass_rate over no appended instruction on matched fixed-deadline Python tasks whose requirements cross module boundaries, with at most 10% higher median wall_time and turns.",
+        "mechanism": "Explicit producer-consumer closure counters single-file fixation by making cross-module contracts and propagation points salient at the moment implementation scope is chosen.",
+        "assumptions": [
+          "Requested behaviors have identifiable producers and direct consumers in the codebase.",
+          "Direct dependency inspection is sufficient for most task-relevant propagation."
+        ],
+        "risks": [
+          "Dynamic dispatch or registration may hide consumers.",
+          "The agent may inspect irrelevant consumers and lose deadline time.",
+          "Focusing on module boundaries may underweight standalone validation or documentation requirements."
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched cross-module Python tasks under identical deadlines to agents with this instruction appended or to agents with no appended instruction.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "The appended-instruction arm yields higher full-task pass_rate while median wall_time and turns remain within 10% of control."
+        },
+        "single_shot_ordinal": 5
+      }
+    },
+    {
+      "candidate_id": "candidate-ad0bfc3d0a405256-06",
+      "proposal_digest": "ad0bfc3d0a405256",
+      "proposal": {
+        "title": "Coverage before refinement",
+        "intervention": "Implement the smallest complete change for every explicit requirement before spending remaining deadline time on refinement, cleanup, or optional robustness.",
+        "claim": "Compared with no appended instruction, this prioritization will increase full-requirement pass_rate on deadline-constrained multi-module Python tasks without increasing median wall_time or turns.",
+        "mechanism": "Coverage-first allocation prevents early requirements or local polish from consuming the finite budget before later dispersed requirements receive any implementation.",
+        "assumptions": [
+          "A minimal complete implementation can be distinguished from optional refinement.",
+          "The benchmark rewards satisfying all explicit requirements more than polish beyond them."
+        ],
+        "risks": [
+          "Minimal implementations may be brittle or fail hidden edge cases.",
+          "Deferring cleanup may leave inconsistent cross-module abstractions.",
+          "Some foundational requirements must be implemented deeply before others can work."
+        ],
+        "test_plan": {
+          "experiment": "Randomize matched multi-module Python tasks to identical agents with this appended instruction or none, using the same fixed deadline and evaluation suite.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "Treatment achieves higher all-requirements pass_rate with median wall_time and turns no higher than control."
+        },
+        "single_shot_ordinal": 6
+      }
+    },
+    {
+      "candidate_id": "candidate-2612d647991bee1c-07",
+      "proposal_digest": "2612d647991bee1c",
+      "proposal": {
+        "title": "One assertion per requirement",
+        "intervention": "Represent every explicit requirement with at least one focused automated assertion and make those assertions pass before declaring completion.",
+        "claim": "On matched fixed-deadline Python tasks with dispersed requirements, this appended instruction will produce a higher complete pass_rate than no appended instruction while keeping median wall_time and turns within 15% of control.",
+        "mechanism": "Requiring a concrete assertion for each requirement turns vague completion judgments into executable coverage signals that expose omissions and cross-module integration failures.",
+        "assumptions": [
+          "Each explicit requirement has behavior that can be asserted within the available test harness.",
+          "Focused assertions can be written and run within the deadline."
+        ],
+        "risks": [
+          "The agent may write weak assertions that mirror its implementation and miss the intended behavior.",
+          "Test construction may consume time needed for implementation.",
+          "Nonfunctional requirements may not map cleanly to automated assertions."
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched multi-module Python tasks and fixed deadlines to the appended instruction or no-instruction control, then grade both with an independent hidden suite.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "Treatment complete-task pass_rate is higher, with treatment median wall_time and turns each no more than 115% of control."
+        },
+        "single_shot_ordinal": 7
+      }
+    },
+    {
+      "candidate_id": "candidate-7a7b1eb88dcc7834-08",
+      "proposal_digest": "7a7b1eb88dcc7834",
+      "proposal": {
+        "title": "Bidirectional requirement trace",
+        "intervention": "Ensure every explicit requirement is supported by a concrete final code or test change and every final change can be traced back to an explicit requirement.",
+        "claim": "Versus no appended instruction, this traceability constraint will improve all-requirements pass_rate on matched deadline-bound multi-module Python tasks while limiting median wall_time and turns overhead to 10%.",
+        "mechanism": "Bidirectional traceability simultaneously surfaces uncovered requirements and suppresses unrelated work that would otherwise consume the fixed implementation budget.",
+        "assumptions": [
+          "Explicit requirements can be mapped to observable changes in code or tests.",
+          "Most unnecessary work lacks a direct requirement trace."
+        ],
+        "risks": [
+          "Necessary refactoring or compatibility work may not map directly to request wording.",
+          "A superficial trace can conceal incomplete behavior.",
+          "Maintaining traceability may distract from emergent integration issues."
+        ],
+        "test_plan": {
+          "experiment": "Run matched requirement-dispersed Python tasks with identical agents and deadlines, randomly appending this instruction for treatment and nothing for control.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "Treatment has higher full-task pass_rate and its median wall_time and turns are each at most 110% of control."
+        },
+        "single_shot_ordinal": 8
+      }
+    },
+    {
+      "candidate_id": "candidate-8ca692d2a041f97c-09",
+      "proposal_digest": "8ca692d2a041f97c",
+      "proposal": {
+        "title": "Verbatim constraint capture",
+        "intervention": "Before coding, copy every request clause containing a mandate, prohibition, exception, quantity, or deadline into a compact scratch list and preserve those exact constraints in the implementation.",
+        "claim": "Appending this instruction will increase complete-task pass_rate relative to no appended instruction on matched fixed-deadline multi-module Python tasks, with no more than 10% median wall_time or turns overhead.",
+        "mechanism": "Verbatim capture protects high-information qualifiers and negative constraints from being simplified away when the agent compresses a long dispersed request into working memory.",
+        "assumptions": [
+          "Critical requirements are linguistically marked by mandates, prohibitions, exceptions, quantities, or timing language.",
+          "A compact scratch list remains visible during implementation."
+        ],
+        "risks": [
+          "Important declarative requirements without marker words may be omitted.",
+          "Literal preservation can mishandle ambiguous or inconsistent wording.",
+          "Copying constraints may use time without revealing which modules implement them."
+        ],
+        "test_plan": {
+          "experiment": "Randomize matched dispersed-requirement Python tasks under the same deadline between agents receiving this appended instruction and agents receiving no appended instruction.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "Treatment improves all-requirements pass_rate while its median wall_time and turns each remain at or below 110% of control."
+        },
+        "single_shot_ordinal": 9
+      }
+    },
+    {
+      "candidate_id": "candidate-cdce4b09ebe348df-10",
+      "proposal_digest": "cdce4b09ebe348df",
+      "proposal": {
+        "title": "Ten-percent scope map",
+        "intervention": "Spend no more than the first 10% of the deadline listing each explicit acceptance criterion with its likely owning Python module, then use that map to bound the implementation.",
+        "claim": "Against no appended instruction, this time-boxed scope map will improve full-task pass_rate on matched dispersed-requirement Python tasks while keeping median wall_time and turns within 10% of control.",
+        "mechanism": "A small protected discovery budget reduces premature file selection and omission of remote requirements without allowing open-ended planning to consume the fixed deadline.",
+        "assumptions": [
+          "Likely module ownership can be estimated within 10% of the available time.",
+          "The remaining 90% of the deadline is sufficient for implementation and verification."
+        ],
+        "risks": [
+          "Incorrect early ownership guesses may anchor subsequent work.",
+          "Ten percent may be excessive for short tasks or insufficient for unfamiliar repositories.",
+          "Requirements spanning several modules may be forced into one misleading owner."
+        ],
+        "test_plan": {
+          "experiment": "Randomly assign matched multi-module Python tasks with fixed deadlines to this appended instruction or no appended instruction using identical agents and evaluation.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "Treatment complete-task pass_rate exceeds control and treatment median wall_time and turns are each no more than 110% of control."
+        },
+        "single_shot_ordinal": 10
+      }
+    },
+    {
+      "candidate_id": "candidate-963cc93a1aacf83a-11",
+      "proposal_digest": "963cc93a1aacf83a",
+      "proposal": {
+        "title": "Shared-contract closure",
+        "intervention": "Whenever a requirement changes a shared function, class, schema, or configuration contract, update its definition, every statically discoverable Python consumer, and its focused tests as one bounded change.",
+        "claim": "On matched deadline-limited multi-module Python tasks, appending this contract-closure instruction will increase complete pass_rate versus no appended instruction with median wall_time and turns no more than 15% higher.",
+        "mechanism": "Treating shared contracts as an indivisible change unit prevents partial implementations in which a central definition changes but dispersed consumers or validations retain the old behavior.",
+        "assumptions": [
+          "Cross-module requirements commonly propagate through discoverable shared contracts.",
+          "Static search finds the consumers relevant to the task."
+        ],
+        "risks": [
+          "Dynamic consumers may remain undiscovered.",
+          "Updating every apparent consumer can expand scope beyond the deadline.",
+          "Bundling tests with implementation may encourage tests that merely confirm the chosen design."
+        ],
+        "test_plan": {
+          "experiment": "Randomly allocate matched Python tasks involving shared contracts to identical fixed-deadline agents with this appended instruction or no appended instruction.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "Treatment all-requirements pass_rate is higher while its median wall_time and turns each stay within 115% of control."
+        },
+        "single_shot_ordinal": 11
+      }
+    },
+    {
+      "candidate_id": "candidate-75892bc8b94df3c5-12",
+      "proposal_digest": "75892bc8b94df3c5",
+      "proposal": {
+        "title": "Evidence-gated completion",
+        "intervention": "Do not declare completion unless you can name one concrete executed verification result for every explicit requirement; use any missing result to target the remaining work.",
+        "claim": "Relative to no appended instruction, evidence-gated completion will raise the full-task pass_rate on matched fixed-deadline multi-module Python tasks while adding no more than 15% to median wall_time or turns.",
+        "mechanism": "Requiring requirement-specific execution evidence replaces a subjective done signal with an omission detector and directs scarce remaining effort toward uncovered behavior.",
+        "assumptions": [
+          "Every explicit requirement admits a concrete verification executable within the deadline.",
+          "Verification results are sufficiently diagnostic to guide a correction."
+        ],
+        "risks": [
+          "The agent may choose weak or irrelevant verification evidence.",
+          "Running separate checks can consume the remaining deadline.",
+          "Some structural or quality requirements may lack a concise executable result."
+        ],
+        "test_plan": {
+          "experiment": "Randomize matched dispersed-requirement Python tasks under identical deadlines and agent settings to this appended instruction or no appended instruction; grade with independent tests.",
+          "metrics": [
+            "pass_rate",
+            "wall_time",
+            "turns"
+          ],
+          "success_condition": "Treatment has higher complete-task pass_rate and its median wall_time and turns do not exceed 115% of control."
+        },
+        "single_shot_ordinal": 12
+      }
+    }
+  ],
+  "selections": [
+    {
+      "selected_id": "candidate-020636159c2633ec-01",
+      "reason": "It most directly covers the full causal chain in the objective: explicit requirements are externalized, mapped to dispersed modules, paired with verification, and used as an auditable stop gate. The intervention is a single bounded instruction, its mechanism targets omission and premature completion, its risks are concrete, and its matched A/B protocol specifies both coverage benefit and overhead limits.",
+      "scores": {
+        "specificity": 5,
+        "plausibility": 5,
+        "testability": 5,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 5
+      }
+    },
+    {
+      "selected_id": "candidate-020636159c2633ec-01",
+      "reason": "This candidate is the most specific fit to dispersed requirement coverage because it binds each explicit requirement to both affected modules and verification, then makes unresolved mappings an explicit stop condition. Its proposed mechanism is plausible, the overhead is explicitly constrained by compactness, and the A/B protocol and stated failure modes are directly auditable.",
+      "scores": {
+        "specificity": 5,
+        "plausibility": 5,
+        "testability": 5,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 5
+      }
+    },
+    {
+      "selected_id": "candidate-020636159c2633ec-01",
+      "reason": "The ledger instruction operationalizes complete extraction, cross-module implementation coverage, and verification in one compact artifact, making compliance observable without prescribing a large workflow. It directly addresses working-memory loss and premature completion, includes credible counter-risks, and defines a clean randomized comparison with explicit benefit and overhead thresholds.",
+      "scores": {
+        "specificity": 5,
+        "plausibility": 5,
+        "testability": 5,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 5
+      }
+    },
+    {
+      "selected_id": "candidate-020636159c2633ec-01",
+      "reason": "It provides the clearest bounded intervention for the exact failure mode: a compact requirement-by-module ledger externalizes dispersed scope and couples each item to verification before completion. The causal account is direct, the assumptions and failure risks are explicit, and the matched randomized protocol makes both coverage gains and time or turn costs falsifiable.",
+      "scores": {
+        "specificity": 5,
+        "plausibility": 5,
+        "testability": 5,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 5
+      }
+    }
+  ],
+  "selected": {
+    "candidate_id": "candidate-020636159c2633ec-01",
+    "proposal_digest": "020636159c2633ec",
+    "proposal": {
+      "title": "Requirement-to-module coverage ledger",
+      "intervention": "Maintain a compact ledger mapping every explicit requirement to its affected Python module and verification, and do not declare completion while any ledger entry is unmapped or unverified.",
+      "claim": "Against no appended instruction, this instruction will increase full-task pass rate on fixed-deadline multi-module Python tasks without increasing median wall time or turns by more than 10%.",
+      "mechanism": "Externalizing requirement-to-module coverage reduces working-memory loss and premature completion by making omitted or unverified dispersed requirements auditable before the agent stops.",
+      "assumptions": [
+        "Task requirements can be represented as a short ledger without consuming material deadline budget.",
+        "The agent can identify affected modules and available verification from the repository and task text."
+      ],
+      "risks": [
+        "The ledger may encode an initially missed or misinterpreted requirement and create false confidence.",
+        "Maintaining the ledger may consume scarce time on very short deadlines.",
+        "The agent may over-expand scope by mapping implied rather than explicit requirements."
+      ],
+      "test_plan": {
+        "experiment": "Randomly assign matched multi-module Python tasks with identical deadlines and agent settings to this appended instruction or no appended instruction.",
+        "metrics": [
+          "pass_rate",
+          "wall_time",
+          "turns"
+        ],
+        "success_condition": "The intervention arm has a higher full-task pass rate, with median wall_time and turns each no more than 10% above control."
+      },
+      "single_shot_ordinal": 1
+    }
+  }
+}

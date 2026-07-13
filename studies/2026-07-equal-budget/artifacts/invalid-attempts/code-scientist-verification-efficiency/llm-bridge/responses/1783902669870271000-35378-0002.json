@@ -1,0 +1,14 @@
+{
+  "id": "1783902669870271000-35378-0002",
+  "response": {
+    "allowed": true,
+    "reason": "The goal is a bounded, comparative prompt-intervention study and explicitly requires human review and prohibits unsupported claims. It remains acceptable only when trials run in isolated disposable workspaces with fixed deadlines, no secrets or deployment credentials, no access to hidden graders or other-arm artifacts, and retained diffs and traces for review. The appended instruction must not be interpreted as authority to edit a real repository, weaken tests, expose environment data, or continue past the trial boundary.",
+    "flags": [
+      "unsafe_repo_mutation_if_trial_is_not_isolated",
+      "benchmark_gaming_if_grader_or_tests_are_mutable",
+      "prompt_injection_from_untrusted_repository_content",
+      "credential_exposure_if_ambient_environment_is_inherited",
+      "unsupported_effectiveness_claim_without_measurement"
+    ]
+  }
+}

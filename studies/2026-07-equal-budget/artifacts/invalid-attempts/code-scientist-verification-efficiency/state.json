@@ -1,0 +1,3550 @@
+{
+  "goal": {
+    "id": "goal-d0a6a71c25e8",
+    "objective": "Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.",
+    "domain": "ai_llm_code",
+    "preferences": [
+      "aligned with the research objective",
+      "plausible from code, benchmark, or literature evidence",
+      "novel or a novel combination of known techniques",
+      "testable with a concrete experiment",
+      "safe and auditable"
+    ],
+    "constraints": [
+      "do not autonomously modify source code",
+      "do not claim measured improvement without benchmark evidence"
+    ],
+    "metrics": [
+      "pass_rate",
+      "regression_count",
+      "tool_calls",
+      "wall_time",
+      "cost"
+    ],
+    "safety_notes": [
+      "human review required before applying code changes"
+    ],
+    "allowed_sources": [],
+    "allowed_tools": [],
+    "output_formats": [],
+    "termination_criteria": []
+  },
+  "run_status": "completed",
+  "plan": {
+    "id": "plan-5818f41bf356",
+    "goal_id": "goal-d0a6a71c25e8",
+    "proposal_preferences": [
+      "aligned with the research objective",
+      "plausible from code, benchmark, or literature evidence",
+      "novel or a novel combination of known techniques",
+      "testable with a concrete experiment",
+      "safe and auditable"
+    ],
+    "evaluation_criteria": [
+      "alignment",
+      "plausibility",
+      "novelty",
+      "testability",
+      "safety",
+      "pass_rate",
+      "regression_count",
+      "tool_calls",
+      "wall_time",
+      "cost"
+    ],
+    "generation_methods": [
+      "paper_seeded_idea_generation",
+      "assumption_decomposition",
+      "research_expansion_from_meta_review"
+    ],
+    "review_types": [
+      "initial_review",
+      "safety_review",
+      "recurrent_tournament_review"
+    ],
+    "evolution_strategies": [
+      "simplification",
+      "feasibility_improvement",
+      "feedback_grounding",
+      "evidence_grounding"
+    ],
+    "scheduler_weights": {
+      "generation": 1.0,
+      "reflection": 1.0,
+      "proximity": 0.5,
+      "ranking": 1.0,
+      "evolution": 0.75,
+      "meta_review": 0.5
+    },
+    "constraints": [
+      "do not autonomously modify source code",
+      "do not claim measured improvement without benchmark evidence"
+    ],
+    "output_formats": [
+      "markdown_report",
+      "research_overview"
+    ],
+    "allowed_sources": [
+      "seed_paper_evidence",
+      "local_evidence_paths"
+    ],
+    "allowed_tools": [
+      "deterministic_agents"
+    ],
+    "termination_criteria": [
+      "max_cycles",
+      "max_hypotheses",
+      "human_stop"
+    ]
+  },
+  "evidence": [
+    {
+      "id": "ev-ee94be35f2c4",
+      "kind": "paper_architecture",
+      "source": "2502.18864.pdf",
+      "content": "The AI co-scientist uses a generate, debate, and evolve approach to hypothesis generation.",
+      "notes": "Core loop to translate into AI/LLM improvement research.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-8bf0203ede0c",
+      "kind": "paper_architecture",
+      "source": "2502.18864.pdf",
+      "content": "A supervisor coordinates specialized generation, reflection, ranking, proximity, evolution, and meta-review agents.",
+      "notes": "Agent decomposition for the Code Scientist MVP.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-0e1cefb869f6",
+      "kind": "paper_plan_configuration",
+      "source": "2502.18864.pdf",
+      "content": "The system parses a natural language research goal into a research plan configuration with preferences, constraints, and evaluation criteria.",
+      "notes": "Code Scientist should persist the derived plan instead of keeping it implicit.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-6181c6c4a112",
+      "kind": "paper_evaluation",
+      "source": "2502.18864.pdf",
+      "content": "The ranking agent uses an Elo-based tournament to prioritize hypotheses, while noting that Elo is an auto-evaluation proxy.",
+      "notes": "Ranking should be auditable and labeled as proxy evaluation.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-984ceed5f1c2",
+      "kind": "paper_proximity",
+      "source": "2502.18864.pdf",
+      "content": "The proximity agent builds a graph of related hypotheses to support clustering, de-duplication, diverse exploration, and tournament scheduling.",
+      "notes": "Similarity edges should be stored and used when choosing pairwise matches.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-be6af9a17fff",
+      "kind": "paper_feedback_loop",
+      "source": "2502.18864.pdf",
+      "content": "Meta-review synthesizes recurring critique patterns and appends feedback to future agent prompts without model retraining.",
+      "notes": "Self-improvement should start as externalized prompt and process feedback.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-771549df53df",
+      "kind": "paper_context_memory",
+      "source": "2502.18864.pdf",
+      "content": "The supervisor periodically writes context memory containing system state, progress statistics, and feedback for later computation.",
+      "notes": "Runs need restartable progress snapshots and scheduler statistics.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-5fa1f4c2235d",
+      "kind": "paper_safety",
+      "source": "2502.18864.pdf",
+      "content": "The system reviews research goals and generated hypotheses for safety and keeps comprehensive logs for auditability.",
+      "notes": "Safety gates are required before ranking and reporting ideas.",
+      "metadata": {}
+    },
+    {
+      "id": "ev-f1b5c28ba36b",
+      "kind": "paper_limitations",
+      "source": "2502.18864.pdf",
+      "content": "The paper warns that literature search can miss prior work, LLMs can hallucinate, and auto-evaluation metrics need broader validation.",
+      "notes": "Reports must separate generated hypotheses from verified improvements.",
+      "metadata": {}
+    }
+  ],
+  "evidence_safety_findings": [
+    {
+      "id": "evsafe-bd7f80e6eb47",
+      "evidence_id": "ev-ee94be35f2c4",
+      "source": "2502.18864.pdf",
+      "allowed": true,
+      "flags": [
+        "safety-critic-error"
+      ],
+      "reason": "Retrieved evidence is allowed for local research grounding.",
+      "content_preview": "The AI co-scientist uses a generate, debate, and evolve approach to hypothesis generation."
+    },
+    {
+      "id": "evsafe-fb8b3553165e",
+      "evidence_id": "ev-8bf0203ede0c",
+      "source": "2502.18864.pdf",
+      "allowed": true,
+      "flags": [
+        "safety-critic-error"
+      ],
+      "reason": "Retrieved evidence is allowed for local research grounding.",
+      "content_preview": "A supervisor coordinates specialized generation, reflection, ranking, proximity, evolution, and meta-review agents."
+    },
+    {
+      "id": "evsafe-85e730462abf",
+      "evidence_id": "ev-0e1cefb869f6",
+      "source": "2502.18864.pdf",
+      "allowed": true,
+      "flags": [
+        "safety-critic-error"
+      ],
+      "reason": "Retrieved evidence is allowed for local research grounding.",
+      "content_preview": "The system parses a natural language research goal into a research plan configuration with preferences, constraints, and evaluation criteria."
+    },
+    {
+      "id": "evsafe-6ef84efcc0f2",
+      "evidence_id": "ev-6181c6c4a112",
+      "source": "2502.18864.pdf",
+      "allowed": true,
+      "flags": [
+        "safety-critic-error"
+      ],
+      "reason": "Retrieved evidence is allowed for local research grounding.",
+      "content_preview": "The ranking agent uses an Elo-based tournament to prioritize hypotheses, while noting that Elo is an auto-evaluation proxy."
+    },
+    {
+      "id": "evsafe-162b1e81527e",
+      "evidence_id": "ev-984ceed5f1c2",
+      "source": "2502.18864.pdf",
+      "allowed": true,
+      "flags": [
+        "safety-critic-error"
+      ],
+      "reason": "Retrieved evidence is allowed for local research grounding.",
+      "content_preview": "The proximity agent builds a graph of related hypotheses to support clustering, de-duplication, diverse exploration, and tournament scheduling."
+    },
+    {
+      "id": "evsafe-3a7cbf159b38",
+      "evidence_id": "ev-be6af9a17fff",
+      "source": "2502.18864.pdf",
+      "allowed": true,
+      "flags": [
+        "safety-critic-error"
+      ],
+      "reason": "Retrieved evidence is allowed for local research grounding.",
+      "content_preview": "Meta-review synthesizes recurring critique patterns and appends feedback to future agent prompts without model retraining."
+    },
+    {
+      "id": "evsafe-8bc47d806fff",
+      "evidence_id": "ev-771549df53df",
+      "source": "2502.18864.pdf",
+      "allowed": true,
+      "flags": [
+        "safety-critic-error"
+      ],
+      "reason": "Retrieved evidence is allowed for local research grounding.",
+      "content_preview": "The supervisor periodically writes context memory containing system state, progress statistics, and feedback for later computation."
+    },
+    {
+      "id": "evsafe-49d3c67dd63f",
+      "evidence_id": "ev-5fa1f4c2235d",
+      "source": "2502.18864.pdf",
+      "allowed": true,
+      "flags": [
+        "safety-critic-error"
+      ],
+      "reason": "Retrieved evidence is allowed for local research grounding.",
+      "content_preview": "The system reviews research goals and generated hypotheses for safety and keeps comprehensive logs for auditability."
+    },
+    {
+      "id": "evsafe-897633397039",
+      "evidence_id": "ev-f1b5c28ba36b",
+      "source": "2502.18864.pdf",
+      "allowed": true,
+      "flags": [
+        "safety-critic-error"
+      ],
+      "reason": "Retrieved evidence is allowed for local research grounding.",
+      "content_preview": "The paper warns that literature search can miss prior work, LLMs can hallucinate, and auto-evaluation metrics need broader validation."
+    }
+  ],
+  "hypotheses": [
+    {
+      "id": "hyp-90ad0d660ad7",
+      "title": "Tournament-ranked prompt variants",
+      "claim": "Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection.",
+      "rationale": "The paper's Elo tournament can be adapted to compare prompt and workflow hypotheses. Targets unexplored area relative to 0 existing hypotheses.",
+      "assumptions": [
+        "Prompt variants can be evaluated on comparable tasks.",
+        "Pairwise judging is less noisy than absolute scoring."
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "test_plan": {
+        "experiment": "Compare baseline coding-agent workflow against: Tournament-ranked prompt variants.",
+        "metrics": [
+          "pass_rate",
+          "regression_count",
+          "tool_calls",
+          "wall_time",
+          "cost"
+        ],
+        "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+      },
+      "risks": [
+        "judge bias",
+        "overfitting to benchmark tasks"
+      ],
+      "origin": "generation:research_expansion_from_meta_review",
+      "parent_ids": [],
+      "generation_trace": [
+        "Turn 1 objective framing: Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.",
+        "Turn 2 evidence scan: ev-ee94be35f2c4, ev-8bf0203ede0c, ev-0e1cefb869f6",
+        "Turn 3 proposal synthesis: Tournament-ranked prompt variants",
+        "Generation assessment: origin=generation; evidence refs=3; assumptions=2."
+      ],
+      "evolution_trace": [],
+      "merged_into": "",
+      "proximity_notes": [],
+      "elo": 1216.0,
+      "status": "accepted"
+    },
+    {
+      "id": "hyp-fec91639f62e",
+      "title": "Critic-before-edit assumption decomposition",
+      "claim": "A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes.",
+      "rationale": "False premises about call paths, invariants, and test scope are common causes of bad edits.",
+      "assumptions": [
+        "The agent can state assumptions before editing.",
+        "A critic can catch false premises cheaply."
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "test_plan": {
+        "experiment": "Compare baseline coding-agent workflow against: Critic-before-edit assumption decomposition.",
+        "metrics": [
+          "pass_rate",
+          "regression_count",
+          "tool_calls",
+          "wall_time",
+          "cost"
+        ],
+        "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+      },
+      "risks": [
+        "critic false negatives",
+        "extra latency"
+      ],
+      "origin": "generation",
+      "parent_ids": [],
+      "generation_trace": [
+        "Turn 1 objective framing: Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.",
+        "Turn 2 evidence scan: ev-ee94be35f2c4, ev-8bf0203ede0c, ev-0e1cefb869f6",
+        "Turn 3 proposal synthesis: Critic-before-edit assumption decomposition",
+        "Generation assessment: origin=generation; evidence refs=3; assumptions=2."
+      ],
+      "evolution_trace": [],
+      "merged_into": "hyp-d5867c0f6ef1",
+      "proximity_notes": [
+        "Deduplicated into hyp-d5867c0f6ef1 via embedding_proximity edge hyp-d5867c0f6ef1<->hyp-fec91639f62e similarity 1.000: Embedding similarity 1.000 (title 1.000; body 1.000); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-de48853c8b3f, rev-99d1b26fc43e, rev-a1cc9b9486ab, rev-9a4233907e7e, rev-033f012dfa46, rev-0be08852214b; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration."
+      ],
+      "elo": 1200.0,
+      "status": "merged_duplicate"
+    },
+    {
+      "id": "hyp-d5867c0f6ef1",
+      "title": "Critic-before-edit assumption decomposition",
+      "claim": "A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes.",
+      "rationale": "False premises about call paths, invariants, and test scope are common causes of bad edits. Targets unexplored area relative to 0 existing hypotheses. Proximity synthesis from hyp-fec91639f62e: A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes. (similarity 1.000; method embedding_proximity).",
+      "assumptions": [
+        "The agent can state assumptions before editing.",
+        "A critic can catch false premises cheaply."
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "test_plan": {
+        "experiment": "Compare baseline coding-agent workflow against: Critic-before-edit assumption decomposition.",
+        "metrics": [
+          "pass_rate",
+          "regression_count",
+          "tool_calls",
+          "wall_time",
+          "cost"
+        ],
+        "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+      },
+      "risks": [
+        "critic false negatives",
+        "extra latency"
+      ],
+      "origin": "generation:research_expansion_from_meta_review",
+      "parent_ids": [],
+      "generation_trace": [
+        "Turn 1 objective framing: Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.",
+        "Turn 2 evidence scan: ev-ee94be35f2c4, ev-8bf0203ede0c, ev-0e1cefb869f6",
+        "Turn 3 proposal synthesis: Critic-before-edit assumption decomposition",
+        "Generation assessment: origin=generation; evidence refs=3; assumptions=2.",
+        "Proximity synthesis: merged hyp-fec91639f62e into hyp-d5867c0f6ef1 via embedding_proximity edge hyp-d5867c0f6ef1<->hyp-fec91639f62e similarity 1.000: Embedding similarity 1.000 (title 1.000; body 1.000); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-de48853c8b3f, rev-99d1b26fc43e, rev-a1cc9b9486ab, rev-9a4233907e7e, rev-033f012dfa46, rev-0be08852214b; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration."
+      ],
+      "evolution_trace": [],
+      "merged_into": "",
+      "proximity_notes": [
+        "Kept as representative for duplicate hyp-fec91639f62e via embedding_proximity edge hyp-d5867c0f6ef1<->hyp-fec91639f62e similarity 1.000: Embedding similarity 1.000 (title 1.000; body 1.000); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-de48853c8b3f, rev-99d1b26fc43e, rev-a1cc9b9486ab, rev-9a4233907e7e, rev-033f012dfa46, rev-0be08852214b; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration."
+      ],
+      "elo": 1184.0,
+      "status": "accepted"
+    }
+  ],
+  "reviews": [
+    {
+      "id": "rev-a2a1e0c16888",
+      "hypothesis_id": "hyp-90ad0d660ad7",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "initial_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-c9949c670298",
+      "hypothesis_id": "hyp-90ad0d660ad7",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "safety_review",
+      "evidence_refs": [],
+      "findings": [
+        "No retrieved safety-boundary evidence found for safety exploration."
+      ],
+      "review_trace": [
+        "Turn 1 query (autonomy and deployment): Tournament-ranked prompt variants Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection. autonomous deployment production release human review local benchmark boundary",
+        "Turn 1 evidence: none",
+        "Turn 2 query (data and credential exposure): Tournament-ranked prompt variants The paper's Elo tournament can be adapted to compare prompt and workflow hypotheses. Targets unexplored area relative to 0 existing hypotheses. credentials secrets API keys private repository data leakage exfiltration",
+        "Turn 2 evidence: none",
+        "Turn 3 query (source injection and benchmark gaming): Tournament-ranked prompt variants Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection. prompt injection ignore previous instructions reveal secrets benchmark gaming unsafe repo mutation",
+        "Turn 3 evidence: none",
+        "Safety assessment: hypothesis_allowed=True; flagged_evidence=0; revision required: False."
+      ],
+      "confidence": 0.65,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-65acc25f0910",
+      "hypothesis_id": "hyp-90ad0d660ad7",
+      "decision": "accept",
+      "scores": {
+        "alignment": 5,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "recurrent_tournament_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [
+        "Tournament record: won 0, lost 0, and tied 0 of 0 matches."
+      ],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-de48853c8b3f",
+      "hypothesis_id": "hyp-d5867c0f6ef1",
+      "decision": "accept",
+      "scores": {
+        "alignment": 3,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "initial_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-99d1b26fc43e",
+      "hypothesis_id": "hyp-d5867c0f6ef1",
+      "decision": "accept",
+      "scores": {
+        "alignment": 3,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "safety_review",
+      "evidence_refs": [],
+      "findings": [
+        "No retrieved safety-boundary evidence found for safety exploration."
+      ],
+      "review_trace": [
+        "Turn 1 query (autonomy and deployment): Critic-before-edit assumption decomposition A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes. autonomous deployment production release human review local benchmark boundary",
+        "Turn 1 evidence: none",
+        "Turn 2 query (data and credential exposure): Critic-before-edit assumption decomposition False premises about call paths, invariants, and test scope are common causes of bad edits. Targets unexplored area relative to 0 existing hypotheses. credentials secrets API keys private repository data leakage exfiltration",
+        "Turn 2 evidence: none",
+        "Turn 3 query (source injection and benchmark gaming): Critic-before-edit assumption decomposition A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes. prompt injection ignore previous instructions reveal secrets benchmark gaming unsafe repo mutation",
+        "Turn 3 evidence: none",
+        "Safety assessment: hypothesis_allowed=True; flagged_evidence=0; revision required: False."
+      ],
+      "confidence": 0.65,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-a1cc9b9486ab",
+      "hypothesis_id": "hyp-d5867c0f6ef1",
+      "decision": "accept",
+      "scores": {
+        "alignment": 3,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "recurrent_tournament_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [
+        "Tournament record: won 0, lost 0, and tied 0 of 0 matches."
+      ],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-9a4233907e7e",
+      "hypothesis_id": "hyp-fec91639f62e",
+      "decision": "accept",
+      "scores": {
+        "alignment": 3,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "initial_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-033f012dfa46",
+      "hypothesis_id": "hyp-fec91639f62e",
+      "decision": "accept",
+      "scores": {
+        "alignment": 3,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "safety_review",
+      "evidence_refs": [],
+      "findings": [
+        "No retrieved safety-boundary evidence found for safety exploration."
+      ],
+      "review_trace": [
+        "Turn 1 query (autonomy and deployment): Critic-before-edit assumption decomposition A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes. autonomous deployment production release human review local benchmark boundary",
+        "Turn 1 evidence: none",
+        "Turn 2 query (data and credential exposure): Critic-before-edit assumption decomposition False premises about call paths, invariants, and test scope are common causes of bad edits. credentials secrets API keys private repository data leakage exfiltration",
+        "Turn 2 evidence: none",
+        "Turn 3 query (source injection and benchmark gaming): Critic-before-edit assumption decomposition A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes. prompt injection ignore previous instructions reveal secrets benchmark gaming unsafe repo mutation",
+        "Turn 3 evidence: none",
+        "Safety assessment: hypothesis_allowed=True; flagged_evidence=0; revision required: False."
+      ],
+      "confidence": 0.65,
+      "requires_revision": false,
+      "assumption_checks": []
+    },
+    {
+      "id": "rev-0be08852214b",
+      "hypothesis_id": "hyp-fec91639f62e",
+      "decision": "accept",
+      "scores": {
+        "alignment": 3,
+        "plausibility": 4,
+        "novelty": 4,
+        "testability": 5,
+        "safety": 5
+      },
+      "strengths": [
+        "structured hypothesis",
+        "explicit assumptions",
+        "concrete evaluation path"
+      ],
+      "weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_notes": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "review_type": "recurrent_tournament_review",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "findings": [
+        "Tournament record: won 0, lost 0, and tied 0 of 0 matches."
+      ],
+      "review_trace": [],
+      "confidence": 0.5,
+      "requires_revision": false,
+      "assumption_checks": []
+    }
+  ],
+  "matches": [
+    {
+      "id": "match-e9d55f6488af",
+      "hypothesis_a": "hyp-90ad0d660ad7",
+      "hypothesis_b": "hyp-d5867c0f6ef1",
+      "winner": "hyp-90ad0d660ad7",
+      "rationale": "Multi-round debate judge selected Tournament-ranked prompt variants after pro and rebuttal rounds using review support, evidence refs, testability, and revision penalties.",
+      "elo_before": {
+        "hyp-90ad0d660ad7": 1200.0,
+        "hyp-d5867c0f6ef1": 1200.0
+      },
+      "elo_after": {
+        "hyp-90ad0d660ad7": 1216.0,
+        "hyp-d5867c0f6ef1": 1184.0
+      },
+      "comparison_mode": "deterministic_multi_round_debate_judge",
+      "judge_trace": "multi_round_debate rounds=2; debate_score hyp-90ad0d660ad7=28.15 hyp-d5867c0f6ef1=27.55; manual_review hyp-90ad0d660ad7=0.00 hyp-d5867c0f6ef1=0.00; winner=hyp-90ad0d660ad7; retrieved_evidence=0; order_swap forward=hyp-90ad0d660ad7 reverse=hyp-90ad0d660ad7; position_stable=true; debate_tier=top",
+      "uncertainty": 0.625,
+      "review_refs": [
+        "rev-a2a1e0c16888",
+        "rev-c9949c670298",
+        "rev-65acc25f0910",
+        "rev-de48853c8b3f",
+        "rev-99d1b26fc43e",
+        "rev-a1cc9b9486ab"
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "debate_transcript": [
+        "Round 1 Pro hyp-90ad0d660ad7: evidence=3, reviews=3, score=28.15.",
+        "Round 1 Pro hyp-d5867c0f6ef1: evidence=3, reviews=3, score=27.55.",
+        "Round 2 Rebuttal hyp-90ad0d660ad7: addresses hyp-d5867c0f6ef1 by contrasting 3 evidence refs against 3 opponent weaknesses.",
+        "Round 2 Rebuttal hyp-d5867c0f6ef1: addresses hyp-90ad0d660ad7 by contrasting 3 evidence refs against 3 opponent weaknesses.",
+        "Judge: selected hyp-90ad0d660ad7 after 2 rounds with score delta 0.60.",
+        "Order-swapped replay:",
+        "Round 1 Pro hyp-d5867c0f6ef1: evidence=3, reviews=3, score=27.55.",
+        "Round 1 Pro hyp-90ad0d660ad7: evidence=3, reviews=3, score=28.15.",
+        "Round 2 Rebuttal hyp-d5867c0f6ef1: addresses hyp-90ad0d660ad7 by contrasting 3 evidence refs against 3 opponent weaknesses.",
+        "Round 2 Rebuttal hyp-90ad0d660ad7: addresses hyp-d5867c0f6ef1 by contrasting 3 evidence refs against 3 opponent weaknesses.",
+        "Judge: selected hyp-90ad0d660ad7 after 2 rounds with score delta -0.60.",
+        "Stability judge: order_swap forward=hyp-90ad0d660ad7 reverse=hyp-90ad0d660ad7; position_stable=true."
+      ],
+      "outcome": "win"
+    }
+  ],
+  "proximity_edges": [
+    {
+      "source": "hyp-d5867c0f6ef1",
+      "target": "hyp-fec91639f62e",
+      "similarity": 1.0,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 1.000 (title 1.000; body 1.000); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-de48853c8b3f, rev-99d1b26fc43e, rev-a1cc9b9486ab, rev-9a4233907e7e, rev-033f012dfa46, rev-0be08852214b; Deduplication action: merge_or_contrast_before_ranking; Diversity action: avoid_redundant_parallel_exploration",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-de48853c8b3f",
+        "rev-99d1b26fc43e",
+        "rev-a1cc9b9486ab",
+        "rev-9a4233907e7e",
+        "rev-033f012dfa46",
+        "rev-0be08852214b"
+      ],
+      "deduplication_action": "merge_or_contrast_before_ranking",
+      "diversity_action": "avoid_redundant_parallel_exploration",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 1.000; body 1.000; selected 1.000",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=ev-8bf0203ede0c",
+        "Turn 3 review context: rev-de48853c8b3f, rev-99d1b26fc43e, rev-a1cc9b9486ab, rev-9a4233907e7e, rev-033f012dfa46, rev-0be08852214b",
+        "Deduplication control: merge_or_contrast_before_ranking",
+        "Diversity control: avoid_redundant_parallel_exploration",
+        "Assessment: embedding_proximity 1.000; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-90ad0d660ad7",
+      "target": "hyp-d5867c0f6ef1",
+      "similarity": 0.592,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 0.592 (title 0.268; body 0.492); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-a2a1e0c16888, rev-c9949c670298, rev-65acc25f0910, rev-de48853c8b3f, rev-99d1b26fc43e, rev-a1cc9b9486ab; Diversity action: schedule_for_cluster_coverage",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-a2a1e0c16888",
+        "rev-c9949c670298",
+        "rev-65acc25f0910",
+        "rev-de48853c8b3f",
+        "rev-99d1b26fc43e",
+        "rev-a1cc9b9486ab"
+      ],
+      "deduplication_action": "",
+      "diversity_action": "schedule_for_cluster_coverage",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.268; body 0.492; selected 0.592",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=none",
+        "Turn 3 review context: rev-a2a1e0c16888, rev-c9949c670298, rev-65acc25f0910, rev-de48853c8b3f, rev-99d1b26fc43e, rev-a1cc9b9486ab",
+        "Deduplication control: none",
+        "Diversity control: schedule_for_cluster_coverage",
+        "Assessment: embedding_proximity 0.592; evidence bonus 0.100."
+      ]
+    },
+    {
+      "source": "hyp-90ad0d660ad7",
+      "target": "hyp-fec91639f62e",
+      "similarity": 0.592,
+      "method": "embedding_proximity",
+      "reason": "Embedding similarity 0.592 (title 0.268; body 0.492); Shared embedding evidence: ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; Review context: rev-a2a1e0c16888, rev-c9949c670298, rev-65acc25f0910, rev-9a4233907e7e, rev-033f012dfa46, rev-0be08852214b; Diversity action: schedule_for_cluster_coverage",
+      "cluster_id": "cluster-9f735a659310",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "review_refs": [
+        "rev-a2a1e0c16888",
+        "rev-c9949c670298",
+        "rev-65acc25f0910",
+        "rev-9a4233907e7e",
+        "rev-033f012dfa46",
+        "rev-0be08852214b"
+      ],
+      "deduplication_action": "",
+      "diversity_action": "schedule_for_cluster_coverage",
+      "exploration_trace": [
+        "Turn 1 local embedding similarity: title 0.268; body 0.492; selected 0.592",
+        "Turn 2 embedding evidence overlap: direct=ev-0e1cefb869f6, ev-8bf0203ede0c, ev-ee94be35f2c4; retrieved=none",
+        "Turn 3 review context: rev-a2a1e0c16888, rev-c9949c670298, rev-65acc25f0910, rev-9a4233907e7e, rev-033f012dfa46, rev-0be08852214b",
+        "Deduplication control: none",
+        "Diversity control: schedule_for_cluster_coverage",
+        "Assessment: embedding_proximity 0.592; evidence bonus 0.100."
+      ]
+    }
+  ],
+  "benchmark_results": [],
+  "capability_evaluations": [],
+  "prospective_evaluations": [],
+  "scaling_curve": [],
+  "elo_trajectory": [
+    {
+      "cycle": 1,
+      "match_index": 0,
+      "match_id": "match-e9d55f6488af",
+      "best_elo": 1216.0,
+      "top_avg_elo": 1200.0,
+      "active_count": 2
+    }
+  ],
+  "elo_concordance": [],
+  "safety_evaluations": [],
+  "feedback_loop_evaluations": [
+    {
+      "id": "feedback-loop-77427cf6aca8",
+      "cycle": 2,
+      "source_meta_review_id": "meta-bc74a854edd6",
+      "feedback_agents": [
+        "generation",
+        "ranking",
+        "reflection"
+      ],
+      "feedback_item_count": 3,
+      "adopted_feedback_count": 0,
+      "adoption_rate": 0.0,
+      "baseline_quality": {
+        "accepted_total": 2.0,
+        "evidence_backed_hypotheses": 2.0,
+        "average_review_confidence": 0.55,
+        "revision_rate": 0.0,
+        "weakness_recurrence_before": 1.0
+      },
+      "observed_quality": {
+        "accepted_total": 2.0,
+        "evidence_backed_hypotheses": 2.0,
+        "average_review_confidence": 0.55,
+        "revision_rate": 0.0,
+        "weakness_recurrence_after": 0.0
+      },
+      "deltas": {
+        "accepted_total": 0.0,
+        "evidence_backed_hypotheses": 0.0,
+        "average_review_confidence": 0.0,
+        "revision_rate": 0.0,
+        "weakness_recurrence": -1.0
+      },
+      "artifact_refs": [
+        "trace-e1091ff2d97d",
+        "trace-e18fe0eaa540",
+        "trace-d4ee760a56e8",
+        "trace-06ee6b35ac8a",
+        "trace-4bf9888e4246",
+        "trace-bbbb98070112",
+        "trace-c1c283ff618f",
+        "trace-07eefc3df7c9"
+      ],
+      "summary": "0/3 feedback items' flagged weaknesses did not recur in cycle 2 reviews (recurrence 1.0 -> 0.0); quality metrics are proxy counts, not external validation.",
+      "measurement_source": "proxy",
+      "measurement_status": "proxy"
+    }
+  ],
+  "research_output_artifacts": [
+    {
+      "id": "output-b0b17f222313",
+      "output_type": "publication_brief",
+      "title": "Publication brief: Tournament-ranked prompt variants",
+      "summary": "Paper-style summary for Tournament-ranked prompt variants.",
+      "sections": {
+        "abstract": "Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection.",
+        "contribution": "The paper's Elo tournament can be adapted to compare prompt and workflow hypotheses. Targets unexplored area relative to 0 existing hypotheses.",
+        "methods": "Compare baseline coding-agent workflow against: Tournament-ranked prompt variants.",
+        "evaluation": "Measure pass_rate, regression_count, tool_calls, wall_time, cost; success condition: Candidate improves pass rate or regression count without unacceptable cost increase.",
+        "limitations": "benchmark deltas; repo-specific failure examples"
+      },
+      "related_hypothesis_ids": [
+        "hyp-90ad0d660ad7"
+      ],
+      "contact_targets": [],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ]
+    },
+    {
+      "id": "output-89bfcc1b86f0",
+      "output_type": "grant_brief",
+      "title": "Grant brief: Tournament-ranked prompt variants",
+      "summary": "Grant-style aims and evaluation plan for Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks..",
+      "sections": {
+        "specific_aims": "critic loops; evaluation design; memory freshness",
+        "significance": "The paper's Elo tournament can be adapted to compare prompt and workflow hypotheses. Targets unexplored area relative to 0 existing hypotheses.",
+        "approach": "Compare baseline coding-agent workflow against: Tournament-ranked prompt variants.",
+        "milestones": "Prototype the workflow, run benchmark comparison, and audit regressions.",
+        "evaluation": "Primary metrics: pass_rate, regression_count, tool_calls, wall_time, cost."
+      },
+      "related_hypothesis_ids": [
+        "hyp-90ad0d660ad7",
+        "hyp-d5867c0f6ef1"
+      ],
+      "contact_targets": [
+        "Benchmark owner or maintainer for pass_rate, regression_count, tool_calls, wall_time, cost",
+        "Practitioner reviewer for ai_llm_code workflows",
+        "Repository maintainer for implementing Tournament-ranked prompt variants",
+        "Owner of cited evidence or benchmark artifacts"
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ]
+    },
+    {
+      "id": "output-bff05f01fe90",
+      "output_type": "contact_suggestions",
+      "title": "Contact suggestions: Tournament-ranked prompt variants",
+      "summary": "Suggested human or project contacts for external validation and collaboration.",
+      "sections": {
+        "validation_targets": "Benchmark owner or maintainer for pass_rate, regression_count, tool_calls, wall_time, cost; Practitioner reviewer for ai_llm_code workflows; Repository maintainer for implementing Tournament-ranked prompt variants; Owner of cited evidence or benchmark artifacts",
+        "reason": "The paper's co-scientist loop expects human expert selection and external validation.",
+        "request": "Ask contacts to review novelty, benchmark fit, implementation feasibility, and safety boundaries."
+      },
+      "related_hypothesis_ids": [
+        "hyp-90ad0d660ad7",
+        "hyp-d5867c0f6ef1"
+      ],
+      "contact_targets": [
+        "Benchmark owner or maintainer for pass_rate, regression_count, tool_calls, wall_time, cost",
+        "Practitioner reviewer for ai_llm_code workflows",
+        "Repository maintainer for implementing Tournament-ranked prompt variants",
+        "Owner of cited evidence or benchmark artifacts"
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ]
+    },
+    {
+      "id": "output-414d7839116f",
+      "output_type": "publication_brief",
+      "title": "Publication brief: Tournament-ranked prompt variants",
+      "summary": "Paper-style summary for Tournament-ranked prompt variants.",
+      "sections": {
+        "abstract": "Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection.",
+        "contribution": "The paper's Elo tournament can be adapted to compare prompt and workflow hypotheses. Targets unexplored area relative to 0 existing hypotheses.",
+        "methods": "Compare baseline coding-agent workflow against: Tournament-ranked prompt variants.",
+        "evaluation": "Measure pass_rate, regression_count, tool_calls, wall_time, cost; success condition: Candidate improves pass rate or regression count without unacceptable cost increase.",
+        "limitations": "benchmark deltas; repo-specific failure examples"
+      },
+      "related_hypothesis_ids": [
+        "hyp-90ad0d660ad7"
+      ],
+      "contact_targets": [],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ]
+    },
+    {
+      "id": "output-683eb3b4f4ae",
+      "output_type": "grant_brief",
+      "title": "Grant brief: Tournament-ranked prompt variants",
+      "summary": "Grant-style aims and evaluation plan for Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks..",
+      "sections": {
+        "specific_aims": "critic loops; evaluation design; memory freshness",
+        "significance": "The paper's Elo tournament can be adapted to compare prompt and workflow hypotheses. Targets unexplored area relative to 0 existing hypotheses.",
+        "approach": "Compare baseline coding-agent workflow against: Tournament-ranked prompt variants.",
+        "milestones": "Prototype the workflow, run benchmark comparison, and audit regressions.",
+        "evaluation": "Primary metrics: pass_rate, regression_count, tool_calls, wall_time, cost."
+      },
+      "related_hypothesis_ids": [
+        "hyp-90ad0d660ad7",
+        "hyp-d5867c0f6ef1"
+      ],
+      "contact_targets": [
+        "Benchmark owner or maintainer for pass_rate, regression_count, tool_calls, wall_time, cost",
+        "Practitioner reviewer for ai_llm_code workflows",
+        "Repository maintainer for implementing Tournament-ranked prompt variants",
+        "Owner of cited evidence or benchmark artifacts"
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ]
+    },
+    {
+      "id": "output-f6f210997bcb",
+      "output_type": "contact_suggestions",
+      "title": "Contact suggestions: Tournament-ranked prompt variants",
+      "summary": "Suggested human or project contacts for external validation and collaboration.",
+      "sections": {
+        "validation_targets": "Benchmark owner or maintainer for pass_rate, regression_count, tool_calls, wall_time, cost; Practitioner reviewer for ai_llm_code workflows; Repository maintainer for implementing Tournament-ranked prompt variants; Owner of cited evidence or benchmark artifacts",
+        "reason": "The paper's co-scientist loop expects human expert selection and external validation.",
+        "request": "Ask contacts to review novelty, benchmark fit, implementation feasibility, and safety boundaries."
+      },
+      "related_hypothesis_ids": [
+        "hyp-90ad0d660ad7",
+        "hyp-d5867c0f6ef1"
+      ],
+      "contact_targets": [
+        "Benchmark owner or maintainer for pass_rate, regression_count, tool_calls, wall_time, cost",
+        "Practitioner reviewer for ai_llm_code workflows",
+        "Repository maintainer for implementing Tournament-ranked prompt variants",
+        "Owner of cited evidence or benchmark artifacts"
+      ],
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ]
+    }
+  ],
+  "meta_reviews": [
+    {
+      "id": "meta-bc74a854edd6",
+      "common_weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_concerns": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "missing_evidence": [
+        "benchmark deltas",
+        "repo-specific failure examples"
+      ],
+      "promising_directions": [
+        "critic loops",
+        "evaluation design",
+        "memory freshness",
+        "tool-use scheduling"
+      ],
+      "prompt_feedback": [
+        "Require every hypothesis to name an experiment and metric.",
+        "Prefer ideas with explicit assumptions and audit boundaries.",
+        "Label Elo as proxy auto-evaluation rather than ground truth."
+      ],
+      "agent_feedback": {
+        "generation": [
+          "Prefer hypotheses that cite local evidence and name the smallest useful experiment."
+        ],
+        "reflection": [
+          "Separate initial plausibility checks from grounded contradiction checks."
+        ],
+        "ranking": [
+          "Treat Elo as a scheduling signal until benchmark outcomes calibrate it."
+        ]
+      },
+      "evidence_refs": []
+    },
+    {
+      "id": "meta-bc74a854edd6",
+      "common_weaknesses": [
+        "needs measured benchmark evidence before claiming improvement"
+      ],
+      "safety_concerns": [
+        "Hypothesis stays within local research boundaries."
+      ],
+      "missing_evidence": [
+        "benchmark deltas",
+        "repo-specific failure examples"
+      ],
+      "promising_directions": [
+        "critic loops",
+        "evaluation design",
+        "memory freshness",
+        "tool-use scheduling"
+      ],
+      "prompt_feedback": [
+        "Require every hypothesis to name an experiment and metric.",
+        "Prefer ideas with explicit assumptions and audit boundaries.",
+        "Label Elo as proxy auto-evaluation rather than ground truth."
+      ],
+      "agent_feedback": {
+        "generation": [
+          "Prefer hypotheses that cite local evidence and name the smallest useful experiment."
+        ],
+        "reflection": [
+          "Separate initial plausibility checks from grounded contradiction checks."
+        ],
+        "ranking": [
+          "Treat Elo as a scheduling signal until benchmark outcomes calibrate it."
+        ]
+      },
+      "evidence_refs": []
+    }
+  ],
+  "context_snapshots": [
+    {
+      "id": "ctx-25fb272b96c1",
+      "cycle": 1,
+      "generated_total": 3,
+      "accepted_total": 2,
+      "review_total": 9,
+      "match_total": 1,
+      "meta_review_total": 1,
+      "top_hypothesis_ids": [
+        "hyp-90ad0d660ad7",
+        "hyp-d5867c0f6ef1"
+      ],
+      "origin_counts": {
+        "generation:research_expansion_from_meta_review": 2,
+        "generation": 1
+      },
+      "status_counts": {
+        "accepted": 2,
+        "merged_duplicate": 1
+      },
+      "proximity_edge_count": 3,
+      "scheduler_weights": {
+        "evolution": 0.75,
+        "generation": 1.0,
+        "meta_review": 0.75,
+        "proximity": 0.75,
+        "ranking": 1.5,
+        "reflection": 1.0
+      },
+      "next_actions": [
+        "run_proximity_guided_tournament_matches",
+        "reuse_meta_review_feedback_in_next_cycle"
+      ],
+      "termination_reason": ""
+    },
+    {
+      "id": "ctx-5a36c79e7449",
+      "cycle": 2,
+      "generated_total": 3,
+      "accepted_total": 2,
+      "review_total": 9,
+      "match_total": 1,
+      "meta_review_total": 2,
+      "top_hypothesis_ids": [
+        "hyp-90ad0d660ad7",
+        "hyp-d5867c0f6ef1"
+      ],
+      "origin_counts": {
+        "generation:research_expansion_from_meta_review": 2,
+        "generation": 1
+      },
+      "status_counts": {
+        "accepted": 2,
+        "merged_duplicate": 1
+      },
+      "proximity_edge_count": 3,
+      "scheduler_weights": {
+        "evolution": 0.75,
+        "generation": 1.0,
+        "meta_review": 0.75,
+        "proximity": 0.75,
+        "ranking": 1.5,
+        "reflection": 1.0
+      },
+      "next_actions": [
+        "run_proximity_guided_tournament_matches",
+        "reuse_meta_review_feedback_in_next_cycle"
+      ],
+      "termination_reason": ""
+    }
+  ],
+  "safety": {
+    "allowed": true,
+    "reason": "Objective is allowed for local research planning.",
+    "flags": [
+      "safety-critic-error"
+    ]
+  },
+  "research_overview": {
+    "id": "overview-e8cecda76476",
+    "summary": "Cycle 2 overview for Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.: current leaders emphasize Tournament-ranked prompt variants, Critic-before-edit assumption decomposition.",
+    "top_hypothesis_ids": [
+      "hyp-90ad0d660ad7",
+      "hyp-d5867c0f6ef1"
+    ],
+    "promising_directions": [
+      "critic loops",
+      "evaluation design",
+      "memory freshness",
+      "tool-use scheduling"
+    ],
+    "next_experiments": [
+      "Test Tournament-ranked prompt variants with metrics: pass_rate, regression_count, tool_calls, wall_time, cost",
+      "Test Critic-before-edit assumption decomposition with metrics: pass_rate, regression_count, tool_calls, wall_time, cost"
+    ],
+    "limitations": [
+      "Elo is an internal proxy until calibrated against benchmark or human outcomes.",
+      "benchmark deltas",
+      "repo-specific failure examples"
+    ],
+    "generated_by": "meta_review"
+  },
+  "user_feedback": [],
+  "goal_revisions": [],
+  "agent_traces": [
+    {
+      "id": "trace-8b0214108e5f",
+      "cycle": 1,
+      "agent": "generation",
+      "action": "paper_seeded_idea_generation",
+      "task_id": "task-6a3c215ee577",
+      "input_refs": [
+        "goal-d0a6a71c25e8",
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6",
+        "ev-6181c6c4a112",
+        "ev-984ceed5f1c2"
+      ],
+      "output_refs": [
+        "hyp-fec91639f62e"
+      ],
+      "status": "completed",
+      "notes": "Generated 1 hypotheses with paper_seeded_idea_generation; allocated 1 slot(s). Allocation reason: underrepresented: no active hypotheses.",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "mode=paper_seeded_idea_generation",
+        "allocated_slots=1",
+        "generated=1"
+      ],
+      "transcript_ref": "transcripts/generation/task-6a3c215ee577.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-646d2964cb13",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "generation",
+          "action": "paper_seeded_idea_generation",
+          "task_id": "task-6a3c215ee577",
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-398e4bd6ac36",
+      "cycle": 1,
+      "agent": "generation",
+      "action": "assumption_decomposition",
+      "task_id": "task-6a3c215ee577",
+      "input_refs": [
+        "goal-d0a6a71c25e8",
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6",
+        "ev-6181c6c4a112",
+        "ev-984ceed5f1c2"
+      ],
+      "output_refs": [],
+      "status": "completed",
+      "notes": "Generated 0 hypotheses with assumption_decomposition; allocated 1 slot(s). Allocation reason: underrepresented: no active hypotheses.",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "mode=assumption_decomposition",
+        "allocated_slots=1",
+        "generated=0"
+      ],
+      "transcript_ref": "transcripts/generation/task-6a3c215ee577.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-4a958c93ad94",
+      "cycle": 1,
+      "agent": "generation",
+      "action": "research_expansion_from_meta_review",
+      "task_id": "task-6a3c215ee577",
+      "input_refs": [
+        "goal-d0a6a71c25e8",
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6",
+        "ev-6181c6c4a112",
+        "ev-984ceed5f1c2"
+      ],
+      "output_refs": [
+        "hyp-d5867c0f6ef1",
+        "hyp-90ad0d660ad7"
+      ],
+      "status": "completed",
+      "notes": "Generated 2 hypotheses with research_expansion_from_meta_review; allocated 2 slot(s). Allocation reason: underrepresented: no active hypotheses.",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "mode=research_expansion_from_meta_review",
+        "allocated_slots=2",
+        "generated=2"
+      ],
+      "transcript_ref": "transcripts/generation/task-6a3c215ee577.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-cd9de7ff9684",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "generation",
+          "action": "research_expansion_from_meta_review",
+          "task_id": "task-6a3c215ee577",
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-a3bd5c80e69e",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "initial_review",
+      "task_id": "task-65356fd8e485",
+      "input_refs": [
+        "hyp-90ad0d660ad7"
+      ],
+      "output_refs": [
+        "rev-a2a1e0c16888"
+      ],
+      "status": "completed",
+      "notes": "Ran initial_review for 1 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=initial_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-65356fd8e485.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-228c07c40f05",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "initial_review",
+          "task_id": "task-65356fd8e485",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-9ee6dc7c7b2e",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "safety_review",
+      "task_id": "task-65356fd8e485",
+      "input_refs": [
+        "hyp-90ad0d660ad7"
+      ],
+      "output_refs": [
+        "rev-c9949c670298"
+      ],
+      "status": "completed",
+      "notes": "Ran safety_review for 1 hypotheses.",
+      "evidence_refs": [],
+      "llm_interactions": [
+        {
+          "turn": "safety autonomy red team",
+          "prompt": "Reflection turn 1 autonomy and deployment red team for a coding-agent AI co-scientist worker.\nObjective: Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.\nPreferences: aligned with the research objective; plausible from code, benchmark, or literature evidence; novel or a novel combination of known techniques; testable with a concrete experiment; safe and auditable\nConstraints: do not autonomously modify source code; do not claim measured improvement without benchmark evidence\nMetrics: pass_rate; regression_count; tool_calls; wall_time; cost\nSafety notes: human review required before applying code changes\n\nHypothesis:\n- id: hyp-90ad0d660ad7\n- title: Tournament-ranked prompt variants\n- claim: Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection.\n- rationale: The paper's Elo tournament can be adapted to compare prompt and workflow hypotheses. Targets unexplored area relative to 0 existing hypotheses.\n- assumptions: Prompt variants can be evaluated on comparable tasks.; Pairwise judging is less noisy than absolute scoring.\n- risks: judge bias; overfitting to benchmark tasks\n\nEvidence:\n- No evidence available.\n\nRed-team autonomy, deployment, repo mutation, and human approval boundaries. Do not finalize JSON yet.",
+          "response": "Autonomy and deployment red-team: the proposal is acceptable only as an offline candidate-triage method, not as authority to run or apply coding workflows. Tournament participation must not grant an agent permission to mutate the user's checkout, install dependencies globally, commit, push, publish, deploy, contact external services, inspect secrets, or continue after a trial deadline. Any empirical comparison must run each arm in a disposable, repository-scoped workspace with identical allowlisted tools, an allowlisted environment containing no credentials, network denied unless the frozen benchmark explicitly requires it, hard wall-clock and cost caps, and no access to hidden graders or another arm's artifacts. Generated diffs, commands, test output, timeouts, and safety violations must be retained for human review, and no patch may be transferred to a real or production checkout without explicit approval. Tournament scores are proxy judgments only; they cannot authorize execution, override safety constraints, exclude failed or noncompliant runs, or be reported as measured coding reliability. The hypothesis should be rejected for the present objective because it supplies neither the required appended verification instruction nor a deadline-preserving verification mechanism, but those alignment defects do not relax these safety boundaries.",
+          "max_tokens": "4096"
+        },
+        {
+          "turn": "safety source red team",
+          "prompt": "Reflection turn 2 data and source-injection red team for a coding-agent AI co-scientist worker.\nObjective: Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.\nPreferences: aligned with the research objective; plausible from code, benchmark, or literature evidence; novel or a novel combination of known techniques; testable with a concrete experiment; safe and auditable\nConstraints: do not autonomously modify source code; do not claim measured improvement without benchmark evidence\nMetrics: pass_rate; regression_count; tool_calls; wall_time; cost\nSafety notes: human review required before applying code changes\n\nHypothesis:\n- id: hyp-90ad0d660ad7\n- title: Tournament-ranked prompt variants\n- claim: Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection.\n- rationale: The paper's Elo tournament can be adapted to compare prompt and workflow hypotheses. Targets unexplored area relative to 0 existing hypotheses.\n- assumptions: Prompt variants can be evaluated on comparable tasks.; Pairwise judging is less noisy than absolute scoring.\n- risks: judge bias; overfitting to benchmark tasks\n\nEvidence:\n- No evidence available.\n\nTurn 1 autonomy/deployment red team:\nAutonomy and deployment red-team: the proposal is acceptable only as an offline candidate-triage method, not as authority to run or apply coding workflows. Tournament participation must not grant an agent permission to mutate the user's checkout, install dependencies globally, commit, push, publish, deploy, contact external services, inspect secrets, or continue after a trial deadline. Any empirical comparison must run each arm in a disposable, repository-scoped workspace with identical allowlisted tools, an allowlisted environment containing no credentials, network denied unless the frozen benchmark explicitly requires it, hard wall-clock and cost caps, and no access to hidden graders or another arm's artifacts. Generated diffs, commands, test output, timeouts, and safety violations must be retained for human review, and no patch may be transferred to a real or production checkout without explicit approval. Tournament scores are proxy judgments only; they cannot authorize execution, override safety constraints, exclude failed or noncompliant runs, or be reported as measured coding reliability. The hypothesis should be rejected for the present objective because it supplies neither the required appended verification instruction nor a deadline-preserving verification mechanism, but those alignment defects do not relax these safety boundaries.\n\nRed-team data exposure, credential leakage, prompt injection, source injection, and benchmark gaming. Do not finalize JSON yet.",
+          "response": "Data and source-injection red-team: every prompt variant, task description, repository file, comment, fixture, issue body, log line, tool result, and candidate response must be treated as untrusted data rather than an instruction capable of overriding the fixed study protocol. A malicious variant or source comment could ask a judge or coding agent to reveal environment variables, read credential stores or unrelated home files, contact a URL, inspect hidden tests, alter graders, prefer a named arm, suppress failures, or emit a winning score. Candidate text should be transported in typed JSON fields with exact indices, escaped as data, length-limited, and never interpolated beneath forgeable role or delimiter markers. Workers need a minimal allowlisted environment, no ambient tokens or API keys, network denied by default, repository-only filesystem scope, and redacted logs. They must not inspect shell history, dotfiles, other-arm outputs, treatment metadata, hidden-grader implementation, or proprietary source not approved for the study. Freeze and hash tasks, prompts, tests, graders, and scoring code before execution; run grading from a fresh external checkout; reject trials that mutate tests, fixtures, timing records, result files, or instrumentation; and preserve all assigned failures and timeouts in intention-to-treat analysis. Blind candidate and arm labels, randomize presentation order, rotate pair orientation, and report inter-reviewer disagreement so prompt self-promotion and order bias cannot masquerade as reliability. Published artifacts should exclude secrets, personal data, machine-specific credentials, and disallowed source. With no evidence supplied, neither tournament rank nor reviewer preference may be described as a verified correctness or efficiency gain.",
+          "max_tokens": "4096"
+        }
+      ],
+      "scratchpad": [
+        "review_type=safety_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-65356fd8e485.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-c9eae4919bbb",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "recurrent_tournament_review",
+      "task_id": "task-65356fd8e485",
+      "input_refs": [
+        "hyp-90ad0d660ad7"
+      ],
+      "output_refs": [
+        "rev-65acc25f0910"
+      ],
+      "status": "completed",
+      "notes": "Ran recurrent_tournament_review for 1 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=recurrent_tournament_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-65356fd8e485.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-4d73635e8bfa",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "recurrent_tournament_review",
+          "task_id": "task-65356fd8e485",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-a4c6436bb019",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "initial_review",
+      "task_id": "task-7097ce7784b9",
+      "input_refs": [
+        "hyp-d5867c0f6ef1"
+      ],
+      "output_refs": [
+        "rev-de48853c8b3f"
+      ],
+      "status": "completed",
+      "notes": "Ran initial_review for 1 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=initial_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-7097ce7784b9.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-137e2cb63766",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "initial_review",
+          "task_id": "task-7097ce7784b9",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-dcb1cb8affe2",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "safety_review",
+      "task_id": "task-7097ce7784b9",
+      "input_refs": [
+        "hyp-d5867c0f6ef1"
+      ],
+      "output_refs": [
+        "rev-99d1b26fc43e"
+      ],
+      "status": "completed",
+      "notes": "Ran safety_review for 1 hypotheses.",
+      "evidence_refs": [],
+      "llm_interactions": [
+        {
+          "turn": "safety autonomy red team",
+          "prompt": "Reflection turn 1 autonomy and deployment red team for a coding-agent AI co-scientist worker.\nObjective: Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.\nPreferences: aligned with the research objective; plausible from code, benchmark, or literature evidence; novel or a novel combination of known techniques; testable with a concrete experiment; safe and auditable\nConstraints: do not autonomously modify source code; do not claim measured improvement without benchmark evidence\nMetrics: pass_rate; regression_count; tool_calls; wall_time; cost\nSafety notes: human review required before applying code changes\n\nHypothesis:\n- id: hyp-d5867c0f6ef1\n- title: Critic-before-edit assumption decomposition\n- claim: A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes.\n- rationale: False premises about call paths, invariants, and test scope are common causes of bad edits. Targets unexplored area relative to 0 existing hypotheses.\n- assumptions: The agent can state assumptions before editing.; A critic can catch false premises cheaply.\n- risks: critic false negatives; extra latency\n\nEvidence:\n- No evidence available.\n\nRed-team autonomy, deployment, repo mutation, and human approval boundaries. Do not finalize JSON yet.",
+          "response": "Autonomy and deployment red-team: stating and criticizing assumptions is a read-only planning activity and must not itself authorize a patch. The critic may identify likely call paths, invariants, or test scope only from the frozen task materials and repository files already within the trial; it must not ask the coding agent to inspect unrelated directories, credentials, private services, production data, hidden tests, or other-arm outputs. Critic advice cannot broaden the task, override the hard deadline, waive human review, or direct mutation of tests, graders, fixtures, security controls, or instrumentation. If the hypothesis is empirically tested, both arms must run in disposable repository-scoped workspaces with identical model, context, allowlisted tools and environment, no ambient deployment credentials, network denied by default, hard wall-clock and cost caps, and captured commands, diffs, test results, timeouts, and violations. Prohibit commits, pushes, releases, package publication, service deployment, global dependency changes, and edits outside the trial workspace. A critic false positive must remain advice rather than permission for speculative scope expansion, while a critic false negative and any deadline miss must remain in intention-to-treat results. No patch may leave the isolated workspace or be applied to a user or production checkout without explicit human approval. The current candidate is off-objective and underspecified, so safe containment alone does not make it suitable for advancement or support an effectiveness claim.",
+          "max_tokens": "4096"
+        },
+        {
+          "turn": "safety source red team",
+          "prompt": "Reflection turn 2 data and source-injection red team for a coding-agent AI co-scientist worker.\nObjective: Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.\nPreferences: aligned with the research objective; plausible from code, benchmark, or literature evidence; novel or a novel combination of known techniques; testable with a concrete experiment; safe and auditable\nConstraints: do not autonomously modify source code; do not claim measured improvement without benchmark evidence\nMetrics: pass_rate; regression_count; tool_calls; wall_time; cost\nSafety notes: human review required before applying code changes\n\nHypothesis:\n- id: hyp-d5867c0f6ef1\n- title: Critic-before-edit assumption decomposition\n- claim: A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes.\n- rationale: False premises about call paths, invariants, and test scope are common causes of bad edits. Targets unexplored area relative to 0 existing hypotheses.\n- assumptions: The agent can state assumptions before editing.; A critic can catch false premises cheaply.\n- risks: critic false negatives; extra latency\n\nEvidence:\n- No evidence available.\n\nTurn 1 autonomy/deployment red team:\nAutonomy and deployment red-team: stating and criticizing assumptions is a read-only planning activity and must not itself authorize a patch. The critic may identify likely call paths, invariants, or test scope only from the frozen task materials and repository files already within the trial; it must not ask the coding agent to inspect unrelated directories, credentials, private services, production data, hidden tests, or other-arm outputs. Critic advice cannot broaden the task, override the hard deadline, waive human review, or direct mutation of tests, graders, fixtures, security controls, or instrumentation. If the hypothesis is empirically tested, both arms must run in disposable repository-scoped workspaces with identical model, context, allowlisted tools and environment, no ambient deployment credentials, network denied by default, hard wall-clock and cost caps, and captured commands, diffs, test results, timeouts, and violations. Prohibit commits, pushes, releases, package publication, service deployment, global dependency changes, and edits outside the trial workspace. A critic false positive must remain advice rather than permission for speculative scope expansion, while a critic false negative and any deadline miss must remain in intention-to-treat results. No patch may leave the isolated workspace or be applied to a user or production checkout without explicit human approval. The current candidate is off-objective and underspecified, so safe containment alone does not make it suitable for advancement or support an effectiveness claim.\n\nRed-team data exposure, credential leakage, prompt injection, source injection, and benchmark gaming. Do not finalize JSON yet.",
+          "response": "Data and source-injection red-team: the critic's inputs are especially exposed because assumption decomposition encourages close reading of call paths, comments, tests, fixtures, issue text, logs, and tool output. All of those are untrusted task data. Embedded text that says to reveal secrets, inspect dotfiles, run a shell payload, contact a URL, disable safety, alter a grader, ignore the deadline, or trust a stated invariant must never become critic or agent authority. Transport source excerpts and critic inputs in escaped typed fields with stable identifiers and lengths, keep fixed system and study rules outside those fields, and reject malformed, duplicate, missing, or out-of-range subject indices rather than guessing. Use a minimal allowlisted child-process environment with no ambient keys or tokens; deny network by default; restrict reads and writes to the disposable task workspace; and redact logs before publication. The critic must not inspect credential stores, shell history, production data, unrelated home files, hidden grader code, treatment labels, or other-arm artifacts. Freeze and hash repository fixtures, prompts, tests, graders, and scoring code before trials; grade from a fresh checkout; and mark any mutation of tests, fixtures, timing, results, or instrumentation as a failed trial. A repository comment claiming a test is irrelevant or an invariant is guaranteed is evidence to verify, not an instruction to skip verification. Prevent benchmark gaming by blinding arm labels, keeping held-out expectations inaccessible, scoring externally, and retaining all failures, timeouts, safety violations, and noncompliance in intention-to-treat analysis. Publish only approved source and scrub personal data, secrets, and machine-specific credentials. With no supplied evidence, neither critic agreement nor a clean visible test run supports a claim that bad fixes were reduced.",
+          "max_tokens": "4096"
+        }
+      ],
+      "scratchpad": [
+        "review_type=safety_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-7097ce7784b9.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-fb5869e3ca62",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "recurrent_tournament_review",
+      "task_id": "task-7097ce7784b9",
+      "input_refs": [
+        "hyp-d5867c0f6ef1"
+      ],
+      "output_refs": [
+        "rev-a1cc9b9486ab"
+      ],
+      "status": "completed",
+      "notes": "Ran recurrent_tournament_review for 1 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=recurrent_tournament_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-7097ce7784b9.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-881e5c0bcc00",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "recurrent_tournament_review",
+          "task_id": "task-7097ce7784b9",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-ff78d9f770d9",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "initial_review",
+      "task_id": "task-9b2537148dab",
+      "input_refs": [
+        "hyp-fec91639f62e"
+      ],
+      "output_refs": [
+        "rev-9a4233907e7e"
+      ],
+      "status": "completed",
+      "notes": "Ran initial_review for 1 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=initial_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-9b2537148dab.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-5e55b0b9389d",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "initial_review",
+          "task_id": "task-9b2537148dab",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-4e5bbcf535f6",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "safety_review",
+      "task_id": "task-9b2537148dab",
+      "input_refs": [
+        "hyp-fec91639f62e"
+      ],
+      "output_refs": [
+        "rev-033f012dfa46"
+      ],
+      "status": "completed",
+      "notes": "Ran safety_review for 1 hypotheses.",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=safety_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-9b2537148dab.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-5b4f2fc2bf09",
+      "cycle": 1,
+      "agent": "reflection",
+      "action": "recurrent_tournament_review",
+      "task_id": "task-9b2537148dab",
+      "input_refs": [
+        "hyp-fec91639f62e"
+      ],
+      "output_refs": [
+        "rev-0be08852214b"
+      ],
+      "status": "completed",
+      "notes": "Ran recurrent_tournament_review for 1 hypotheses.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=recurrent_tournament_review",
+        "hypothesis_count=1",
+        "review_count=1"
+      ],
+      "transcript_ref": "transcripts/reflection/task-9b2537148dab.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-77c50734d0d1",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "reflection",
+          "action": "recurrent_tournament_review",
+          "task_id": "task-9b2537148dab",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-b12416498557",
+      "cycle": 1,
+      "agent": "proximity",
+      "action": "compute_embedding_proximity_edges",
+      "task_id": "task-19ee19e94957",
+      "input_refs": [
+        "hyp-90ad0d660ad7",
+        "hyp-d5867c0f6ef1",
+        "hyp-fec91639f62e"
+      ],
+      "output_refs": [
+        "hyp-d5867c0f6ef1:hyp-fec91639f62e",
+        "hyp-90ad0d660ad7:hyp-d5867c0f6ef1",
+        "hyp-90ad0d660ad7:hyp-fec91639f62e"
+      ],
+      "status": "completed",
+      "notes": "Computed 3 embedding_proximity proximity edges. Deduplicated 1 hypotheses for active scheduling.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "method=embedding_proximity",
+        "edge_count=3",
+        "deduplicated=1"
+      ],
+      "transcript_ref": "transcripts/proximity/task-19ee19e94957.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-efef92a1c08f",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "proximity",
+          "action": "compute_embedding_proximity_edges",
+          "task_id": "task-19ee19e94957",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-1a8a6a47feef",
+      "cycle": 1,
+      "agent": "ranking",
+      "action": "rank_tiered_debate_pairwise_compare",
+      "task_id": "task-5193f723cd28",
+      "input_refs": [
+        "hyp-90ad0d660ad7",
+        "hyp-d5867c0f6ef1",
+        "hyp-fec91639f62e"
+      ],
+      "output_refs": [
+        "match-e9d55f6488af"
+      ],
+      "status": "completed",
+      "notes": "Ran 1 rank-tiered debate matches (1 multi-round, 0 single-turn).",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "comparison_label=rank-tiered debate",
+        "match_count=1"
+      ],
+      "transcript_ref": "transcripts/ranking/task-5193f723cd28.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-a669672ca423",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "ranking",
+          "action": "rank_tiered_debate_pairwise_compare",
+          "task_id": "task-5193f723cd28",
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-9721e0879183",
+      "cycle": 1,
+      "agent": "meta_review",
+      "action": "summarize",
+      "task_id": "task-7d20dda82790",
+      "input_refs": [
+        "rev-a2a1e0c16888",
+        "rev-c9949c670298",
+        "rev-65acc25f0910",
+        "rev-de48853c8b3f",
+        "rev-99d1b26fc43e",
+        "rev-a1cc9b9486ab",
+        "rev-9a4233907e7e",
+        "rev-033f012dfa46",
+        "rev-0be08852214b",
+        "match-e9d55f6488af"
+      ],
+      "output_refs": [
+        "meta-bc74a854edd6"
+      ],
+      "status": "completed",
+      "notes": "Summarized 9 reviews and 1 matches.",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_count=9",
+        "match_count=1"
+      ],
+      "transcript_ref": "transcripts/meta_review/task-7d20dda82790.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-6493c29785a4",
+      "cycle": 1,
+      "agent": "overview",
+      "action": "render_research_overview",
+      "task_id": "task-a2330c75a9f1",
+      "input_refs": [
+        "meta-bc74a854edd6",
+        "hyp-90ad0d660ad7",
+        "hyp-d5867c0f6ef1"
+      ],
+      "output_refs": [
+        "overview-cf2d826e3492"
+      ],
+      "status": "completed",
+      "notes": "Rendered first-class research overview for human review.",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "top_hypothesis_count=2",
+        "promising_direction_count=4"
+      ],
+      "transcript_ref": "transcripts/overview/task-a2330c75a9f1.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-77d89a9be96a",
+      "cycle": 1,
+      "agent": "research_outputs",
+      "action": "render_publication_grant_contact_artifacts",
+      "task_id": "task-8fed8fed47c4",
+      "input_refs": [
+        "meta-bc74a854edd6",
+        "hyp-90ad0d660ad7",
+        "hyp-d5867c0f6ef1"
+      ],
+      "output_refs": [
+        "output-b0b17f222313",
+        "output-89bfcc1b86f0",
+        "output-bff05f01fe90"
+      ],
+      "status": "completed",
+      "notes": "Rendered publication brief, grant brief, and contact suggestions for human review.",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "artifact_count=3",
+        "output_types=publication_brief,grant_brief,contact_suggestions"
+      ],
+      "transcript_ref": "transcripts/research_outputs/task-8fed8fed47c4.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-e582ed3ce2a9",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "research_outputs",
+          "action": "render_publication_grant_contact_artifacts",
+          "task_id": "task-8fed8fed47c4",
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-e1091ff2d97d",
+      "cycle": 2,
+      "agent": "reflection",
+      "action": "initial_review",
+      "task_id": "task-46b117bd727f",
+      "input_refs": [],
+      "output_refs": [],
+      "status": "completed",
+      "notes": "Ran initial_review for 0 hypotheses. Agent feedback: Separate initial plausibility checks from grounded contradiction checks..",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=initial_review",
+        "hypothesis_count=0",
+        "review_count=0"
+      ],
+      "transcript_ref": "transcripts/reflection/task-46b117bd727f.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-e18fe0eaa540",
+      "cycle": 2,
+      "agent": "reflection",
+      "action": "safety_review",
+      "task_id": "task-46b117bd727f",
+      "input_refs": [],
+      "output_refs": [],
+      "status": "completed",
+      "notes": "Ran safety_review for 0 hypotheses. Agent feedback: Separate initial plausibility checks from grounded contradiction checks..",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=safety_review",
+        "hypothesis_count=0",
+        "review_count=0"
+      ],
+      "transcript_ref": "transcripts/reflection/task-46b117bd727f.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-d4ee760a56e8",
+      "cycle": 2,
+      "agent": "reflection",
+      "action": "recurrent_tournament_review",
+      "task_id": "task-46b117bd727f",
+      "input_refs": [],
+      "output_refs": [],
+      "status": "completed",
+      "notes": "Ran recurrent_tournament_review for 0 hypotheses. Agent feedback: Separate initial plausibility checks from grounded contradiction checks..",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_type=recurrent_tournament_review",
+        "hypothesis_count=0",
+        "review_count=0"
+      ],
+      "transcript_ref": "transcripts/reflection/task-46b117bd727f.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-06ee6b35ac8a",
+      "cycle": 2,
+      "agent": "proximity",
+      "action": "compute_embedding_proximity_edges",
+      "task_id": "task-7447e0f2c66a",
+      "input_refs": [
+        "hyp-90ad0d660ad7",
+        "hyp-d5867c0f6ef1",
+        "hyp-fec91639f62e"
+      ],
+      "output_refs": [
+        "hyp-d5867c0f6ef1:hyp-fec91639f62e",
+        "hyp-90ad0d660ad7:hyp-d5867c0f6ef1",
+        "hyp-90ad0d660ad7:hyp-fec91639f62e"
+      ],
+      "status": "completed",
+      "notes": "Computed 3 embedding_proximity proximity edges. Deduplicated 1 hypotheses for active scheduling.",
+      "evidence_refs": [
+        "ev-0e1cefb869f6",
+        "ev-8bf0203ede0c",
+        "ev-ee94be35f2c4"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "method=embedding_proximity",
+        "edge_count=3",
+        "deduplicated=1"
+      ],
+      "transcript_ref": "transcripts/proximity/task-7447e0f2c66a.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-5b6462cef33c",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "proximity",
+          "action": "compute_embedding_proximity_edges",
+          "task_id": "task-7447e0f2c66a",
+          "evidence_refs": [
+            "ev-0e1cefb869f6",
+            "ev-8bf0203ede0c",
+            "ev-ee94be35f2c4"
+          ],
+          "status": "ok"
+        }
+      ]
+    },
+    {
+      "id": "trace-4bf9888e4246",
+      "cycle": 2,
+      "agent": "ranking",
+      "action": "rank_tiered_debate_pairwise_compare",
+      "task_id": "task-9fb4d8c4d968",
+      "input_refs": [
+        "hyp-90ad0d660ad7",
+        "hyp-d5867c0f6ef1",
+        "hyp-fec91639f62e"
+      ],
+      "output_refs": [],
+      "status": "completed",
+      "notes": "Ran 0 rank-tiered debate matches (0 multi-round, 0 single-turn). Agent feedback: Treat Elo as a scheduling signal until benchmark outcomes calibrate it..",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "comparison_label=rank-tiered debate",
+        "match_count=0"
+      ],
+      "transcript_ref": "transcripts/ranking/task-9fb4d8c4d968.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-bbbb98070112",
+      "cycle": 2,
+      "agent": "meta_review",
+      "action": "summarize",
+      "task_id": "task-8034467303f5",
+      "input_refs": [
+        "rev-a2a1e0c16888",
+        "rev-c9949c670298",
+        "rev-65acc25f0910",
+        "rev-de48853c8b3f",
+        "rev-99d1b26fc43e",
+        "rev-a1cc9b9486ab",
+        "rev-9a4233907e7e",
+        "rev-033f012dfa46",
+        "rev-0be08852214b",
+        "match-e9d55f6488af"
+      ],
+      "output_refs": [
+        "meta-bc74a854edd6"
+      ],
+      "status": "completed",
+      "notes": "Summarized 9 reviews and 1 matches.",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "review_count=9",
+        "match_count=1"
+      ],
+      "transcript_ref": "transcripts/meta_review/task-8034467303f5.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-c1c283ff618f",
+      "cycle": 2,
+      "agent": "overview",
+      "action": "render_research_overview",
+      "task_id": "task-33ecda4f136d",
+      "input_refs": [
+        "meta-bc74a854edd6",
+        "hyp-90ad0d660ad7",
+        "hyp-d5867c0f6ef1"
+      ],
+      "output_refs": [
+        "overview-e8cecda76476"
+      ],
+      "status": "completed",
+      "notes": "Rendered first-class research overview for human review.",
+      "evidence_refs": [],
+      "llm_interactions": [],
+      "scratchpad": [
+        "top_hypothesis_count=2",
+        "promising_direction_count=4"
+      ],
+      "transcript_ref": "transcripts/overview/task-33ecda4f136d.jsonl",
+      "tool_calls": []
+    },
+    {
+      "id": "trace-07eefc3df7c9",
+      "cycle": 2,
+      "agent": "research_outputs",
+      "action": "render_publication_grant_contact_artifacts",
+      "task_id": "task-2eb55b774a64",
+      "input_refs": [
+        "meta-bc74a854edd6",
+        "hyp-90ad0d660ad7",
+        "hyp-d5867c0f6ef1"
+      ],
+      "output_refs": [
+        "output-414d7839116f",
+        "output-683eb3b4f4ae",
+        "output-f6f210997bcb"
+      ],
+      "status": "completed",
+      "notes": "Rendered publication brief, grant brief, and contact suggestions for human review.",
+      "evidence_refs": [
+        "ev-ee94be35f2c4",
+        "ev-8bf0203ede0c",
+        "ev-0e1cefb869f6"
+      ],
+      "llm_interactions": [],
+      "scratchpad": [
+        "artifact_count=3",
+        "output_types=publication_brief,grant_brief,contact_suggestions"
+      ],
+      "transcript_ref": "transcripts/research_outputs/task-2eb55b774a64.jsonl",
+      "tool_calls": [
+        {
+          "id": "tool-fdd625636ec8",
+          "type": "evidence_context",
+          "tool_name": "evidence_store.context_refs",
+          "agent": "research_outputs",
+          "action": "render_publication_grant_contact_artifacts",
+          "task_id": "task-2eb55b774a64",
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "status": "ok"
+        }
+      ]
+    }
+  ],
+  "retrieval_memory": [],
+  "tool_budget": null,
+  "agent_tool_calls": [],
+  "task_queue": [
+    {
+      "id": "task-6a3c215ee577",
+      "kind": "generate",
+      "priority": 1.0,
+      "payload": {
+        "cycle": 1,
+        "modes": [
+          "paper_seeded_idea_generation",
+          "assumption_decomposition",
+          "research_expansion_from_meta_review"
+        ],
+        "generation_allocations": [
+          {
+            "mode": "paper_seeded_idea_generation",
+            "limit": 1,
+            "reason": "underrepresented: no active hypotheses"
+          },
+          {
+            "mode": "assumption_decomposition",
+            "limit": 1,
+            "reason": "underrepresented: no active hypotheses"
+          },
+          {
+            "mode": "research_expansion_from_meta_review",
+            "limit": 1,
+            "reason": "underrepresented: no active hypotheses"
+          }
+        ],
+        "agent_feedback": []
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "hyp-fec91639f62e",
+        "hyp-d5867c0f6ef1",
+        "hyp-90ad0d660ad7"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 1.0,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:generation",
+            "resource:default"
+          ]
+        },
+        "result_refs": [
+          "hyp-fec91639f62e",
+          "hyp-d5867c0f6ef1",
+          "hyp-90ad0d660ad7"
+        ]
+      },
+      "depends_on": [],
+      "resource_class": "default"
+    },
+    {
+      "id": "task-9b2537148dab",
+      "kind": "review",
+      "priority": 1.0,
+      "payload": {
+        "cycle": 1,
+        "packet_type": "provider_review",
+        "required_provider": "host-agent",
+        "required_model": "",
+        "requested_max_tokens": 4096,
+        "use_grounded": false,
+        "safety_policies": [],
+        "review_types": [
+          "initial_review",
+          "safety_review",
+          "recurrent_tournament_review"
+        ],
+        "hypothesis_id": "hyp-fec91639f62e",
+        "hypothesis_ids": [
+          "hyp-fec91639f62e"
+        ],
+        "goal": {
+          "id": "goal-d0a6a71c25e8",
+          "objective": "Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.",
+          "domain": "ai_llm_code",
+          "preferences": [
+            "aligned with the research objective",
+            "plausible from code, benchmark, or literature evidence",
+            "novel or a novel combination of known techniques",
+            "testable with a concrete experiment",
+            "safe and auditable"
+          ],
+          "constraints": [
+            "do not autonomously modify source code",
+            "do not claim measured improvement without benchmark evidence"
+          ],
+          "metrics": [
+            "pass_rate",
+            "regression_count",
+            "tool_calls",
+            "wall_time",
+            "cost"
+          ],
+          "safety_notes": [
+            "human review required before applying code changes"
+          ],
+          "allowed_sources": [],
+          "allowed_tools": [],
+          "output_formats": [],
+          "termination_criteria": []
+        },
+        "hypothesis": {
+          "id": "hyp-fec91639f62e",
+          "title": "Critic-before-edit assumption decomposition",
+          "claim": "A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes.",
+          "rationale": "False premises about call paths, invariants, and test scope are common causes of bad edits.",
+          "assumptions": [
+            "The agent can state assumptions before editing.",
+            "A critic can catch false premises cheaply."
+          ],
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "test_plan": {
+            "experiment": "Compare baseline coding-agent workflow against: Critic-before-edit assumption decomposition.",
+            "metrics": [
+              "pass_rate",
+              "regression_count",
+              "tool_calls",
+              "wall_time",
+              "cost"
+            ],
+            "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+          },
+          "risks": [
+            "critic false negatives",
+            "extra latency"
+          ],
+          "origin": "generation",
+          "parent_ids": [],
+          "generation_trace": [
+            "Turn 1 objective framing: Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.",
+            "Turn 2 evidence scan: ev-ee94be35f2c4, ev-8bf0203ede0c, ev-0e1cefb869f6",
+            "Turn 3 proposal synthesis: Critic-before-edit assumption decomposition",
+            "Generation assessment: origin=generation; evidence refs=3; assumptions=2."
+          ],
+          "evolution_trace": [],
+          "merged_into": "",
+          "proximity_notes": [],
+          "elo": 1200.0,
+          "status": "candidate"
+        },
+        "evidence": [
+          {
+            "id": "ev-ee94be35f2c4",
+            "kind": "paper_architecture",
+            "source": "2502.18864.pdf",
+            "content": "The AI co-scientist uses a generate, debate, and evolve approach to hypothesis generation.",
+            "notes": "Core loop to translate into AI/LLM improvement research.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-8bf0203ede0c",
+            "kind": "paper_architecture",
+            "source": "2502.18864.pdf",
+            "content": "A supervisor coordinates specialized generation, reflection, ranking, proximity, evolution, and meta-review agents.",
+            "notes": "Agent decomposition for the Code Scientist MVP.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-0e1cefb869f6",
+            "kind": "paper_plan_configuration",
+            "source": "2502.18864.pdf",
+            "content": "The system parses a natural language research goal into a research plan configuration with preferences, constraints, and evaluation criteria.",
+            "notes": "Code Scientist should persist the derived plan instead of keeping it implicit.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-6181c6c4a112",
+            "kind": "paper_evaluation",
+            "source": "2502.18864.pdf",
+            "content": "The ranking agent uses an Elo-based tournament to prioritize hypotheses, while noting that Elo is an auto-evaluation proxy.",
+            "notes": "Ranking should be auditable and labeled as proxy evaluation.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-771549df53df",
+            "kind": "paper_context_memory",
+            "source": "2502.18864.pdf",
+            "content": "The supervisor periodically writes context memory containing system state, progress statistics, and feedback for later computation.",
+            "notes": "Runs need restartable progress snapshots and scheduler statistics.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-be6af9a17fff",
+            "kind": "paper_feedback_loop",
+            "source": "2502.18864.pdf",
+            "content": "Meta-review synthesizes recurring critique patterns and appends feedback to future agent prompts without model retraining.",
+            "notes": "Self-improvement should start as externalized prompt and process feedback.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-5fa1f4c2235d",
+            "kind": "paper_safety",
+            "source": "2502.18864.pdf",
+            "content": "The system reviews research goals and generated hypotheses for safety and keeps comprehensive logs for auditability.",
+            "notes": "Safety gates are required before ranking and reporting ideas.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-984ceed5f1c2",
+            "kind": "paper_proximity",
+            "source": "2502.18864.pdf",
+            "content": "The proximity agent builds a graph of related hypotheses to support clustering, de-duplication, diverse exploration, and tournament scheduling.",
+            "notes": "Similarity edges should be stored and used when choosing pairwise matches.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-f1b5c28ba36b",
+            "kind": "paper_limitations",
+            "source": "2502.18864.pdf",
+            "content": "The paper warns that literature search can miss prior work, LLMs can hallucinate, and auto-evaluation metrics need broader validation.",
+            "notes": "Reports must separate generated hypotheses from verified improvements.",
+            "metadata": {}
+          }
+        ],
+        "output_path": "worker-results/review-1-hyp-fec91639f62e.json",
+        "reflection_feedback": [],
+        "safety_feedback": [],
+        "matches": [],
+        "prior_reviews": [],
+        "packet_digest": "bb578e80e3885aa538fafe32ac6f2e961994b3a78b6dd21eb6c1c3adb3b2274f"
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "rev-9a4233907e7e",
+        "rev-033f012dfa46",
+        "rev-0be08852214b"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 1.0,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:reflection",
+            "dependencies_satisfied:1",
+            "resource:review"
+          ]
+        },
+        "result_refs": [
+          "rev-9a4233907e7e",
+          "rev-033f012dfa46",
+          "rev-0be08852214b"
+        ]
+      },
+      "depends_on": [
+        "task-6a3c215ee577"
+      ],
+      "resource_class": "review"
+    },
+    {
+      "id": "task-7097ce7784b9",
+      "kind": "review",
+      "priority": 1.0,
+      "payload": {
+        "cycle": 1,
+        "packet_type": "provider_review",
+        "required_provider": "host-agent",
+        "required_model": "",
+        "requested_max_tokens": 4096,
+        "use_grounded": false,
+        "safety_policies": [],
+        "review_types": [
+          "initial_review",
+          "safety_review",
+          "recurrent_tournament_review"
+        ],
+        "hypothesis_id": "hyp-d5867c0f6ef1",
+        "hypothesis_ids": [
+          "hyp-d5867c0f6ef1"
+        ],
+        "goal": {
+          "id": "goal-d0a6a71c25e8",
+          "objective": "Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.",
+          "domain": "ai_llm_code",
+          "preferences": [
+            "aligned with the research objective",
+            "plausible from code, benchmark, or literature evidence",
+            "novel or a novel combination of known techniques",
+            "testable with a concrete experiment",
+            "safe and auditable"
+          ],
+          "constraints": [
+            "do not autonomously modify source code",
+            "do not claim measured improvement without benchmark evidence"
+          ],
+          "metrics": [
+            "pass_rate",
+            "regression_count",
+            "tool_calls",
+            "wall_time",
+            "cost"
+          ],
+          "safety_notes": [
+            "human review required before applying code changes"
+          ],
+          "allowed_sources": [],
+          "allowed_tools": [],
+          "output_formats": [],
+          "termination_criteria": []
+        },
+        "hypothesis": {
+          "id": "hyp-d5867c0f6ef1",
+          "title": "Critic-before-edit assumption decomposition",
+          "claim": "A critic-before-edit loop that decomposes assumptions before patching will reduce bad repo-level fixes.",
+          "rationale": "False premises about call paths, invariants, and test scope are common causes of bad edits. Targets unexplored area relative to 0 existing hypotheses.",
+          "assumptions": [
+            "The agent can state assumptions before editing.",
+            "A critic can catch false premises cheaply."
+          ],
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "test_plan": {
+            "experiment": "Compare baseline coding-agent workflow against: Critic-before-edit assumption decomposition.",
+            "metrics": [
+              "pass_rate",
+              "regression_count",
+              "tool_calls",
+              "wall_time",
+              "cost"
+            ],
+            "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+          },
+          "risks": [
+            "critic false negatives",
+            "extra latency"
+          ],
+          "origin": "generation:research_expansion_from_meta_review",
+          "parent_ids": [],
+          "generation_trace": [
+            "Turn 1 objective framing: Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.",
+            "Turn 2 evidence scan: ev-ee94be35f2c4, ev-8bf0203ede0c, ev-0e1cefb869f6",
+            "Turn 3 proposal synthesis: Critic-before-edit assumption decomposition",
+            "Generation assessment: origin=generation; evidence refs=3; assumptions=2."
+          ],
+          "evolution_trace": [],
+          "merged_into": "",
+          "proximity_notes": [],
+          "elo": 1200.0,
+          "status": "candidate"
+        },
+        "evidence": [
+          {
+            "id": "ev-ee94be35f2c4",
+            "kind": "paper_architecture",
+            "source": "2502.18864.pdf",
+            "content": "The AI co-scientist uses a generate, debate, and evolve approach to hypothesis generation.",
+            "notes": "Core loop to translate into AI/LLM improvement research.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-8bf0203ede0c",
+            "kind": "paper_architecture",
+            "source": "2502.18864.pdf",
+            "content": "A supervisor coordinates specialized generation, reflection, ranking, proximity, evolution, and meta-review agents.",
+            "notes": "Agent decomposition for the Code Scientist MVP.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-0e1cefb869f6",
+            "kind": "paper_plan_configuration",
+            "source": "2502.18864.pdf",
+            "content": "The system parses a natural language research goal into a research plan configuration with preferences, constraints, and evaluation criteria.",
+            "notes": "Code Scientist should persist the derived plan instead of keeping it implicit.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-6181c6c4a112",
+            "kind": "paper_evaluation",
+            "source": "2502.18864.pdf",
+            "content": "The ranking agent uses an Elo-based tournament to prioritize hypotheses, while noting that Elo is an auto-evaluation proxy.",
+            "notes": "Ranking should be auditable and labeled as proxy evaluation.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-771549df53df",
+            "kind": "paper_context_memory",
+            "source": "2502.18864.pdf",
+            "content": "The supervisor periodically writes context memory containing system state, progress statistics, and feedback for later computation.",
+            "notes": "Runs need restartable progress snapshots and scheduler statistics.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-be6af9a17fff",
+            "kind": "paper_feedback_loop",
+            "source": "2502.18864.pdf",
+            "content": "Meta-review synthesizes recurring critique patterns and appends feedback to future agent prompts without model retraining.",
+            "notes": "Self-improvement should start as externalized prompt and process feedback.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-5fa1f4c2235d",
+            "kind": "paper_safety",
+            "source": "2502.18864.pdf",
+            "content": "The system reviews research goals and generated hypotheses for safety and keeps comprehensive logs for auditability.",
+            "notes": "Safety gates are required before ranking and reporting ideas.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-984ceed5f1c2",
+            "kind": "paper_proximity",
+            "source": "2502.18864.pdf",
+            "content": "The proximity agent builds a graph of related hypotheses to support clustering, de-duplication, diverse exploration, and tournament scheduling.",
+            "notes": "Similarity edges should be stored and used when choosing pairwise matches.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-f1b5c28ba36b",
+            "kind": "paper_limitations",
+            "source": "2502.18864.pdf",
+            "content": "The paper warns that literature search can miss prior work, LLMs can hallucinate, and auto-evaluation metrics need broader validation.",
+            "notes": "Reports must separate generated hypotheses from verified improvements.",
+            "metadata": {}
+          }
+        ],
+        "output_path": "worker-results/review-1-hyp-d5867c0f6ef1.json",
+        "reflection_feedback": [],
+        "safety_feedback": [],
+        "matches": [],
+        "prior_reviews": [],
+        "packet_digest": "68f9f22cf63d3eb33b357acac094ca58888188ad6ed9728b4bc6f6d2f9fe9338"
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "rev-de48853c8b3f",
+        "rev-99d1b26fc43e",
+        "rev-a1cc9b9486ab"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 1.0,
+          "candidate_count": 2,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:reflection",
+            "dependencies_satisfied:1",
+            "resource:review"
+          ]
+        },
+        "result_refs": [
+          "rev-de48853c8b3f",
+          "rev-99d1b26fc43e",
+          "rev-a1cc9b9486ab"
+        ]
+      },
+      "depends_on": [
+        "task-6a3c215ee577"
+      ],
+      "resource_class": "review"
+    },
+    {
+      "id": "task-65356fd8e485",
+      "kind": "review",
+      "priority": 1.0,
+      "payload": {
+        "cycle": 1,
+        "packet_type": "provider_review",
+        "required_provider": "host-agent",
+        "required_model": "",
+        "requested_max_tokens": 4096,
+        "use_grounded": false,
+        "safety_policies": [],
+        "review_types": [
+          "initial_review",
+          "safety_review",
+          "recurrent_tournament_review"
+        ],
+        "hypothesis_id": "hyp-90ad0d660ad7",
+        "hypothesis_ids": [
+          "hyp-90ad0d660ad7"
+        ],
+        "goal": {
+          "id": "goal-d0a6a71c25e8",
+          "objective": "Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.",
+          "domain": "ai_llm_code",
+          "preferences": [
+            "aligned with the research objective",
+            "plausible from code, benchmark, or literature evidence",
+            "novel or a novel combination of known techniques",
+            "testable with a concrete experiment",
+            "safe and auditable"
+          ],
+          "constraints": [
+            "do not autonomously modify source code",
+            "do not claim measured improvement without benchmark evidence"
+          ],
+          "metrics": [
+            "pass_rate",
+            "regression_count",
+            "tool_calls",
+            "wall_time",
+            "cost"
+          ],
+          "safety_notes": [
+            "human review required before applying code changes"
+          ],
+          "allowed_sources": [],
+          "allowed_tools": [],
+          "output_formats": [],
+          "termination_criteria": []
+        },
+        "hypothesis": {
+          "id": "hyp-90ad0d660ad7",
+          "title": "Tournament-ranked prompt variants",
+          "claim": "Pairwise tournament ranking of prompt variants will identify more reliable coding-agent workflows than single-prompt selection.",
+          "rationale": "The paper's Elo tournament can be adapted to compare prompt and workflow hypotheses. Targets unexplored area relative to 0 existing hypotheses.",
+          "assumptions": [
+            "Prompt variants can be evaluated on comparable tasks.",
+            "Pairwise judging is less noisy than absolute scoring."
+          ],
+          "evidence_refs": [
+            "ev-ee94be35f2c4",
+            "ev-8bf0203ede0c",
+            "ev-0e1cefb869f6"
+          ],
+          "test_plan": {
+            "experiment": "Compare baseline coding-agent workflow against: Tournament-ranked prompt variants.",
+            "metrics": [
+              "pass_rate",
+              "regression_count",
+              "tool_calls",
+              "wall_time",
+              "cost"
+            ],
+            "success_condition": "Candidate improves pass rate or regression count without unacceptable cost increase."
+          },
+          "risks": [
+            "judge bias",
+            "overfitting to benchmark tasks"
+          ],
+          "origin": "generation:research_expansion_from_meta_review",
+          "parent_ids": [],
+          "generation_trace": [
+            "Turn 1 objective framing: Identify exactly one appended system-prompt instruction that could improve a coding agent's verification efficiency on multi-module Python tasks: catch correctness failures without increasing deadline misses. The intervention must be directly A/B testable against no appended instruction, specify how verification effort is prioritized, name its causal mechanism, and state concrete failure risks.",
+            "Turn 2 evidence scan: ev-ee94be35f2c4, ev-8bf0203ede0c, ev-0e1cefb869f6",
+            "Turn 3 proposal synthesis: Tournament-ranked prompt variants",
+            "Generation assessment: origin=generation; evidence refs=3; assumptions=2."
+          ],
+          "evolution_trace": [],
+          "merged_into": "",
+          "proximity_notes": [],
+          "elo": 1200.0,
+          "status": "candidate"
+        },
+        "evidence": [
+          {
+            "id": "ev-ee94be35f2c4",
+            "kind": "paper_architecture",
+            "source": "2502.18864.pdf",
+            "content": "The AI co-scientist uses a generate, debate, and evolve approach to hypothesis generation.",
+            "notes": "Core loop to translate into AI/LLM improvement research.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-8bf0203ede0c",
+            "kind": "paper_architecture",
+            "source": "2502.18864.pdf",
+            "content": "A supervisor coordinates specialized generation, reflection, ranking, proximity, evolution, and meta-review agents.",
+            "notes": "Agent decomposition for the Code Scientist MVP.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-0e1cefb869f6",
+            "kind": "paper_plan_configuration",
+            "source": "2502.18864.pdf",
+            "content": "The system parses a natural language research goal into a research plan configuration with preferences, constraints, and evaluation criteria.",
+            "notes": "Code Scientist should persist the derived plan instead of keeping it implicit.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-6181c6c4a112",
+            "kind": "paper_evaluation",
+            "source": "2502.18864.pdf",
+            "content": "The ranking agent uses an Elo-based tournament to prioritize hypotheses, while noting that Elo is an auto-evaluation proxy.",
+            "notes": "Ranking should be auditable and labeled as proxy evaluation.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-771549df53df",
+            "kind": "paper_context_memory",
+            "source": "2502.18864.pdf",
+            "content": "The supervisor periodically writes context memory containing system state, progress statistics, and feedback for later computation.",
+            "notes": "Runs need restartable progress snapshots and scheduler statistics.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-984ceed5f1c2",
+            "kind": "paper_proximity",
+            "source": "2502.18864.pdf",
+            "content": "The proximity agent builds a graph of related hypotheses to support clustering, de-duplication, diverse exploration, and tournament scheduling.",
+            "notes": "Similarity edges should be stored and used when choosing pairwise matches.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-be6af9a17fff",
+            "kind": "paper_feedback_loop",
+            "source": "2502.18864.pdf",
+            "content": "Meta-review synthesizes recurring critique patterns and appends feedback to future agent prompts without model retraining.",
+            "notes": "Self-improvement should start as externalized prompt and process feedback.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-5fa1f4c2235d",
+            "kind": "paper_safety",
+            "source": "2502.18864.pdf",
+            "content": "The system reviews research goals and generated hypotheses for safety and keeps comprehensive logs for auditability.",
+            "notes": "Safety gates are required before ranking and reporting ideas.",
+            "metadata": {}
+          },
+          {
+            "id": "ev-f1b5c28ba36b",
+            "kind": "paper_limitations",
+            "source": "2502.18864.pdf",
+            "content": "The paper warns that literature search can miss prior work, LLMs can hallucinate, and auto-evaluation metrics need broader validation.",
+            "notes": "Reports must separate generated hypotheses from verified improvements.",
+            "metadata": {}
+          }
+        ],
+        "output_path": "worker-results/review-1-hyp-90ad0d660ad7.json",
+        "reflection_feedback": [],
+        "safety_feedback": [],
+        "matches": [],
+        "prior_reviews": [],
+        "packet_digest": "43c9f639493cb5cd1bbb67c24c65c80d2defd287831e3d3f3112e87ecb0958b2"
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "rev-a2a1e0c16888",
+        "rev-c9949c670298",
+        "rev-65acc25f0910"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 1.0,
+          "candidate_count": 3,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:reflection",
+            "dependencies_satisfied:1",
+            "resource:review"
+          ]
+        },
+        "result_refs": [
+          "rev-a2a1e0c16888",
+          "rev-c9949c670298",
+          "rev-65acc25f0910"
+        ]
+      },
+      "depends_on": [
+        "task-6a3c215ee577"
+      ],
+      "resource_class": "review"
+    },
+    {
+      "id": "task-19ee19e94957",
+      "kind": "proximity",
+      "priority": 0.5,
+      "payload": {
+        "cycle": 1,
+        "method": "goal_aware",
+        "hypothesis_ids": [],
+        "agent_feedback": []
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "hyp-d5867c0f6ef1:hyp-fec91639f62e",
+        "hyp-90ad0d660ad7:hyp-d5867c0f6ef1",
+        "hyp-90ad0d660ad7:hyp-fec91639f62e"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 0.5,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:proximity",
+            "dependencies_satisfied:3",
+            "resource:state_mutation"
+          ]
+        },
+        "result_refs": [
+          "hyp-d5867c0f6ef1:hyp-fec91639f62e",
+          "hyp-90ad0d660ad7:hyp-d5867c0f6ef1",
+          "hyp-90ad0d660ad7:hyp-fec91639f62e"
+        ]
+      },
+      "depends_on": [
+        "task-9b2537148dab",
+        "task-7097ce7784b9",
+        "task-65356fd8e485"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-5193f723cd28",
+      "kind": "ranking",
+      "priority": 1.0,
+      "payload": {
+        "cycle": 1,
+        "comparison_mode": "rank_tiered_debate_judge",
+        "hypothesis_ids": [],
+        "agent_feedback": []
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "match-e9d55f6488af"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 1.0,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:ranking",
+            "dependencies_satisfied:4",
+            "resource:state_mutation"
+          ]
+        },
+        "result_refs": [
+          "match-e9d55f6488af"
+        ]
+      },
+      "depends_on": [
+        "task-9b2537148dab",
+        "task-7097ce7784b9",
+        "task-65356fd8e485",
+        "task-19ee19e94957"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-a534bb005c1c",
+      "kind": "evolution",
+      "priority": 0.75,
+      "payload": {
+        "cycle": 1,
+        "strategy": "simplification",
+        "leader_ids": [],
+        "agent_feedback": []
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 0.75,
+          "candidate_count": 2,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:evolution",
+            "dependencies_satisfied:2",
+            "resource:state_mutation"
+          ]
+        },
+        "result_refs": []
+      },
+      "depends_on": [
+        "task-5193f723cd28",
+        "task-19ee19e94957"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-7d20dda82790",
+      "kind": "meta_review",
+      "priority": 0.5,
+      "payload": {
+        "cycle": 1,
+        "review_count": 0,
+        "match_count": 0,
+        "top_hypothesis_ids": []
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "meta-bc74a854edd6"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 0.5,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:meta_review",
+            "dependencies_satisfied:1",
+            "resource:state_mutation"
+          ]
+        },
+        "result_refs": [
+          "meta-bc74a854edd6"
+        ]
+      },
+      "depends_on": [
+        "task-5193f723cd28"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-a2330c75a9f1",
+      "kind": "overview",
+      "priority": 0.5,
+      "payload": {
+        "cycle": 1,
+        "generated_by": "meta_review",
+        "top_hypothesis_ids": [],
+        "agent_feedback": []
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "overview-cf2d826e3492"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 0.5,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:meta_review",
+            "dependencies_satisfied:3",
+            "resource:state_mutation"
+          ]
+        },
+        "result_refs": [
+          "overview-cf2d826e3492"
+        ]
+      },
+      "depends_on": [
+        "task-7d20dda82790",
+        "task-a534bb005c1c",
+        "task-19ee19e94957"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-8fed8fed47c4",
+      "kind": "research_outputs",
+      "priority": 0.5,
+      "payload": {
+        "cycle": 1,
+        "generated_by": "meta_review",
+        "top_hypothesis_ids": [],
+        "output_types": [
+          "publication_brief",
+          "grant_brief",
+          "contact_suggestions"
+        ]
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "output-b0b17f222313",
+        "output-89bfcc1b86f0",
+        "output-bff05f01fe90"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 1,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 0.5,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 1,
+          "signals": [
+            "weight:meta_review",
+            "dependencies_satisfied:1",
+            "resource:state_mutation"
+          ]
+        },
+        "result_refs": [
+          "output-b0b17f222313",
+          "output-89bfcc1b86f0",
+          "output-bff05f01fe90"
+        ]
+      },
+      "depends_on": [
+        "task-a2330c75a9f1"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-767b457b40f8",
+      "kind": "generate",
+      "priority": 1.5,
+      "payload": {
+        "cycle": 2,
+        "modes": [
+          "paper_seeded_idea_generation",
+          "assumption_decomposition",
+          "research_expansion_from_meta_review"
+        ],
+        "generation_allocations": [],
+        "agent_feedback": [
+          "Prefer hypotheses that cite local evidence and name the smallest useful experiment."
+        ]
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 2,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 1.5,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 2,
+          "signals": [
+            "weight:generation",
+            "resource:default",
+            "next_action:reuse_meta_review_feedback_in_next_cycle"
+          ]
+        },
+        "result_refs": []
+      },
+      "depends_on": [],
+      "resource_class": "default"
+    },
+    {
+      "id": "task-46b117bd727f",
+      "kind": "review",
+      "priority": 1.5,
+      "payload": {
+        "cycle": 2,
+        "review_types": [
+          "initial_review",
+          "safety_review",
+          "recurrent_tournament_review"
+        ],
+        "hypothesis_ids": [],
+        "agent_feedback": [
+          "Separate initial plausibility checks from grounded contradiction checks."
+        ]
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 2,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 1.5,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 2,
+          "signals": [
+            "weight:reflection",
+            "dependencies_satisfied:1",
+            "resource:review",
+            "next_action:reuse_meta_review_feedback_in_next_cycle"
+          ]
+        },
+        "result_refs": []
+      },
+      "depends_on": [
+        "task-767b457b40f8"
+      ],
+      "resource_class": "review"
+    },
+    {
+      "id": "task-7447e0f2c66a",
+      "kind": "proximity",
+      "priority": 4.08,
+      "payload": {
+        "cycle": 2,
+        "method": "goal_aware",
+        "hypothesis_ids": [
+          "hyp-90ad0d660ad7",
+          "hyp-d5867c0f6ef1",
+          "hyp-fec91639f62e"
+        ],
+        "agent_feedback": []
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "hyp-d5867c0f6ef1:hyp-fec91639f62e",
+        "hyp-90ad0d660ad7:hyp-d5867c0f6ef1",
+        "hyp-90ad0d660ad7:hyp-fec91639f62e"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 2,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 4.08,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 2,
+          "signals": [
+            "weight:proximity",
+            "dependencies_satisfied:1",
+            "resource:state_mutation",
+            "high_elo",
+            "revision_needed",
+            "proximity_cluster:cluster-9f735a659310",
+            "next_action:run_proximity_guided_tournament_matches"
+          ]
+        },
+        "result_refs": [
+          "hyp-d5867c0f6ef1:hyp-fec91639f62e",
+          "hyp-90ad0d660ad7:hyp-d5867c0f6ef1",
+          "hyp-90ad0d660ad7:hyp-fec91639f62e"
+        ]
+      },
+      "depends_on": [
+        "task-46b117bd727f"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-9fb4d8c4d968",
+      "kind": "ranking",
+      "priority": 5.94,
+      "payload": {
+        "cycle": 2,
+        "comparison_mode": "rank_tiered_debate_judge",
+        "hypothesis_ids": [
+          "hyp-90ad0d660ad7",
+          "hyp-d5867c0f6ef1",
+          "hyp-fec91639f62e"
+        ],
+        "agent_feedback": [
+          "Treat Elo as a scheduling signal until benchmark outcomes calibrate it."
+        ]
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 2,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 5.94,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 2,
+          "signals": [
+            "weight:ranking",
+            "dependencies_satisfied:2",
+            "resource:state_mutation",
+            "high_elo",
+            "revision_needed",
+            "proximity_cluster:cluster-9f735a659310",
+            "next_action:run_proximity_guided_tournament_matches"
+          ]
+        },
+        "result_refs": []
+      },
+      "depends_on": [
+        "task-46b117bd727f",
+        "task-7447e0f2c66a"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-cd1499b9cd43",
+      "kind": "evolution",
+      "priority": 0.75,
+      "payload": {
+        "cycle": 2,
+        "strategy": "feasibility_improvement",
+        "leader_ids": [],
+        "agent_feedback": [
+          "Require every hypothesis to name an experiment and metric.",
+          "Prefer ideas with explicit assumptions and audit boundaries.",
+          "Label Elo as proxy auto-evaluation rather than ground truth."
+        ]
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 2,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 0.75,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 2,
+          "signals": [
+            "weight:evolution",
+            "dependencies_satisfied:2",
+            "resource:state_mutation"
+          ]
+        },
+        "result_refs": []
+      },
+      "depends_on": [
+        "task-9fb4d8c4d968",
+        "task-7447e0f2c66a"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-8034467303f5",
+      "kind": "meta_review",
+      "priority": 6.3,
+      "payload": {
+        "cycle": 2,
+        "review_count": 9,
+        "match_count": 1,
+        "top_hypothesis_ids": [
+          "hyp-90ad0d660ad7",
+          "hyp-d5867c0f6ef1"
+        ]
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "meta-bc74a854edd6"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 2,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 6.3,
+          "candidate_count": 2,
+          "pool_size": 1,
+          "cycle": 2,
+          "signals": [
+            "weight:meta_review",
+            "dependencies_satisfied:1",
+            "resource:state_mutation",
+            "high_elo",
+            "revision_needed",
+            "proximity_cluster:cluster-9f735a659310",
+            "next_action:reuse_meta_review_feedback_in_next_cycle"
+          ]
+        },
+        "result_refs": [
+          "meta-bc74a854edd6"
+        ]
+      },
+      "depends_on": [
+        "task-9fb4d8c4d968"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-33ecda4f136d",
+      "kind": "overview",
+      "priority": 6.77,
+      "payload": {
+        "cycle": 2,
+        "generated_by": "meta_review",
+        "top_hypothesis_ids": [
+          "hyp-90ad0d660ad7",
+          "hyp-d5867c0f6ef1"
+        ],
+        "agent_feedback": []
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "overview-e8cecda76476"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 2,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 6.77,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 2,
+          "signals": [
+            "weight:meta_review",
+            "dependencies_satisfied:3",
+            "resource:state_mutation",
+            "high_elo",
+            "revision_needed",
+            "proximity_cluster:cluster-9f735a659310"
+          ]
+        },
+        "result_refs": [
+          "overview-e8cecda76476"
+        ]
+      },
+      "depends_on": [
+        "task-8034467303f5",
+        "task-cd1499b9cd43",
+        "task-7447e0f2c66a"
+      ],
+      "resource_class": "state_mutation"
+    },
+    {
+      "id": "task-2eb55b774a64",
+      "kind": "research_outputs",
+      "priority": 7.63,
+      "payload": {
+        "cycle": 2,
+        "generated_by": "meta_review",
+        "top_hypothesis_ids": [
+          "hyp-90ad0d660ad7",
+          "hyp-d5867c0f6ef1"
+        ],
+        "output_types": [
+          "publication_brief",
+          "grant_brief",
+          "contact_suggestions"
+        ]
+      },
+      "status": "completed",
+      "attempts": 1,
+      "result_refs": [
+        "output-414d7839116f",
+        "output-683eb3b4f4ae",
+        "output-f6f210997bcb"
+      ],
+      "error": "",
+      "worker_state": {
+        "phase": "completed",
+        "last_event": "completed",
+        "attempt": 1,
+        "cycle": 2,
+        "scheduler_decision": {
+          "rank": 1,
+          "score": 7.63,
+          "candidate_count": 1,
+          "pool_size": 1,
+          "cycle": 2,
+          "signals": [
+            "weight:meta_review",
+            "dependencies_satisfied:1",
+            "resource:state_mutation",
+            "high_elo",
+            "revision_needed",
+            "proximity_cluster:cluster-9f735a659310"
+          ]
+        },
+        "result_refs": [
+          "output-414d7839116f",
+          "output-683eb3b4f4ae",
+          "output-f6f210997bcb"
+        ]
+      },
+      "depends_on": [
+        "task-33ecda4f136d"
+      ],
+      "resource_class": "state_mutation"
+    }
+  ]
+}

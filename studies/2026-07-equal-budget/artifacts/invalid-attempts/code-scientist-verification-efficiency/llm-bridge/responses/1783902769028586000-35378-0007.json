@@ -1,0 +1,49 @@
+{
+  "id": "1783902769028586000-35378-0007",
+  "response": {
+    "hypotheses": [
+      {
+        "title": "Repair-Reserved Cheapest Falsifier Queue",
+        "claim": "Appending exactly this instruction — 'When verification begins, reserve the final 20% of the remaining deadline for repairs; nominate the smallest check most likely to disprove each changed public behavior, run checks in descending estimated failure-impact-per-second order, and start no check whose expected runtime exceeds the verification budget.' — will improve held-out pass rate and regression count versus no addition while keeping deadline misses noninferior.",
+        "rationale": "Budgeted falsification concentrates time on consequential, cheap counterexamples and preserves capacity to act on discovered failures. Measure paired pass rate, regressions, deadline misses, calls, time, and cost; no benefit is yet established.",
+        "assumptions": ["Remaining time and relative check runtime can be estimated", "Changed contracts concentrate defect probability"],
+        "risks": ["Bad estimates skip valuable checks", "Narrow checks miss integration defects", "Queue construction adds overhead", "A fixed reserve can be mistuned"]
+      },
+      {
+        "title": "Three-Check Contract Cut Set",
+        "claim": "Appending exactly this instruction — 'Cap verification at three ordered commands: first test the changed module boundary with greatest downstream fan-out, second test that boundary's nearest invalid or limit input, and third run the broadest affected suite only if its observed runtime fits before a final 15% repair window.' — will improve correctness per tool call without increasing deadline misses.",
+        "rationale": "Propagation-weighted boundary checks target locations where one defect can contaminate many modules, while the cap bounds cost. This should be evaluated, not described as proven.",
+        "assumptions": ["Dependency fan-out is cheap to infer", "Boundary defects are consequential", "A deadline signal is available"],
+        "risks": ["Fan-out may not predict risk", "Three commands may be too few", "The chosen edge input may be uninformative", "Local defects can be missed"]
+      },
+      {
+        "title": "Two-Pass Unsupported-Assumption Probe",
+        "claim": "Appending exactly this instruction — 'Inspect the diff once, name the changed cross-module assumption least supported by existing tests, predict an observable result that would falsify it, and run the cheapest check capable of contradiction; repeat for only the next-most-unsupported assumption after a pass, but repair and rerun immediately after a failure.' — will improve pass rate and regressions per unit cost without more deadline misses.",
+        "rationale": "Uncertainty-directed falsification avoids spending scarce time reconfirming well-supported behavior, and the two-pass stop rule bounds overhead.",
+        "assumptions": ["Agent uncertainty is sufficiently calibrated", "Cheap contradicting probes exist", "One failure can be repaired within the remaining time"],
+        "risks": ["Self-ranked uncertainty can miss subtle defects", "Prediction adds cognitive cost", "Two probes under-test broad changes", "A repair can introduce an unchecked regression"]
+      },
+      {
+        "title": "Thin End-to-End First",
+        "claim": "Appending exactly this instruction — 'Before module-local verification, run the cheapest existing end-to-end path that crosses every changed module; if it fails, localize with the narrowest check at the first failing boundary, and if it passes, verify only the highest-risk changed branch before stopping when 15% of time remains.' — will catch integration failures earlier and improve complete-task pass rate without increasing deadline misses.",
+        "rationale": "A thin vertical slice tests composition across all changed modules with one command; conditional localization spends extra calls only when evidence warrants them, and a stop reserve protects completion.",
+        "assumptions": ["A cheap cross-module path exists", "Its failure localizes meaningfully", "The first failure is actionable"],
+        "risks": ["The path may be slow or unrepresentative", "First-failure localization can chase symptoms", "Module-local edge cases may remain unchecked", "The time reserve may be unreliable"]
+      },
+      {
+        "title": "Observed-Runtime Verification Knapsack",
+        "claim": "Appending exactly this instruction — 'Allocate at most 20% of remaining time to verification; among existing checks with known runtimes, repeatedly choose the check maximizing changed-contract coverage times failure consequence divided by observed seconds, and stop admitting checks when their summed observed runtime reaches the budget.' — will improve correctness detected per second and remain noninferior on deadline misses versus no addition.",
+        "rationale": "A small knapsack heuristic converts verification selection into explicit value-per-time prioritization and uses observed rather than imagined cost where possible.",
+        "assumptions": ["Check runtimes and contract coverage are available or cheap to infer", "Past runtime predicts current runtime", "The 20% budget is broadly suitable"],
+        "risks": ["Coverage and consequence estimates can be gamed or wrong", "Runtime variance can cause overruns", "Interacting checks violate additive value assumptions", "Scoring overhead can erase savings"]
+      },
+      {
+        "title": "Failure-Triggered Expansion Ladder",
+        "claim": "Appending exactly this instruction — 'Verify in this order: import or compile the changed modules, run the narrowest affected test, then run one cross-module affected-suite check; advance a level only after a pass, but after a failure repair and rerun that level before any broader check, and never start a level that cannot finish before a final 15% repair reserve.' — will reduce wasted broad-suite runs while preserving correctness and deadline completion.",
+        "rationale": "A cost-ordered ladder eliminates basic failures before expensive checks and prevents broad verification from obscuring or multiplying unresolved failures. The conditional expansion is auditable in traces.",
+        "assumptions": ["Checks can be arranged from cheap/local to expensive/broad", "Early-level failures predict broader failure", "Runtime estimates and deadline signals are usable"],
+        "risks": ["Passing cheap checks can create false confidence", "Repeated repair-rerun loops consume the budget", "The ladder can duplicate fixture startup", "Broad-only integration defects may be reached too late"]
+      }
+    ]
+  }
+}

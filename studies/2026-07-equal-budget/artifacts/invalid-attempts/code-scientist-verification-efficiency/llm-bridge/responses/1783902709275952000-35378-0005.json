@@ -1,0 +1,27 @@
+{
+  "id": "1783902709275952000-35378-0005",
+  "response": {
+    "hypotheses": [
+      {
+        "title": "Repair-Reserved Cheapest Falsifier Queue",
+        "claim": "Appending exactly this instruction — 'When verification begins, reserve the final 20% of the remaining deadline for repairs; for each changed public behavior, nominate the smallest existing test or direct probe most likely to disprove it, run those checks in descending estimated failure-impact-per-second order, start no check whose expected runtime exceeds the verification budget, and run the broad suite only if its last observed runtime fits the unused budget.' — will increase complete held-out task pass rate and reduce regressions versus no appended instruction while keeping deadline-miss rate noninferior under the same hard deadline.",
+        "rationale": "The proposed mechanism is budgeted falsification rather than coverage accumulation. Changed contracts concentrate defect probability, small counterexample-oriented checks return correctness information quickly, impact-per-second ordering spends scarce verification time on consequential failures first, and a protected repair reserve prevents a late-discovered failure or long broad suite from consuming the entire deadline. The intervention is one auditable prompt addition and can be tested in paired trials with identical tasks, models, tools, and deadlines. This is an unvalidated hypothesis, not a measured result.",
+        "assumptions": [
+          "The agent receives a reliable remaining-time signal or can infer it accurately enough to enforce the reserve",
+          "Existing targeted tests or safe direct probes exercise most changed public behaviors",
+          "The agent can estimate relative runtime and failure impact without excessive bookkeeping",
+          "A 20% repair reserve is sufficient for typical failures found late in the task",
+          "The previous broad-suite runtime, when available, predicts its next runtime reasonably well"
+        ],
+        "risks": [
+          "Runtime or impact estimates can be wrong, causing high-value checks to be skipped or a long check to overrun",
+          "Narrow probes can miss cross-module integration failures that a broad suite would catch",
+          "The fixed 20% reserve can waste implementation time on easy tasks or leave too little repair time on hard tasks",
+          "Generating and ordering candidate checks can add cognitive and tool overhead that offsets saved test time",
+          "Direct probes may mutate state or differ from production execution unless constrained to isolated workspaces",
+          "The agent may optimize visible checks or avoid the broad suite, increasing hidden-test regressions"
+        ]
+      }
+    ]
+  }
+}

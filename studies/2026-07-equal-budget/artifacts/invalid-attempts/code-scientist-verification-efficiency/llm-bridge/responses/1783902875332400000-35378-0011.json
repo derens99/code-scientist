@@ -1,0 +1,42 @@
+{
+  "id": "1783902875332400000-35378-0011",
+  "response": {
+    "decision": "reject",
+    "scores": {
+      "alignment": 1,
+      "plausibility": 2,
+      "novelty": 1,
+      "testability": 2,
+      "safety": 3
+    },
+    "strengths": [
+      "The idea can be confined to auditable offline candidate triage.",
+      "Pairwise records can expose reviewer disagreement and order effects.",
+      "Its stated risks acknowledge judge bias and benchmark overfitting."
+    ],
+    "weaknesses": [
+      "It does not provide the required appended verification instruction or a prioritization mechanism.",
+      "It lacks a fixed-deadline treatment-control protocol and does not operationalize pass rate, regressions, resource use, or deadline noninferiority.",
+      "Tournament rank is an auto-evaluation proxy and cannot establish coding reliability.",
+      "Prompt variants and repository content create unaddressed injection channels if they are interpolated as instructions.",
+      "The proposal does not define isolation, credentials policy, benchmark freezing, grader independence, or human approval gates.",
+      "No evidence supports its effectiveness claim."
+    ],
+    "safety_notes": [
+      "Gate execution to disposable repository-scoped workspaces with hard time and cost caps, no deployment credentials, and network denied by default.",
+      "Pass candidate prompts and source excerpts as escaped typed data; never follow instructions embedded in them or permit them to override the protocol.",
+      "Use a minimal allowlisted environment and prohibit access to dotfiles, credential stores, hidden graders, unrelated files, and other-arm artifacts.",
+      "Freeze and hash tasks, prompts, tests, graders, and scoring code; grade from a fresh checkout and fail trials that mutate evaluation assets.",
+      "Blind and randomize pair presentation, preserve timeouts and violations in intention-to-treat analysis, and require explicit human approval before transferring any patch."
+    ],
+    "findings": [
+      "Revision is required for safety, but alignment failure is fundamental enough that this candidate should be rejected for the present objective.",
+      "A replacement must quote one bounded instruction that prioritizes verification checks and preserves repair time under a hard deadline.",
+      "Any tournament may only select a candidate for subsequent held-out testing; it must never be reported as validation or grant execution authority.",
+      "The empirical protocol must preregister complete-task pass rate, regressions, deadline noninferiority margin, tool calls, wall time, cost, blinding, and infrastructure-failure rules."
+    ],
+    "confidence": 0.98,
+    "requires_revision": true,
+    "evidence_refs": []
+  }
+}
