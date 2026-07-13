@@ -1,0 +1,32 @@
+{
+  "id": "exp-4fc659db9869",
+  "created_at": "2026-07-13T00:57:26.014729+00:00",
+  "state_path": "studies/2026-07-equal-budget/artifacts/code-scientist/edge-semantics/state.json",
+  "hypothesis_id": "hyp-4e43c9afce38",
+  "hypothesis_title": "Boundary-contract precommitment",
+  "hypothesis_claim": "Appending exactly this instruction\u2014\"Before editing code, write a compact boundary contract for every affected callable that lists valid-domain edges, invalid-input behavior, and the exact exception type and message, then make the implementation and tests conform to that contract.\"\u2014may increase held-out boundary and error-semantics pass_rate, relative to no appended instruction, when otherwise identical coding agents receive equal tool-call and wall-time caps across several Python modules.",
+  "baseline_description": "Agent defaults: identical prompt, model, tools, and limits with no appended system prompt.",
+  "intervention": "Before editing code, write a compact boundary contract for every affected callable that lists valid-domain edges, invalid-input behavior, and the exact exception type and message, then make the implementation and tests conform to that contract.",
+  "task_suite": "benchmarks/agent-task-bundles",
+  "task_ids": [
+    "bundle-05",
+    "bundle-06",
+    "bundle-07",
+    "bundle-08"
+  ],
+  "trials_per_task": 2,
+  "seed": 20260712,
+  "executor": "host-agent",
+  "model": "claude-haiku-4-5",
+  "max_turns": 15,
+  "trial_timeout_seconds": 360.0,
+  "allowed_tools": "Read,Edit,Write,Glob,Grep,Bash",
+  "disallowed_tools": "WebSearch,WebFetch,Task",
+  "agent_auth": "login",
+  "alpha": 0.05,
+  "min_discordant_pairs": 3,
+  "cost_budget_usd": 10.0,
+  "execution_policy": "trusted_local",
+  "direction": "candidate_gt_baseline",
+  "trial_concurrency": 4
+}

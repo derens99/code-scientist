@@ -365,7 +365,17 @@ Elo is an auto-evaluation proxy, not ground truth.
 
 ## Benchmark Results
 
-- No benchmark results recorded.
+- Measured: Cross-module counterexample first: needs review
+  - Source: experiment:exp-e8940cd44e68
+  - Provenance: executed experiment (measured:agent-experiment)
+  - Verdict: inconclusive
+  - Hypothesis: hyp-96ae9555347a
+  - cost: baseline 0, candidate 0, delta +0
+  - pass_rate: baseline 0, candidate 0, delta +0
+  - regression_count: baseline 0, candidate 0, delta +0
+  - tool_calls: baseline 0.625, candidate 0.375, delta -0.25
+  - wall_time: baseline 228.464, candidate 213.5, delta -14.9645
+  - Notes: experiment exp-e8940cd44e68 (complete); protocol sha256 d0e7445e06b80ca6, verdict inconclusive: delta +0.000 [+0.000, +0.000] CI95, one-sided McNemar p=1.0000 over 0 discordant of 8 pairs
 
 ## Capability Evaluation
 

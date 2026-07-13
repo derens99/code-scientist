@@ -1,0 +1,130 @@
+modified: event_windows.py
+--- a/event_windows.py
++++ b/event_windows.py
+@@ -49,4 +49,36 @@
+ 
+     Returns the list of `(window_start, window_end, aggregate)` tuples.
+     """
+-    raise NotImplementedError
++    if type(window_size) is not int or window_size <= 0:
++        raise ValueError("window_size must be a positive int")
++    if agg not in ("sum", "avg", "min", "max", "count"):
++        raise ValueError("unsupported aggregation mode")
++    if not isinstance(events, list):
++        raise ValueError("events must be a list")
++
++    grouped = {}
++    for event in events:
++        if not isinstance(event, (tuple, list)) or len(event) != 2:
++            raise ValueError("each event must be a pair")
++        timestamp, value = event
++        if type(timestamp) is not int:
++            raise TypeError("timestamp must be an int")
++        index = timestamp // window_size
++        grouped.setdefault(index, []).append(value)
++
++    result = []
++    for index in sorted(grouped):
++        values = grouped[index]
++        if agg == "sum":
++            aggregate = sum(values)
++        elif agg == "avg":
++            aggregate = float(sum(values) / len(values))
++        elif agg == "min":
++            aggregate = min(values)
++        elif agg == "max":
++            aggregate = max(values)
++        else:  # count
++            aggregate = len(values)
++        start = index * window_size
++        result.append((start, start + window_size, aggregate))
++    return result
+modified: intervals.py
+--- a/intervals.py
++++ b/intervals.py
+@@ -41,4 +41,44 @@
+ 
+     Returns the merged list of `(start, end)` tuples.
+     """
+-    raise NotImplementedError
++    # Validate the optional bounds before processing any input intervals.
++    if lo is not None and type(lo) is not int:
++        raise TypeError("lo must be an int or None")
++    if hi is not None and type(hi) is not int:
++        raise TypeError("hi must be an int or None")
++    if lo is not None and hi is not None and lo > hi:
++        raise ValueError("lo must not be greater than hi")
++
++    prepared = []
++    for interval in intervals:
++        if not isinstance(interval, (tuple, list)) or len(interval) != 2:
++            raise ValueError("each interval must be a pair")
++        start, end = interval
++        if type(start) is not int or type(end) is not int:
++            raise TypeError("interval endpoints must be ints")
++        if start > end:
++            raise ValueError("interval start must not exceed end")
++        if start == end:
++            continue
++
++        if lo is not None:
++            start = max(start, lo)
++        if hi is not None:
++            end = min(end, hi)
++        if start >= end:
++            continue
++        prepared.append((start, end))
++
++    if not prepared:
++        return []
++
++    prepared.sort(key=lambda item: item[0])
++    merged = [prepared[0]]
++    for start, end in prepared[1:]:
++        prev_start, prev_end = merged[-1]
++        if start <= prev_end:  # overlap or merely touch
++            if end > prev_end:
++                merged[-1] = (prev_start, end)
++        else:
++            merged.append((start, end))
++    return merged
+modified: path_normalize.py
+--- a/path_normalize.py
++++ b/path_normalize.py
+@@ -44,4 +44,35 @@
+ 
+     Returns the normalized path string.
+     """
+-    raise NotImplementedError
++    if not isinstance(path, str):
++        raise TypeError("path must be a string")
++    if path == "":
++        raise ValueError("path must not be empty")
++    if "\\" in path:
++        raise ValueError("backslashes are not allowed")
++
++    absolute = path.startswith("/")
++    stack = []
++    # Splitting naturally discards duplicate and trailing separators when
++    # empty segments are skipped below.
++    for segment in path.split("/"):
++        if segment == "" or segment == ".":
++            continue
++        if segment == "..":
++            # A .. cancels the nearest real segment already retained, even if
++            # unresolved relative .. segments occur after that segment.
++            real_index = None
++            for index in range(len(stack) - 1, -1, -1):
++                if stack[index] != "..":
++                    real_index = index
++                    break
++            if real_index is not None:
++                stack.pop(real_index)
++            elif not absolute:
++                stack.append("..")
++            continue
++        stack.append(segment)
++
++    if absolute:
++        return "/" + "/".join(stack) if stack else "/"
++    return "/".join(stack) if stack else "."

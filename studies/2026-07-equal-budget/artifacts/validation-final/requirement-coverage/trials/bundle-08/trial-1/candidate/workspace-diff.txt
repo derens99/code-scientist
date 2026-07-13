@@ -1,0 +1,121 @@
+modified: event_windows.py
+--- a/event_windows.py
++++ b/event_windows.py
+@@ -49,4 +49,36 @@
+ 
+     Returns the list of `(window_start, window_end, aggregate)` tuples.
+     """
+-    raise NotImplementedError
++    if not isinstance(window_size, int) or window_size <= 0:
++        raise ValueError("window_size must be a positive integer")
++    if agg not in ("sum", "avg", "min", "max", "count"):
++        raise ValueError("unsupported aggregation")
++    if not isinstance(events, list):
++        raise ValueError("events must be a list")
++
++    windows = {}
++    for event in events:
++        if not isinstance(event, (tuple, list)) or len(event) != 2:
++            raise ValueError("each event must be a pair")
++        timestamp, value = event
++        if not isinstance(timestamp, int):
++            raise TypeError("timestamp must be an integer")
++        index = timestamp // window_size
++        windows.setdefault(index, []).append(value)
++
++    result = []
++    for index in sorted(windows):
++        values = windows[index]
++        if agg == "sum":
++            aggregate = sum(values)
++        elif agg == "avg":
++            aggregate = float(sum(values) / len(values))
++        elif agg == "min":
++            aggregate = min(values)
++        elif agg == "max":
++            aggregate = max(values)
++        else:
++            aggregate = len(values)
++        start = index * window_size
++        result.append((start, start + window_size, aggregate))
++    return result
+modified: path_normalize.py
+--- a/path_normalize.py
++++ b/path_normalize.py
+@@ -44,4 +44,26 @@
+ 
+     Returns the normalized path string.
+     """
+-    raise NotImplementedError
++    if not isinstance(path, str):
++        raise TypeError("path must be a string")
++    if path == "":
++        raise ValueError("path must not be empty")
++    if "\\" in path:
++        raise ValueError("backslashes are not allowed")
++
++    absolute = path.startswith("/")
++    kept = []
++    for segment in path.split("/"):
++        if segment == "" or segment == ".":
++            continue
++        if segment == "..":
++            if kept and kept[-1] != "..":
++                kept.pop()
++            elif not absolute:
++                kept.append(segment)
++        else:
++            kept.append(segment)
++
++    if absolute:
++        return "/" + "/".join(kept)
++    return "/".join(kept) or "."
+modified: record_sort.py
+--- a/record_sort.py
++++ b/record_sort.py
+@@ -1,4 +1,6 @@
+ """Stable multi-key sorter for lists of dict records."""
++
++from functools import cmp_to_key
+ 
+ 
+ def sort_records(records, keys):
+@@ -46,4 +48,37 @@
+ 
+     Returns the sorted list.
+     """
+-    raise NotImplementedError
++    if not isinstance(records, list):
++        raise TypeError("records must be a list")
++    if not isinstance(keys, list) or not keys:
++        raise ValueError("keys must be a non-empty list")
++
++    normalized_keys = []
++    for key_spec in keys:
++        if not isinstance(key_spec, (tuple, list)) or len(key_spec) != 2:
++            raise ValueError("each key must be a pair")
++        field_name, direction = key_spec
++        if direction not in ("asc", "desc"):
++            raise ValueError("direction must be 'asc' or 'desc'")
++        normalized_keys.append((field_name, direction))
++
++    def compare(left, right):
++        for field_name, direction in normalized_keys:
++            left_value = left.get(field_name)
++            right_value = right.get(field_name)
++            if left_value is None and right_value is None:
++                continue
++            if left_value is None:
++                return 1
++            if right_value is None:
++                return -1
++            if left_value < right_value:
++                result = -1
++            elif right_value < left_value:
++                result = 1
++            else:
++                continue
++            return result if direction == "asc" else -result
++        return 0
++
++    return sorted(records, key=cmp_to_key(compare))

@@ -349,7 +349,17 @@ Elo is an auto-evaluation proxy, not ground truth.
 
 ## Benchmark Results
 
-- No benchmark results recorded.
+- Measured: Boundary-contract precommitment: needs review
+  - Source: experiment:exp-4fc659db9869
+  - Provenance: executed experiment (measured:agent-experiment)
+  - Verdict: inconclusive
+  - Hypothesis: hyp-4e43c9afce38
+  - cost: baseline 0, candidate 0, delta +0
+  - pass_rate: baseline 0, candidate 0, delta +0
+  - regression_count: baseline 0, candidate 0, delta +0
+  - tool_calls: baseline 0.625, candidate 0.5, delta -0.125
+  - wall_time: baseline 180.75, candidate 275.125, delta +94.375
+  - Notes: experiment exp-4fc659db9869 (complete); protocol sha256 07db29ce11b2bb4e, verdict inconclusive: delta +0.000 [+0.000, +0.000] CI95, one-sided McNemar p=1.0000 over 0 discordant of 8 pairs
 
 ## Capability Evaluation
 

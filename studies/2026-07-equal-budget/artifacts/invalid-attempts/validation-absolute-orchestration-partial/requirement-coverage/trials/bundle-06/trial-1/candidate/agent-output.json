@@ -1,0 +1,1 @@
+{"id": "bundle-06-trial1-candidate", "status": "completed", "duration_seconds": 120, "num_turns": 1, "cost_usd": 0, "detail": "Implemented record_sort.py, table_render.py, and glob_match.py; py_compile and smoke checks pass."}

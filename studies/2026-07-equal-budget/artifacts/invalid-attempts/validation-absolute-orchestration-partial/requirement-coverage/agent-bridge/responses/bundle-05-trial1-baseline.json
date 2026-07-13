@@ -1,0 +1,8 @@
+{
+  "id": "bundle-05-trial1-baseline",
+  "status": "completed",
+  "duration_seconds": 1.0,
+  "num_turns": 1,
+  "cost_usd": 0.0,
+  "detail": "Implemented merge_intervals, normalize_path, and aggregate_windows per their docstrings; verified with uv smoke tests and compilation."
+}

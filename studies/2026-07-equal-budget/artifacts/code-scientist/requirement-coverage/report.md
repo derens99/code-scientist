@@ -351,7 +351,17 @@ Elo is an auto-evaluation proxy, not ground truth.
 
 ## Benchmark Results
 
-- No benchmark results recorded.
+- Measured: Coverage-First Round-Robin Passes: needs review
+  - Source: experiment:exp-3bd22df91276
+  - Provenance: executed experiment (measured:agent-experiment)
+  - Verdict: inconclusive
+  - Hypothesis: hyp-cb75262aba7b
+  - cost: baseline 0, candidate 0, delta +0
+  - pass_rate: baseline 0, candidate 0, delta +0
+  - regression_count: baseline 0, candidate 0, delta +0
+  - tool_calls: baseline 1.375, candidate 1, delta -0.375
+  - wall_time: baseline 173.812, candidate 184.75, delta +10.9375
+  - Notes: experiment exp-3bd22df91276 (complete); protocol sha256 33c27b1a0e70dfba, verdict inconclusive: delta +0.000 [+0.000, +0.000] CI95, one-sided McNemar p=1.0000 over 0 discordant of 8 pairs
 
 ## Capability Evaluation
 

@@ -57,3 +57,14 @@ same registered tasks, interventions, seed, trials, timeout, and analysis.
 The original arm responses remain part of the audit, and any bridge scheduling
 timeouts remain failures under the same no-retry rule unless the runner itself
 cannot start the grader.
+
+## 2026-07-12: preserve executed workspaces and regrade
+
+The absolute-path orchestration attempt was also stopped after bridge scheduling
+could not answer every batch before the shared deadline; its partial files are
+retained under `validation-absolute-orchestration-partial`. The executed
+workspaces from the original relative-path attempt were complete and are
+regraded in `artifacts/validation-final/` with absolute grader paths. This is a
+grader-only replay of those already executed arms, not an agent rerun or a new
+task sample. The final report separates this corrected grader result from all
+strict invalid/orchestration attempts.

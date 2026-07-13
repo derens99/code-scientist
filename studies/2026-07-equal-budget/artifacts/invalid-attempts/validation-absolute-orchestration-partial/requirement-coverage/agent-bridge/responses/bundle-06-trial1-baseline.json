@@ -1,0 +1,12 @@
+{
+  "id": "bundle-06-trial1-baseline",
+  "task_id": "bundle-06",
+  "trial": 1,
+  "status": "completed",
+  "duration_seconds": 115,
+  "num_turns": 1,
+  "cost_usd": 0,
+  "detail": "Implemented all three requested modules and verified syntax plus representative behavior.",
+  "workspace": "/Users/derensnonwork/Documents/code-scientist/studies/2026-07-equal-budget/artifacts/validation/requirement-coverage/trials/bundle-06/trial-1/baseline/workspace",
+  "implemented": ["record_sort.py", "table_render.py", "glob_match.py"]
+}

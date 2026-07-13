@@ -1374,7 +1374,59 @@
       ]
     }
   ],
-  "benchmark_results": [],
+  "benchmark_results": [
+    {
+      "id": "bench-measured-215b13999f32",
+      "name": "Measured: Boundary-contract precommitment",
+      "source": "experiment:exp-4fc659db9869",
+      "baseline_metrics": {
+        "pass_rate": 0.0,
+        "regression_count": 0.0,
+        "tool_calls": 0.625,
+        "wall_time": 180.75,
+        "cost": 0.0
+      },
+      "candidate_metrics": {
+        "pass_rate": 0.0,
+        "regression_count": 0.0,
+        "tool_calls": 0.5,
+        "wall_time": 275.125,
+        "cost": 0.0
+      },
+      "deltas": {
+        "pass_rate": 0.0,
+        "regression_count": 0.0,
+        "tool_calls": -0.125,
+        "wall_time": 94.375,
+        "cost": 0.0
+      },
+      "success": false,
+      "notes": [
+        "experiment exp-4fc659db9869 (complete); protocol sha256 07db29ce11b2bb4e",
+        "verdict inconclusive: delta +0.000 [+0.000, +0.000] CI95, one-sided McNemar p=1.0000 over 0 discordant of 8 pairs"
+      ],
+      "provenance": "measured:agent-experiment",
+      "hypothesis_id": "hyp-4e43c9afce38",
+      "verdict": "inconclusive",
+      "stats": {
+        "n_pairs": 8.0,
+        "baseline_pass_rate": 0.0,
+        "candidate_pass_rate": 0.0,
+        "pass_rate_delta": 0.0,
+        "candidate_only_wins": 0.0,
+        "baseline_only_wins": 0.0,
+        "discordant_pairs": 0.0,
+        "mcnemar_p_one_sided": 1.0,
+        "mcnemar_p_regression": 1.0,
+        "delta_ci95_low": 0.0,
+        "delta_ci95_high": 0.0,
+        "tasks_candidate_better": 0.0,
+        "tasks_baseline_better": 0.0,
+        "tasks_tied": 4.0,
+        "task_sign_p_one_sided": 1.0
+      }
+    }
+  ],
   "capability_evaluations": [],
   "prospective_evaluations": [],
   "scaling_curve": [],

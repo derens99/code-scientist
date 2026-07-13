@@ -1,0 +1,1 @@
+{"id": "bundle-05-trial1-baseline", "status": "completed", "duration_seconds": 2.1, "num_turns": 1, "cost_usd": 0.0, "detail": "Implemented intervals.merge_intervals, path_normalize.normalize_path, and event_windows.aggregate_windows according to their docstrings; uv smoke checks passed."}

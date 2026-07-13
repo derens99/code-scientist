@@ -1676,7 +1676,59 @@
       ]
     }
   ],
-  "benchmark_results": [],
+  "benchmark_results": [
+    {
+      "id": "bench-measured-20715104a493",
+      "name": "Measured: Cross-module counterexample first",
+      "source": "experiment:exp-e8940cd44e68",
+      "baseline_metrics": {
+        "pass_rate": 0.0,
+        "regression_count": 0.0,
+        "tool_calls": 0.625,
+        "wall_time": 228.4645,
+        "cost": 0.0
+      },
+      "candidate_metrics": {
+        "pass_rate": 0.0,
+        "regression_count": 0.0,
+        "tool_calls": 0.375,
+        "wall_time": 213.5,
+        "cost": 0.0
+      },
+      "deltas": {
+        "pass_rate": 0.0,
+        "regression_count": 0.0,
+        "tool_calls": -0.25,
+        "wall_time": -14.9645,
+        "cost": 0.0
+      },
+      "success": false,
+      "notes": [
+        "experiment exp-e8940cd44e68 (complete); protocol sha256 d0e7445e06b80ca6",
+        "verdict inconclusive: delta +0.000 [+0.000, +0.000] CI95, one-sided McNemar p=1.0000 over 0 discordant of 8 pairs"
+      ],
+      "provenance": "measured:agent-experiment",
+      "hypothesis_id": "hyp-96ae9555347a",
+      "verdict": "inconclusive",
+      "stats": {
+        "n_pairs": 8.0,
+        "baseline_pass_rate": 0.0,
+        "candidate_pass_rate": 0.0,
+        "pass_rate_delta": 0.0,
+        "candidate_only_wins": 0.0,
+        "baseline_only_wins": 0.0,
+        "discordant_pairs": 0.0,
+        "mcnemar_p_one_sided": 1.0,
+        "mcnemar_p_regression": 1.0,
+        "delta_ci95_low": 0.0,
+        "delta_ci95_high": 0.0,
+        "tasks_candidate_better": 0.0,
+        "tasks_baseline_better": 0.0,
+        "tasks_tied": 4.0,
+        "task_sign_p_one_sided": 1.0
+      }
+    }
+  ],
   "capability_evaluations": [],
   "prospective_evaluations": [],
   "scaling_curve": [],

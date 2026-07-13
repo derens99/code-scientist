@@ -1,0 +1,178 @@
+{
+  "registered_overall_rule": "supported only if ideation and coding endpoints are both supported; refuted if either symmetric refutation rule is met; otherwise inconclusive",
+  "ideation": {
+    "judgment_count": 9,
+    "code_scientist_preference_wins": 0,
+    "single_shot_baseline_preference_wins": 9,
+    "preference_half_wins": 0,
+    "preference_by_goal": {
+      "requirement-coverage": {
+        "code_scientist": 0.0,
+        "single_shot_baseline": 3.0
+      },
+      "edge-semantics": {
+        "code_scientist": 0.0,
+        "single_shot_baseline": 3.0
+      },
+      "verification-efficiency": {
+        "code_scientist": 0.0,
+        "single_shot_baseline": 3.0
+      }
+    },
+    "mean_total_rubric_score": {
+      "code_scientist": 26.111111,
+      "single_shot_baseline": 28.666667
+    },
+    "rubric_score_delta_code_scientist_minus_baseline": -2.555556,
+    "judgments": [
+      {
+        "reviewer": "reviewer-1",
+        "goal": "requirement-coverage",
+        "preferred_arm": "arm_b",
+        "preferred_origin": "single_shot_baseline"
+      },
+      {
+        "reviewer": "reviewer-1",
+        "goal": "edge-semantics",
+        "preferred_arm": "arm_b",
+        "preferred_origin": "single_shot_baseline"
+      },
+      {
+        "reviewer": "reviewer-1",
+        "goal": "verification-efficiency",
+        "preferred_arm": "arm_b",
+        "preferred_origin": "single_shot_baseline"
+      },
+      {
+        "reviewer": "reviewer-2",
+        "goal": "requirement-coverage",
+        "preferred_arm": "arm_a",
+        "preferred_origin": "single_shot_baseline"
+      },
+      {
+        "reviewer": "reviewer-2",
+        "goal": "edge-semantics",
+        "preferred_arm": "arm_a",
+        "preferred_origin": "single_shot_baseline"
+      },
+      {
+        "reviewer": "reviewer-2",
+        "goal": "verification-efficiency",
+        "preferred_arm": "arm_a",
+        "preferred_origin": "single_shot_baseline"
+      },
+      {
+        "reviewer": "reviewer-3",
+        "goal": "requirement-coverage",
+        "preferred_arm": "arm_b",
+        "preferred_origin": "single_shot_baseline"
+      },
+      {
+        "reviewer": "reviewer-3",
+        "goal": "edge-semantics",
+        "preferred_arm": "arm_b",
+        "preferred_origin": "single_shot_baseline"
+      },
+      {
+        "reviewer": "reviewer-3",
+        "goal": "verification-efficiency",
+        "preferred_arm": "arm_a",
+        "preferred_origin": "single_shot_baseline"
+      }
+    ]
+  },
+  "coding": {
+    "per_goal": {
+      "requirement-coverage": {
+        "stats": {
+          "n_pairs": 8.0,
+          "baseline_pass_rate": 1.0,
+          "candidate_pass_rate": 1.0,
+          "pass_rate_delta": 0.0,
+          "candidate_only_wins": 0.0,
+          "baseline_only_wins": 0.0,
+          "discordant_pairs": 0.0,
+          "mcnemar_p_one_sided": 1.0,
+          "mcnemar_p_regression": 1.0,
+          "delta_ci95_low": 0.0,
+          "delta_ci95_high": 0.0,
+          "tasks_candidate_better": 0.0,
+          "tasks_baseline_better": 0.0,
+          "tasks_tied": 4.0,
+          "task_sign_p_one_sided": 1.0
+        },
+        "verdict": "inconclusive"
+      },
+      "edge-semantics": {
+        "stats": {
+          "n_pairs": 8.0,
+          "baseline_pass_rate": 0.75,
+          "candidate_pass_rate": 0.5,
+          "pass_rate_delta": -0.25,
+          "candidate_only_wins": 0.0,
+          "baseline_only_wins": 2.0,
+          "discordant_pairs": 2.0,
+          "mcnemar_p_one_sided": 1.0,
+          "mcnemar_p_regression": 0.25,
+          "delta_ci95_low": -0.625,
+          "delta_ci95_high": 0.0,
+          "tasks_candidate_better": 0.0,
+          "tasks_baseline_better": 2.0,
+          "tasks_tied": 2.0,
+          "task_sign_p_one_sided": 1.0
+        },
+        "verdict": "inconclusive"
+      },
+      "verification-efficiency": {
+        "stats": {
+          "n_pairs": 8.0,
+          "baseline_pass_rate": 0.625,
+          "candidate_pass_rate": 0.625,
+          "pass_rate_delta": 0.0,
+          "candidate_only_wins": 0.0,
+          "baseline_only_wins": 0.0,
+          "discordant_pairs": 0.0,
+          "mcnemar_p_one_sided": 1.0,
+          "mcnemar_p_regression": 1.0,
+          "delta_ci95_low": 0.0,
+          "delta_ci95_high": 0.0,
+          "tasks_candidate_better": 0.0,
+          "tasks_baseline_better": 0.0,
+          "tasks_tied": 4.0,
+          "task_sign_p_one_sided": 1.0
+        },
+        "verdict": "inconclusive"
+      }
+    },
+    "pooled_stats": {
+      "n_pairs": 24.0,
+      "baseline_pass_rate": 0.791667,
+      "candidate_pass_rate": 0.708333,
+      "pass_rate_delta": -0.083333,
+      "candidate_only_wins": 0.0,
+      "baseline_only_wins": 2.0,
+      "discordant_pairs": 2.0,
+      "mcnemar_p_one_sided": 1.0,
+      "mcnemar_p_regression": 0.25,
+      "delta_ci95_low": -0.208333,
+      "delta_ci95_high": 0.0,
+      "tasks_candidate_better": 0.0,
+      "tasks_baseline_better": 2.0,
+      "tasks_tied": 10.0,
+      "task_sign_p_one_sided": 1.0
+    },
+    "pooled_verdict": "inconclusive",
+    "arm_count": 48
+  },
+  "strict_invalid_attempts": {
+    "status": "incomplete",
+    "reason": "Raw runs used invalid bridge wrappers, relative grader paths, or orchestration timeouts; retained under artifacts/invalid-attempts and excluded from primary corrected statistics."
+  },
+  "overall_verdict": "refuted",
+  "limitations": [
+    "Three objectives, one host model, public local task bundles, and model reviewers rather than humans.",
+    "The corrected coding result is a grader-only regrade of executed workspaces after a path fix; no coding agent was rerun.",
+    "The pooled coding endpoint has only two discordant pairs and is therefore inconclusive by the registered minimum.",
+    "The first raw validation set is invalid infrastructure evidence, not a quality result."
+  ]
+}
