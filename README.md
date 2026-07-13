@@ -63,6 +63,8 @@ workbench into an authenticated multi-user service.
 
 Host-CLI providers spawn one headless agent per call, so runs are slower than API runs. Neither host-CLI nor host-agent providers accept image payloads, so `--pdf-vision` remains `anthropic`-only, and `host-agent` runs execute reviews in-process (`--review-processes` is rejected because detached workers cannot reach the answering session).
 
+Host-CLI children receive an allowlisted environment rather than the full parent environment: path/home, locale, temporary-directory, proxy, certificate, XDG, and provider config-directory variables are preserved. Ambient API keys, tokens, passwords, and unrelated service variables are not inherited. The measured Claude executor passes `ANTHROPIC_API_KEY` only in explicit `--agent-auth api-key` mode after loading it from `--env-file`.
+
 Run controls: `--provider-call-budget` (default 100) is a hard in-process cap on LLM calls for every provider — on exhaustion, agents fall back to their deterministic paths and the run finishes instead of spending more. Creating `runs/<run-id>/llm-bridge/stop` cancels a host-agent run immediately (pending and future bridge calls fail and the engine drains to `state.json`/`report.md`), `{"action": "stop"}` in `runs/<run-id>/control.json` stops any run at the next task boundary, and a bridge with two consecutive unanswered requests declares itself abandoned so orphaned runs terminate on their own.
 
 ```bash

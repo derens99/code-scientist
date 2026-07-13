@@ -38,14 +38,64 @@ CommandRunner = Callable[
     [list[str], str, float, dict[str, str] | None], "subprocess.CompletedProcess[str]"
 ]
 
-# Session-scoped auth and endpoint overrides (for example the proxy base URL a
-# Claude Code harness injects) must not leak into a nested `claude` process,
-# or it authenticates against the wrong endpoint instead of its own login.
-CLAUDE_CLI_SANITIZED_ENV_VARS = (
-    "ANTHROPIC_API_KEY",
-    "ANTHROPIC_AUTH_TOKEN",
-    "ANTHROPIC_BASE_URL",
+# Host CLIs should inherit only the operating-system and tool configuration they
+# need. In particular, copying the ambient environment would expose unrelated
+# repository/service credentials to every nested provider process.
+HOST_CLI_ENV_ALLOWLIST = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USER",
+        "LOGNAME",
+        "SHELL",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "LANG",
+        "LANGUAGE",
+        "TZ",
+        "TERM",
+        "COLORTERM",
+        "NO_COLOR",
+        "FORCE_COLOR",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_DATA_HOME",
+        "XDG_STATE_HOME",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "CURL_CA_BUNDLE",
+        "REQUESTS_CA_BUNDLE",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "no_proxy",
+        "CLAUDE_CONFIG_DIR",
+        "CODEX_HOME",
+    }
 )
+
+
+def host_cli_environment(explicit: dict[str, str] | None = None) -> dict[str, str]:
+    """Build the minimal environment inherited by a local provider CLI.
+
+    ``explicit`` is the sole escape hatch for provider inputs such as an API
+    key deliberately loaded from a selected env file. Ambient values never
+    become explicit implicitly.
+    """
+
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key in HOST_CLI_ENV_ALLOWLIST or key.startswith("LC_")
+    }
+    if explicit:
+        env.update({str(key): str(value) for key, value in explicit.items()})
+    return env
 
 
 def is_llm_provider(provider: str) -> bool:
@@ -281,12 +331,7 @@ class ClaudeCLIClient(_HostCLIClient):
 
     def complete(self, prompt: str, max_tokens: int = 1024) -> str:
         argv = [self.binary, "-p", "--model", self.model, "--output-format", "text"]
-        env = {
-            key: value
-            for key, value in os.environ.items()
-            if key not in CLAUDE_CLI_SANITIZED_ENV_VARS
-        }
-        result = self._run(argv, prompt, env=env)
+        result = self._run(argv, prompt, env=host_cli_environment())
         text = result.stdout.strip()
         if not text:
             raise LLMResponseError("claude-cli returned an empty response.")
@@ -328,7 +373,7 @@ class CodexCLIClient(_HostCLIClient):
             if self.model:
                 argv.extend(["--model", self.model])
             argv.append("-")
-            self._run(argv, prompt)
+            self._run(argv, prompt, env=host_cli_environment())
             text = output_path.read_text(encoding="utf-8").strip() if output_path.exists() else ""
         finally:
             output_path.unlink(missing_ok=True)
