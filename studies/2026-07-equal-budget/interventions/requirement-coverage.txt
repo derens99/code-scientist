@@ -1,0 +1,1 @@
+Use round-robin coverage passes: first remove every stub and implement the smallest specification-valid path in every module; only then revisit modules in descending risk to add boundary and error clauses, never polishing one module while another required behavior remains wholly unimplemented.

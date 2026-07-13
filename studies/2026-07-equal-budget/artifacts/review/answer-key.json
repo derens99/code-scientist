@@ -1,0 +1,17 @@
+{
+  "reviewer-1": {
+    "requirement-coverage": "single_shot_baseline",
+    "edge-semantics": "single_shot_baseline",
+    "verification-efficiency": "single_shot_baseline"
+  },
+  "reviewer-2": {
+    "requirement-coverage": "code_scientist",
+    "edge-semantics": "code_scientist",
+    "verification-efficiency": "code_scientist"
+  },
+  "reviewer-3": {
+    "requirement-coverage": "single_shot_baseline",
+    "edge-semantics": "single_shot_baseline",
+    "verification-efficiency": "code_scientist"
+  }
+}

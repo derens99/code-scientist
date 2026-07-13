@@ -1,0 +1,32 @@
+{
+  "id": "exp-3bd22df91276",
+  "created_at": "2026-07-13T00:57:26.014753+00:00",
+  "state_path": "studies/2026-07-equal-budget/artifacts/code-scientist/requirement-coverage/state.json",
+  "hypothesis_id": "hyp-cb75262aba7b",
+  "hypothesis_title": "Coverage-First Round-Robin Passes",
+  "hypothesis_claim": "Appending exactly this instruction \u2014 'Use round-robin coverage passes: first remove every stub and implement the smallest specification-valid path in every module; only then revisit modules in descending risk to add boundary and error clauses, never polishing one module while another required behavior remains wholly unimplemented.' \u2014 will increase all-modules held-out pass rate under a fixed deadline relative to no appended instruction.",
+  "baseline_description": "Agent defaults: identical prompt, model, tools, and limits with no appended system prompt.",
+  "intervention": "Use round-robin coverage passes: first remove every stub and implement the smallest specification-valid path in every module; only then revisit modules in descending risk to add boundary and error clauses, never polishing one module while another required behavior remains wholly unimplemented.",
+  "task_suite": "benchmarks/agent-task-bundles",
+  "task_ids": [
+    "bundle-05",
+    "bundle-06",
+    "bundle-07",
+    "bundle-08"
+  ],
+  "trials_per_task": 2,
+  "seed": 20260712,
+  "executor": "host-agent",
+  "model": "claude-haiku-4-5",
+  "max_turns": 15,
+  "trial_timeout_seconds": 360.0,
+  "allowed_tools": "Read,Edit,Write,Glob,Grep,Bash",
+  "disallowed_tools": "WebSearch,WebFetch,Task",
+  "agent_auth": "login",
+  "alpha": 0.05,
+  "min_discordant_pairs": 3,
+  "cost_budget_usd": 10.0,
+  "execution_policy": "trusted_local",
+  "direction": "candidate_gt_baseline",
+  "trial_concurrency": 4
+}

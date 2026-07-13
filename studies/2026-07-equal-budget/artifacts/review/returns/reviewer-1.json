@@ -1,0 +1,71 @@
+{
+  "reviewer_id": "reviewer-1",
+  "reviews": [
+    {
+      "item_id": "requirement-coverage",
+      "preferred_arm": "arm_b",
+      "arm_a_scores": {
+        "specificity": 5,
+        "plausibility": 4,
+        "testability": 4,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 3
+      },
+      "arm_b_scores": {
+        "specificity": 5,
+        "plausibility": 5,
+        "testability": 5,
+        "mechanism_clarity": 5,
+        "risk_awareness": 4,
+        "protocol_quality": 5
+      },
+      "justification": "Arm B makes dispersed coverage directly auditable with a compact requirement-to-module ledger and defines a matched randomized protocol with explicit overhead limits; Arm A has a strong scheduling mechanism but a looser success condition and a greater risk that shallow first passes create rework.",
+      "confidence": 0.86
+    },
+    {
+      "item_id": "edge-semantics",
+      "preferred_arm": "arm_b",
+      "arm_a_scores": {
+        "specificity": 5,
+        "plausibility": 4,
+        "testability": 4,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 3
+      },
+      "arm_b_scores": {
+        "specificity": 5,
+        "plausibility": 4,
+        "testability": 5,
+        "mechanism_clarity": 5,
+        "risk_awareness": 4,
+        "protocol_quality": 5
+      },
+      "justification": "Both interventions externalize edge contracts clearly, but Arm B enumerates concrete boundary dimensions and pairs them with held-out edge-focused scoring under controlled conditions; Arm A identifies more failure modes yet leaves acceptable cost increase undefined.",
+      "confidence": 0.78
+    },
+    {
+      "item_id": "verification-efficiency",
+      "preferred_arm": "arm_b",
+      "arm_a_scores": {
+        "specificity": 5,
+        "plausibility": 4,
+        "testability": 4,
+        "mechanism_clarity": 5,
+        "risk_awareness": 5,
+        "protocol_quality": 4
+      },
+      "arm_b_scores": {
+        "specificity": 5,
+        "plausibility": 4,
+        "testability": 5,
+        "mechanism_clarity": 4,
+        "risk_awareness": 4,
+        "protocol_quality": 5
+      },
+      "justification": "Arm B supplies an auditable risk ordering, a hard verification-budget cap, and explicit deadline-miss and overhead criteria, making efficiency easier to test. Arm A has the stronger adaptive counterexample mechanism and broader risk analysis, but selecting the most plausible violation and cheapest falsifier is less reproducible and its cost threshold is unspecified.",
+      "confidence": 0.7
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+Before editing code, write a compact boundary contract for every affected callable that lists valid-domain edges, invalid-input behavior, and the exact exception type and message, then make the implementation and tests conform to that contract.
